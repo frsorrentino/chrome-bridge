@@ -5,13 +5,22 @@
 // Tipi di messaggi WebSocket
 export const MessageType = Object.freeze({
   // Comandi (server → extension)
-  NAVIGATE:   'navigate',
-  SCREENSHOT: 'screenshot',
-  EXECUTE_JS: 'execute_js',
-  CLICK:      'click',
-  TYPE_TEXT:   'type_text',
-  READ_PAGE:  'read_page',
-  GET_TABS:   'get_tabs',
+  NAVIGATE:        'navigate',
+  SCREENSHOT:      'screenshot',
+  EXECUTE_JS:      'execute_js',
+  CLICK:           'click',
+  TYPE_TEXT:        'type_text',
+  READ_PAGE:       'read_page',
+  GET_TABS:        'get_tabs',
+  GET_PAGE_INFO:   'get_page_info',
+  GET_STORAGE:     'get_storage',
+  GET_PERFORMANCE: 'get_performance',
+  QUERY_DOM:       'query_dom',
+  MODIFY_DOM:      'modify_dom',
+  INJECT_CSS:      'inject_css',
+  READ_CONSOLE:    'read_console',
+  MONITOR_NETWORK: 'monitor_network',
+  CREATE_TAB:      'create_tab',
 
   // Risposte (extension → server)
   RESULT: 'result',
