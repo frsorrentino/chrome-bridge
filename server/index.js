@@ -8,7 +8,7 @@
  * 2. Il server MCP (per comunicare con Claude Code via stdio)
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WSManager } from './ws-manager.js';
 import { registerTools } from './tools.js';
@@ -18,28 +18,21 @@ const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
 
 async function main() {
   // 1. Crea il server MCP
-  const server = new Server(
-    {
-      name: 'chrome-bridge',
-      version: '1.0.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
+  const mcpServer = new McpServer({
+    name: 'chrome-bridge',
+    version: '1.0.0',
+  });
 
   // 2. Avvia il WebSocket server
   const wsManager = new WSManager(PORT);
   await wsManager.start();
 
   // 3. Registra i tool MCP
-  registerTools(server, wsManager);
+  registerTools(mcpServer, wsManager);
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await mcpServer.connect(transport);
 
   console.error('[chrome-bridge] MCP server ready (stdio + WebSocket)');
 
@@ -47,7 +40,7 @@ async function main() {
   const shutdown = async () => {
     console.error('[chrome-bridge] Shutting down...');
     await wsManager.stop();
-    await server.close();
+    await mcpServer.close();
     process.exit(0);
   };
 

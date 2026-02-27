@@ -11,7 +11,7 @@ import { MessageType } from './protocol.js';
 /**
  * Registra tutti i tool MCP.
  *
- * @param {import('@modelcontextprotocol/sdk/server/index.js').Server} server - MCP Server
+ * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
  */
 export function registerTools(server, wsManager) {
