@@ -2,6 +2,28 @@
 
 MCP server that connects Claude Code to Chrome via a WebSocket bridge and a Chrome extension. Built for ChromeOS (Crostini), works on any platform with Chrome.
 
+## Why Chrome Bridge?
+
+There are several browser automation tools for Claude Code. Here's how they compare:
+
+| | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
+|---|---|---|---|---|
+| **ChromeOS / Crostini** | **Yes** | No | No | No |
+| **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Separate browser instance |
+| **Tools** | **31** | ~15 | Full CDP | ~20 |
+| **Uses your real browser** | Yes | Yes | Yes (with flags) | No (isolated session) |
+| **Shares your logins** | Yes | Yes | Yes | No |
+| **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
+| **DevTools** (perf, network, DOM) | Yes | No | Yes (full) | No |
+| **A11y audit** | Yes | No | No | No |
+| **Media emulation** | Yes | No | Yes | Yes |
+| **GIF recording** | No | Yes | No | No |
+| **Breakpoints / profiling** | No | No | Yes | No |
+| **Dialog handling** | No | Yes | Yes | Yes |
+| **Headless / CI** | No | No | No | Yes |
+
+**In short**: Chrome Bridge is the only option that works on ChromeOS, has 31 specialized web development tools, and runs entirely self-hosted with no paid plan required. The tradeoff is no GIF recording, no CDP-level debugging, and no dialog handling.
+
 ## Architecture
 
 ```
@@ -10,6 +32,7 @@ Claude Code <--stdio--> MCP Server <--WebSocket:8765--> Chrome Extension
 
 - **MCP Server** (`server/`): Node.js, communicates with Claude Code via stdio and with the extension via WebSocket
 - **Chrome Extension** (`extension/`): Manifest V3, executes commands using Chrome APIs and returns results
+- All page scripts run via `chrome.scripting.executeScript` (MAIN world). No `chrome.debugger` (broken on ChromeOS).
 
 ## Tools (31)
 
@@ -134,7 +157,7 @@ chrome-bridge/
     test-devtools.js  # End-to-end test suite (23 tests)
 ```
 
-## Notes
+## Technical Notes
 
 - `execute_js` uses ISOLATED world by default (bypasses page CSP), with MAIN world fallback
 - `chrome.debugger` is not used (doesn't work on ChromeOS)
