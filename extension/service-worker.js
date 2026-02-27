@@ -217,13 +217,52 @@ async function cmdExecuteJs({ code, tab_id }) {
   if (!code) throw new Error('Missing required parameter: code');
   const tabId = await resolveTabId(tab_id);
 
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: new Function(code),
-    world: 'MAIN',
-  });
-
-  return { result: results?.[0]?.result ?? null };
+  // Strategia: ISOLATED world (no CSP restrizioni dalla pagina)
+  // per accesso DOM + eval del codice utente.
+  // Fallback: MAIN world per accesso a variabili della pagina.
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (codeStr) => {
+        // In ISOLATED world, eval non è soggetto alla CSP della pagina
+        try {
+          return eval(codeStr);
+        } catch (e) {
+          return { __error: e.message };
+        }
+      },
+      args: [code],
+      world: 'ISOLATED',
+    });
+    const val = results?.[0]?.result;
+    if (val && typeof val === 'object' && val.__error) {
+      throw new Error(val.__error);
+    }
+    return { result: val ?? null };
+  } catch (isolatedErr) {
+    // Fallback: prova MAIN world (funziona se la pagina non ha CSP restrittiva)
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (codeStr) => {
+          try {
+            return eval(codeStr);
+          } catch (e) {
+            return { __error: e.message };
+          }
+        },
+        args: [code],
+        world: 'MAIN',
+      });
+      const val = results?.[0]?.result;
+      if (val && typeof val === 'object' && val.__error) {
+        throw new Error(val.__error);
+      }
+      return { result: val ?? null };
+    } catch (mainErr) {
+      throw new Error(`JS execution failed: ${isolatedErr.message}`);
+    }
+  }
 }
 
 async function cmdClick({ selector, tab_id }) {
