@@ -212,6 +212,248 @@ async function testMonitorNetwork(tabId) {
   }
 }
 
+// --- New tool tests ---
+
+async function testWaitForElement(tabId) {
+  const name = 'wait_for_element (found)';
+  try {
+    const data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, { selector: 'body', timeout: 5000, tab_id: tabId });
+    if (!data.found) throw new Error('body not found');
+    if (!data.tagName) throw new Error('Missing tagName');
+    if (typeof data.elapsed !== 'number') throw new Error('Missing elapsed');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testWaitForElementTimeout(tabId) {
+  const name = 'wait_for_element (timeout)';
+  try {
+    const data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, { selector: '#__nonexistent_element_xyz__', timeout: 500, interval: 100, tab_id: tabId });
+    if (data.found !== false) throw new Error('Should not have found element');
+    if (!data.error) throw new Error('Missing error message');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testScrollTo(tabId) {
+  const name = 'scroll_to';
+  try {
+    const data = await wsManager.sendCommand(MessageType.SCROLL_TO, { y: 0, tab_id: tabId });
+    if (typeof data.scrollX !== 'number') throw new Error('Missing scrollX');
+    if (typeof data.scrollY !== 'number') throw new Error('Missing scrollY');
+    if (!data.viewportWidth) throw new Error('Missing viewportWidth');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testSetStorage(tabId) {
+  const name = 'set_storage';
+  try {
+    // Set a value
+    const setData = await wsManager.sendCommand(MessageType.SET_STORAGE, { type: 'localStorage', action: 'set', key: '__cb_test__', value: 'hello', tab_id: tabId });
+    if (!setData.success) throw new Error('set failed');
+    // Delete the value
+    const delData = await wsManager.sendCommand(MessageType.SET_STORAGE, { type: 'localStorage', action: 'delete', key: '__cb_test__', tab_id: tabId });
+    if (!delData.success) throw new Error('delete failed');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testFillForm(tabId) {
+  const name = 'fill_form';
+  try {
+    // Inject a test form
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: "(() => { const f = document.createElement('form'); f.id='__cb_test_form'; f.innerHTML = '<input name=\"test\" id=\"__cb_test_input\" type=\"text\"><select id=\"__cb_test_select\"><option value=\"a\">A</option><option value=\"b\">B</option></select>'; document.body.appendChild(f); })()",
+      tab_id: tabId,
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const data = await wsManager.sendCommand(MessageType.FILL_FORM, {
+      fields: [
+        { selector: '#__cb_test_input', value: 'test123' },
+        { selector: '#__cb_test_select', value: 'b' },
+      ],
+      tab_id: tabId,
+    });
+    if (!data.fields || !Array.isArray(data.fields)) throw new Error('Missing fields array');
+    if (data.fields.length !== 2) throw new Error(`Expected 2 results, got ${data.fields.length}`);
+    if (!data.fields[0].success) throw new Error('First field fill failed');
+    if (!data.fields[1].success) throw new Error('Second field fill failed');
+
+    // Cleanup
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: "document.getElementById('__cb_test_form')?.remove()",
+      tab_id: tabId,
+    });
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testViewportResize(tabId) {
+  const name = 'viewport_resize';
+  try {
+    const data = await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { preset: 'desktop', tab_id: tabId });
+    if (!data.requested) throw new Error('Missing requested');
+    if (!data.actual) throw new Error('Missing actual');
+    if (typeof data.actual.viewportWidth !== 'number') throw new Error('Missing viewportWidth');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testFullPageScreenshot(tabId) {
+  const name = 'full_page_screenshot';
+  try {
+    const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls: 3, delay: 100, tab_id: tabId });
+    if (!Array.isArray(data.captures)) throw new Error('Missing captures array');
+    if (data.captures.length < 1) throw new Error('No captures');
+    if (typeof data.scrollHeight !== 'number') throw new Error('Missing scrollHeight');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testHighlightElements(tabId) {
+  const name = 'highlight_elements';
+  try {
+    const data = await wsManager.sendCommand(MessageType.HIGHLIGHT_ELEMENTS, { selector: 'h1', label: true, tab_id: tabId });
+    if (typeof data.highlighted !== 'number') throw new Error('Missing highlighted count');
+    // Cleanup
+    await wsManager.sendCommand(MessageType.HIGHLIGHT_ELEMENTS, { remove: true, tab_id: tabId });
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testAccessibilityAudit(tabId) {
+  const name = 'accessibility_audit';
+  try {
+    const data = await wsManager.sendCommand(MessageType.ACCESSIBILITY_AUDIT, { checks: ['all'], tab_id: tabId });
+    if (!data.summary) throw new Error('Missing summary');
+    if (typeof data.summary.total !== 'number') throw new Error('Missing total');
+    if (!Array.isArray(data.violations)) throw new Error('violations not array');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testCheckLinks(tabId) {
+  const name = 'check_links';
+  try {
+    const data = await wsManager.sendCommand(MessageType.CHECK_LINKS, { scope: 'all', max_links: 5, timeout: 5000, tab_id: tabId });
+    if (typeof data.total !== 'number') throw new Error('Missing total');
+    if (typeof data.checked !== 'number') throw new Error('Missing checked');
+    if (!Array.isArray(data.results)) throw new Error('results not array');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testMeasureSpacing(tabId) {
+  const name = 'measure_spacing';
+  try {
+    // example.com has h1 and p elements
+    const data = await wsManager.sendCommand(MessageType.MEASURE_SPACING, { selector1: 'h1', selector2: 'p', tab_id: tabId });
+    if (!data.element1) throw new Error('Missing element1');
+    if (!data.element2) throw new Error('Missing element2');
+    if (!data.spacing) throw new Error('Missing spacing');
+    if (typeof data.spacing.centerDistance !== 'number') throw new Error('Missing centerDistance');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testWatchDom(tabId) {
+  const name = 'watch_dom';
+  try {
+    // Start watcher (clear any previous)
+    await wsManager.sendCommand(MessageType.WATCH_DOM, { clear: true, tab_id: tabId });
+
+    // Trigger a DOM mutation via modify_dom
+    await wsManager.sendCommand(MessageType.MODIFY_DOM, {
+      selector: 'body',
+      action: 'setAttribute',
+      name: 'data-cb-dom-test',
+      value: 'yes',
+      tab_id: tabId,
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Read mutations
+    const data = await wsManager.sendCommand(MessageType.WATCH_DOM, { clear: true, tab_id: tabId });
+    if (typeof data.count !== 'number') throw new Error('Missing count');
+    if (!Array.isArray(data.mutations)) throw new Error('mutations not array');
+    if (data.count < 1) throw new Error('No mutations captured');
+
+    // Stop and cleanup
+    await wsManager.sendCommand(MessageType.WATCH_DOM, { stop: true, tab_id: tabId });
+    await wsManager.sendCommand(MessageType.MODIFY_DOM, {
+      selector: 'body',
+      action: 'removeAttribute',
+      name: 'data-cb-dom-test',
+      tab_id: tabId,
+    });
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testEmulateMedia(tabId) {
+  const name = 'emulate_media';
+  try {
+    const data = await wsManager.sendCommand(MessageType.EMULATE_MEDIA, { colorScheme: 'dark', tab_id: tabId });
+    if (!data.emulated) throw new Error('Missing emulated');
+    // Reset
+    await wsManager.sendCommand(MessageType.EMULATE_MEDIA, { reset: true, tab_id: tabId });
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testHover(tabId) {
+  const name = 'hover';
+  try {
+    const data = await wsManager.sendCommand(MessageType.HOVER, { selector: 'h1', tab_id: tabId });
+    if (!data.tagName) throw new Error('Missing tagName');
+    if (!data.rect) throw new Error('Missing rect');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
+async function testPressKey(tabId) {
+  const name = 'press_key';
+  try {
+    const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key: 'Escape', tab_id: tabId });
+    if (!data.key) throw new Error('Missing key');
+    if (data.key !== 'Escape') throw new Error(`Expected Escape, got ${data.key}`);
+    if (!data.target) throw new Error('Missing target');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
 // --- Main ---
 
 async function main() {
@@ -235,6 +477,7 @@ async function main() {
 
     console.log('Running tests:\n');
 
+    // Original 8 tests
     await testGetPageInfo(testTabId);
     await testGetStorage(testTabId);
     await testGetPerformance(testTabId);
@@ -243,6 +486,23 @@ async function main() {
     await testInjectCss(testTabId);
     await testReadConsole(testTabId);
     await testMonitorNetwork(testTabId);
+
+    // New 12 tests
+    await testWaitForElement(testTabId);
+    await testWaitForElementTimeout(testTabId);
+    await testScrollTo(testTabId);
+    await testSetStorage(testTabId);
+    await testFillForm(testTabId);
+    await testViewportResize(testTabId);
+    await testFullPageScreenshot(testTabId);
+    await testHighlightElements(testTabId);
+    await testAccessibilityAudit(testTabId);
+    await testCheckLinks(testTabId);
+    await testMeasureSpacing(testTabId);
+    await testWatchDom(testTabId);
+    await testEmulateMedia(testTabId);
+    await testHover(testTabId);
+    await testPressKey(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

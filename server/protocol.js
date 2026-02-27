@@ -18,9 +18,23 @@ export const MessageType = Object.freeze({
   QUERY_DOM:       'query_dom',
   MODIFY_DOM:      'modify_dom',
   INJECT_CSS:      'inject_css',
-  READ_CONSOLE:    'read_console',
-  MONITOR_NETWORK: 'monitor_network',
-  CREATE_TAB:      'create_tab',
+  READ_CONSOLE:         'read_console',
+  MONITOR_NETWORK:      'monitor_network',
+  CREATE_TAB:           'create_tab',
+  WAIT_FOR_ELEMENT:     'wait_for_element',
+  SCROLL_TO:            'scroll_to',
+  SET_STORAGE:          'set_storage',
+  FILL_FORM:            'fill_form',
+  VIEWPORT_RESIZE:      'viewport_resize',
+  FULL_PAGE_SCREENSHOT: 'full_page_screenshot',
+  HIGHLIGHT_ELEMENTS:   'highlight_elements',
+  ACCESSIBILITY_AUDIT:  'accessibility_audit',
+  CHECK_LINKS:          'check_links',
+  MEASURE_SPACING:      'measure_spacing',
+  WATCH_DOM:            'watch_dom',
+  EMULATE_MEDIA:        'emulate_media',
+  HOVER:                'hover',
+  PRESS_KEY:            'press_key',
 
   // Risposte (extension → server)
   RESULT: 'result',
@@ -64,7 +78,8 @@ export function createCommand(type, params = {}) {
  * @returns {number} Timeout in millisecondi
  */
 export function getTimeout(type) {
-  return type === MessageType.SCREENSHOT
-    ? SCREENSHOT_TIMEOUT_MS
-    : COMMAND_TIMEOUT_MS;
+  if (type === MessageType.SCREENSHOT) return SCREENSHOT_TIMEOUT_MS;
+  if (type === MessageType.FULL_PAGE_SCREENSHOT || type === MessageType.CHECK_LINKS) return 120000;
+  if (type === MessageType.WAIT_FOR_ELEMENT) return 60000;
+  return COMMAND_TIMEOUT_MS;
 }

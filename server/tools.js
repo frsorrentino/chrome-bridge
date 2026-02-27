@@ -347,4 +347,317 @@ export function registerTools(server, wsManager) {
       };
     }
   );
+
+  // --- wait_for_element ---
+  server.tool(
+    'wait_for_element',
+    'Wait for a CSS selector to appear in the DOM, with optional visibility check. Polls until found or timeout.',
+    {
+      selector: z.string().describe('CSS selector to wait for'),
+      timeout: z.number().optional().default(10000).describe('Max wait time in ms (default 10000)'),
+      interval: z.number().optional().default(200).describe('Poll interval in ms (default 200, min 50)'),
+      visible: z.boolean().optional().default(false).describe('Also require the element to be visible'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, timeout, interval, visible, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, { selector, timeout, interval, visible, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- scroll_to ---
+  server.tool(
+    'scroll_to',
+    'Scroll to an element or coordinates. Supports smooth/instant behavior and offset for fixed headers.',
+    {
+      selector: z.string().optional().describe('CSS selector to scroll to'),
+      x: z.number().optional().describe('X coordinate to scroll to'),
+      y: z.number().optional().describe('Y coordinate to scroll to'),
+      behavior: z.enum(['smooth', 'instant', 'auto']).optional().default('auto').describe('Scroll behavior'),
+      offset_y: z.number().optional().default(0).describe('Vertical offset in px (e.g. for fixed headers)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, x, y, behavior, offset_y, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- set_storage ---
+  server.tool(
+    'set_storage',
+    'Write, delete, or clear localStorage, sessionStorage, or cookies',
+    {
+      type: z.enum(['localStorage', 'sessionStorage', 'cookie']).describe('Storage type to modify'),
+      action: z.enum(['set', 'delete', 'clear']).describe('Action to perform'),
+      key: z.string().optional().describe('Storage key (required for set/delete, ignored for clear)'),
+      value: z.string().optional().describe('Value to set (for set action)'),
+      path: z.string().optional().describe('Cookie path (default /)'),
+      domain: z.string().optional().describe('Cookie domain'),
+      expires: z.string().optional().describe('Cookie expires (UTC date string)'),
+      secure: z.boolean().optional().describe('Cookie Secure flag'),
+      sameSite: z.enum(['Strict', 'Lax', 'None']).optional().describe('Cookie SameSite attribute'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ type, action, key, value, path, domain, expires, secure, sameSite, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- fill_form ---
+  server.tool(
+    'fill_form',
+    'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea.',
+    {
+      fields: z.array(z.object({
+        selector: z.string().describe('CSS selector of the form field'),
+        value: z.string().describe('Value to set'),
+      })).describe('Array of {selector, value} pairs to fill'),
+      submit_selector: z.string().optional().describe('CSS selector of submit button to click after filling'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ fields, submit_selector, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- viewport_resize ---
+  server.tool(
+    'viewport_resize',
+    'Resize Chrome window to preset (mobile/tablet/desktop) or custom dimensions',
+    {
+      preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('Device preset: mobile=375x812, tablet=768x1024, desktop=1440x900'),
+      width: z.number().optional().describe('Custom width (overrides preset)'),
+      height: z.number().optional().describe('Custom height (overrides preset)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ preset, width, height, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { preset, width, height, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- full_page_screenshot ---
+  server.tool(
+    'full_page_screenshot',
+    'Capture full page by scrolling and taking multiple viewport screenshots. Returns array of PNG images.',
+    {
+      max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
+      delay: z.number().optional().default(200).describe('Delay between captures in ms (default 200)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ max_scrolls, delay, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, tab_id });
+      // data.captures is array of base64 PNGs
+      const content = [{ type: 'text', text: `Full page screenshot: ${data.captures?.length || 0} captures, scrollHeight=${data.scrollHeight}, viewportHeight=${data.viewportHeight}` }];
+      if (data.captures && data.captures.length > 0) {
+        for (const img of data.captures) {
+          content.push({ type: 'image', data: img, mimeType: 'image/png' });
+        }
+      }
+      return { content };
+    }
+  );
+
+  // --- highlight_elements ---
+  server.tool(
+    'highlight_elements',
+    'Add colored overlay on elements matching a CSS selector. Use remove=true to clear all highlights.',
+    {
+      selector: z.string().optional().describe('CSS selector of elements to highlight'),
+      color: z.string().optional().default('rgba(255,0,0,0.3)').describe('Overlay background color'),
+      border: z.string().optional().default('2px solid red').describe('Overlay border style'),
+      label: z.boolean().optional().default(false).describe('Show tag.class (WxH) label on each element'),
+      remove: z.boolean().optional().default(false).describe('Remove all existing highlights instead'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, color, border, label, remove, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.HIGHLIGHT_ELEMENTS, { selector, color, border, label, remove, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- accessibility_audit ---
+  server.tool(
+    'accessibility_audit',
+    'Run accessibility audit: missing alt, empty links, heading hierarchy, ARIA issues, contrast, form labels',
+    {
+      scope: z.string().optional().describe('CSS selector to limit audit scope (default: whole page)'),
+      checks: z.array(z.enum(['images', 'links', 'headings', 'aria', 'contrast', 'forms', 'all'])).optional().default(['all']).describe('Which checks to run'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ scope, checks, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.ACCESSIBILITY_AUDIT, { scope, checks, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- check_links ---
+  server.tool(
+    'check_links',
+    'Check all links on the page for broken URLs (HTTP status >= 400). Supports scope filtering.',
+    {
+      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all').describe('Link scope: same-origin, external, or all'),
+      selector: z.string().optional().default('a[href]').describe('CSS selector to find links (default: a[href])'),
+      timeout: z.number().optional().default(5000).describe('Per-link fetch timeout in ms'),
+      max_links: z.number().optional().default(50).describe('Max links to check'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ scope, selector, timeout, max_links, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.CHECK_LINKS, { scope, selector, timeout, max_links, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- measure_spacing ---
+  server.tool(
+    'measure_spacing',
+    'Measure pixel distance, gap, overlap, and margin/padding between two elements',
+    {
+      selector1: z.string().describe('CSS selector of first element'),
+      selector2: z.string().describe('CSS selector of second element'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector1, selector2, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.MEASURE_SPACING, { selector1, selector2, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- watch_dom ---
+  server.tool(
+    'watch_dom',
+    'Watch DOM mutations via MutationObserver. First call installs the watcher; subsequent calls read accumulated mutations.',
+    {
+      selector: z.string().optional().default('body').describe('CSS selector of element to observe (default: body)'),
+      attributes: z.boolean().optional().default(true).describe('Watch attribute changes'),
+      childList: z.boolean().optional().default(true).describe('Watch child additions/removals'),
+      characterData: z.boolean().optional().default(false).describe('Watch text content changes'),
+      subtree: z.boolean().optional().default(true).describe('Watch all descendants'),
+      clear: z.boolean().optional().default(false).describe('Clear accumulated mutations after reading'),
+      stop: z.boolean().optional().default(false).describe('Disconnect observer and cleanup'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, attributes, childList, characterData, subtree, clear, stop, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- emulate_media ---
+  server.tool(
+    'emulate_media',
+    'Emulate media features: dark/light mode, reduced-motion, print mode. Overrides matchMedia and injects CSS.',
+    {
+      colorScheme: z.enum(['dark', 'light', 'no-preference']).optional().describe('Emulate prefers-color-scheme'),
+      reducedMotion: z.enum(['reduce', 'no-preference']).optional().describe('Emulate prefers-reduced-motion'),
+      printMode: z.boolean().optional().default(false).describe('Emulate print media type'),
+      reset: z.boolean().optional().default(false).describe('Remove all media emulations'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ colorScheme, reducedMotion, printMode, reset, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, reset, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- hover ---
+  server.tool(
+    'hover',
+    'Hover over an element identified by CSS selector. Dispatches mouseenter and mouseover events.',
+    {
+      selector: z.string().describe('CSS selector of the element to hover'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.HOVER, { selector, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
+
+  // --- press_key ---
+  server.tool(
+    'press_key',
+    'Press a keyboard key with optional modifiers. Dispatches keydown, keypress (for printable), and keyup events.',
+    {
+      key: z.string().describe('Key to press (e.g. "Enter", "Escape", "Tab", "a", "ArrowDown")'),
+      selector: z.string().optional().describe('CSS selector of element to target (default: document.activeElement)'),
+      ctrl: z.boolean().optional().default(false).describe('Hold Ctrl'),
+      shift: z.boolean().optional().default(false).describe('Hold Shift'),
+      alt: z.boolean().optional().default(false).describe('Hold Alt'),
+      meta: z.boolean().optional().default(false).describe('Hold Meta/Cmd'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ key, selector, ctrl, shift, alt, meta, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(data, null, 2),
+        }],
+      };
+    }
+  );
 }
