@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo main); OUTPUT=$(git pull --ff-only origin $BRANCH 2>&1); EXIT=$?; if [ $EXIT -ne 0 ]; then echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"git pull failed — resolve manually before working\\\",\\\"systemMessage\\\":\\\"git pull --ff-only failed. Fix conflicts or stash changes before starting.\\\"}\"; elif echo \"$OUTPUT\" | grep -q \"Already up to date\"; then echo \"{\\\"systemMessage\\\":\\\"Repo already up to date.\\\"}\"; else echo \"{\\\"systemMessage\\\":\\\"Pulled latest changes from origin/$BRANCH.\\\"}\"; fi",
+            "timeout": 30,
+            "statusMessage": "Syncing with GitHub..."
+          }
+        ]
+      }
+    ]
+  }
+}
