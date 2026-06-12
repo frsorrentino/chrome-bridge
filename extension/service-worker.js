@@ -1987,9 +1987,9 @@ async function cmdWaitForNavigation({ timeout = 15000, tab_id }) {
     }
   }
 
-  await waitForComplete(tabId, timeout - (Date.now() - start));
+  const completed = await waitForComplete(tabId, Math.max(0, timeout - (Date.now() - start)));
   const t = await chrome.tabs.get(tabId);
-  return { navigated: true, url: t.url, title: t.title, elapsed: Date.now() - start };
+  return { navigated: completed, url: t.url, title: t.title, elapsed: Date.now() - start };
 }
 
 // --- wait_for_network_idle ---
@@ -2099,7 +2099,7 @@ async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab
             selector: selectorFor(parent),
             context: ctx.trim(),
             visible: rect.width > 0 && rect.height > 0,
-            position: { x: Math.round(rect.x), y: Math.round(rect.y + window.scrollY) },
+            position: { x: Math.round(rect.x + window.scrollX), y: Math.round(rect.y + window.scrollY) },
           });
           idx = hay.indexOf(needle, idx + 1);
         }
