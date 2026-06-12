@@ -57,6 +57,7 @@ export const COMMAND_TIMEOUT_MS    = 30000;  // 30s per comandi normali
 export const SCREENSHOT_TIMEOUT_MS = 10000;  // 10s per screenshot
 export const PING_INTERVAL_MS      = 15000;  // 15s heartbeat
 export const IDENT_TIMEOUT_MS      = 5000;   // tempo max per identificarsi
+export const PENDING_RELAY_TTL_MS  = 150000; // deve superare il timeout comando più lungo (120s full_page_screenshot)
 
 // Entropia per instance + contatore globale per ID univoci
 // 4 byte casuali per processo (2^32 valori): sufficiente per un bridge locale

@@ -14,7 +14,7 @@
  */
 
 import WebSocket, { WebSocketServer } from 'ws';
-import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, getTimeout, createCommand, MessageType } from './protocol.js';
+import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType } from './protocol.js';
 
 export class WSManager {
   constructor(port = DEFAULT_PORT, opts = {}) {
@@ -22,7 +22,7 @@ export class WSManager {
     this.identTimeout = opts.identTimeout ?? IDENT_TIMEOUT_MS;
     this.token = opts.token ?? process.env.CHROME_BRIDGE_TOKEN ?? null;
     this.pingIntervalMs = opts.pingInterval ?? PING_INTERVAL_MS;
-    this.pongGrace = opts.pongGrace ?? 10000;
+    this.pongGraceMs = opts.pongGrace ?? 10000;
     this.lastPong = 0;
     this.stopped = false;
     this.mode = null;            // 'primary' | 'relay'
@@ -32,7 +32,7 @@ export class WSManager {
     this.client = null;          // Connessione Chrome extension
     this.relayClients = new Set();
     this.pendingRelay = new Map(); // command id → { ws: relay WebSocket, ts: timestamp }
-    this.pingInterval = null;
+    this.pingTimer = null;
 
     // --- relay mode ---
     this.relaySocket = null;
@@ -104,9 +104,9 @@ export class WSManager {
   async stop() {
     this.stopped = true;
 
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
     }
 
     this._rejectAllPending('Server shutting down');
@@ -232,6 +232,17 @@ export class WSManager {
     if (this.client) {
       console.error('[chrome-bridge] Replacing existing Chrome connection');
       this._rejectAllPending('Replaced by new extension connection');
+      // Notifica anche i relay in attesa: le risposte ai loro comandi non arriveranno mai
+      for (const [id, entry] of this.pendingRelay) {
+        if (entry.ws.readyState === WebSocket.OPEN) {
+          entry.ws.send(JSON.stringify({
+            id,
+            type: MessageType.ERROR,
+            error: 'Chrome extension reconnected',
+          }));
+        }
+      }
+      this.pendingRelay.clear();
       this.client.close(1000, 'Replaced by new connection');
     }
 
@@ -422,6 +433,18 @@ export class WSManager {
 
       try {
         await this._startPrimary();
+        // stop() chiamato mentre la promozione era in volo: smonta ciò che è appena stato creato
+        if (this.stopped) {
+          if (this.pingTimer) {
+            clearInterval(this.pingTimer);
+            this.pingTimer = null;
+          }
+          if (this.wss) {
+            this.wss.close();
+            this.wss = null;
+          }
+          return;
+        }
         this.mode = 'primary';
         console.error('[chrome-bridge] Promoted to primary successfully');
         return;
@@ -451,10 +474,11 @@ export class WSManager {
   // ─── Shared helpers ────────────────────────────────────────────
 
   _startPing() {
-    this.pingInterval = setInterval(() => {
+    this.pingTimer = setInterval(() => {
       if (this.client && this.client.readyState === WebSocket.OPEN) {
         // Half-open detection: nessun pong da troppo tempo → terminate
-        if (this.lastPong && Date.now() - this.lastPong > this.pingIntervalMs * 2 + this.pongGrace) {
+        // (lastPong è sempre inizializzato in _setupChromeClient)
+        if (Date.now() - this.lastPong > this.pingIntervalMs * 2 + this.pongGraceMs) {
           console.error('[chrome-bridge] Extension unresponsive (no pong) — terminating connection');
           this.client.terminate();
           return;
@@ -464,8 +488,8 @@ export class WSManager {
           timestamp: Date.now(),
         }));
       }
-      // Sweep pendingRelay scaduti (entry più vecchie di 120s)
-      const cutoff = Date.now() - 120000;
+      // Sweep pendingRelay scaduti
+      const cutoff = Date.now() - PENDING_RELAY_TTL_MS;
       for (const [id, entry] of this.pendingRelay) {
         if (entry.ts < cutoff) this.pendingRelay.delete(id);
       }

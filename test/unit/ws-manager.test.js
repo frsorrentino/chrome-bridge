@@ -106,8 +106,7 @@ test('client che non risponde ai ping viene terminato', async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${p}`, { headers: { origin: 'chrome-extension://abc' } });
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'ext_init' }));
-  await waitFor(() => m.isConnected());
-  assert.equal(m.isConnected(), true);
+  assert.equal(await waitFor(() => m.isConnected()), true);
   // non rispondiamo mai ai ping JSON → entro pingInterval*2 + grace deve scollegare
   const closed = await waitClose(ws, 2000);
   assert.equal(closed, true);
