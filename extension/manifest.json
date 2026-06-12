@@ -12,7 +12,9 @@
     "cookies",
     "webNavigation",
     "webRequest",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"

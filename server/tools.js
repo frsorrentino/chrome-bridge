@@ -165,11 +165,12 @@ export function registerTools(server, wsManager) {
     {
       selector: z.string().describe('CSS selector of the input element'),
       text:     z.string().describe('Text to type'),
+      mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value directly (fast); keys = per-character key events (for autocomplete/masked inputs)'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
       frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, text, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, tab_id, frame_id });
+    async ({ selector, text, mode, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, mode, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -956,6 +957,55 @@ export function registerTools(server, wsManager) {
     },
     async ({ max_selectors, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.UNUSED_CSS, { max_selectors, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- drag_and_drop ---
+  server.tool(
+    'drag_and_drop',
+    'Drag an element onto another. mode html5 = DragEvent sequence with DataTransfer (native DnD APIs); mode pointer = pointer/mouse event sequence (sortable libraries).',
+    {
+      source_selector: z.string().describe('CSS selector of the element to drag'),
+      target_selector: z.string().describe('CSS selector of the drop target'),
+      mode: z.enum(['html5', 'pointer']).optional().default('html5').describe('Event strategy'),
+      frame_id: z.number().optional().describe('Frame ID (from get_frames; default: main frame)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ source_selector, target_selector, mode, frame_id, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector, target_selector, mode, frame_id, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- clipboard ---
+  server.tool(
+    'clipboard',
+    'Read or write the system clipboard (text). Activates the tab first; uses the Clipboard API with execCommand fallback.',
+    {
+      action: z.enum(['read', 'write']).describe('Clipboard operation'),
+      text: z.string().optional().describe('Text to write (for write action)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ action, text, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.CLIPBOARD, { action, text, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- set_geolocation ---
+  server.tool(
+    'set_geolocation',
+    'Override navigator.geolocation with fixed coordinates (page-level patch; pages holding earlier references are unaffected). reset restores native behavior.',
+    {
+      latitude: z.number().optional().describe('Latitude'),
+      longitude: z.number().optional().describe('Longitude'),
+      accuracy: z.number().optional().default(10).describe('Accuracy in meters'),
+      reset: z.boolean().optional().default(false).describe('Restore native geolocation'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ latitude, longitude, accuracy, reset, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );

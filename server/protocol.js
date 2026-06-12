@@ -53,6 +53,9 @@ export const MessageType = Object.freeze({
   SEO_AUDIT:             'seo_audit',
   EXTRACT_TABLE:         'extract_table',
   UNUSED_CSS:            'unused_css',
+  DRAG_AND_DROP:         'drag_and_drop',
+  CLIPBOARD:             'clipboard',
+  SET_GEOLOCATION:       'set_geolocation',
 
   // Risposte (extension → server)
   RESULT: 'result',

@@ -249,6 +249,12 @@ async function executeCommand(msg) {
       return await cmdExtractTable(params);
     case 'unused_css':
       return await cmdUnusedCss(params);
+    case 'drag_and_drop':
+      return await cmdDragAndDrop(params);
+    case 'clipboard':
+      return await cmdClipboard(params);
+    case 'set_geolocation':
+      return await cmdSetGeolocation(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -446,14 +452,14 @@ async function cmdClick({ selector, tab_id, frame_id }) {
   return results?.[0]?.result ?? { clicked: true };
 }
 
-async function cmdTypeText({ selector, text, tab_id, frame_id }) {
+async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   if (text === undefined) throw new Error('Missing required parameter: text');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
-    func: (sel, txt) => {
+    func: async (sel, txt, typeMode) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
         const parts = sel.split('>>>').map((s) => s.trim());
@@ -471,21 +477,46 @@ async function cmdTypeText({ selector, text, tab_id, frame_id }) {
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.focus();
       const tag = el.tagName.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') {
-        // Native setter: i controlled input React ignorano l'assegnazione diretta
-        const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        if (setter) setter.call(el, txt); else el.value = txt;
-      } else if (el.isContentEditable) {
-        el.textContent = txt;
-      } else {
-        el.value = txt;
+      // Native setter: i controlled input React ignorano l'assegnazione diretta
+      const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = (tag === 'input' || tag === 'textarea')
+        ? Object.getOwnPropertyDescriptor(proto, 'value')?.set
+        : null;
+      const setValue = (value) => {
+        if (tag === 'input' || tag === 'textarea') {
+          if (setter) setter.call(el, value); else el.value = value;
+        } else if (el.isContentEditable) {
+          el.textContent = value;
+        } else {
+          el.value = value;
+        }
+      };
+      const getValue = () => {
+        if (tag === 'input' || tag === 'textarea') return el.value;
+        if (el.isContentEditable) return el.textContent;
+        return el.value ?? '';
+      };
+
+      if (typeMode === 'keys') {
+        // Eventi tastiera carattere per carattere: per autocomplete/input mascherati
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (const ch of txt) {
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
+          setValue((getValue() ?? '') + ch);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ch }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, cancelable: true }));
+          await sleep(10);
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { typed: true, tagName: tag, mode: 'keys' };
       }
+
+      setValue(txt);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return { typed: true, tagName: tag };
     },
-    args: [selector, text],
+    args: [selector, text, mode],
     world: 'MAIN',
   });
 
@@ -2678,6 +2709,166 @@ async function cmdUnusedCss({ max_selectors = 200, tab_id }) {
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { sheets: [], unused_selectors: [], total_unused: 0, total_checked: 0 };
+}
+
+// --- drag_and_drop ---
+
+async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5', tab_id, frame_id }) {
+  if (!source_selector) throw new Error('Missing required parameter: source_selector');
+  if (!target_selector) throw new Error('Missing required parameter: target_selector');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: async (srcSel, tgtSel, dndMode) => {
+      const src = document.querySelector(srcSel);
+      if (!src) throw new Error(`Source element not found: ${srcSel}`);
+      const tgt = document.querySelector(tgtSel);
+      if (!tgt) throw new Error(`Target element not found: ${tgtSel}`);
+      src.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const sr = src.getBoundingClientRect();
+      const tr = tgt.getBoundingClientRect();
+      const sc = { x: sr.left + sr.width / 2, y: sr.top + sr.height / 2 };
+      const tc = { x: tr.left + tr.width / 2, y: tr.top + tr.height / 2 };
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      if (dndMode === 'html5') {
+        const dt = new DataTransfer();
+        const fire = (el, type, x, y) => el.dispatchEvent(new DragEvent(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt,
+        }));
+        fire(src, 'dragstart', sc.x, sc.y);
+        await sleep(50);
+        fire(tgt, 'dragenter', tc.x, tc.y);
+        fire(tgt, 'dragover', tc.x, tc.y);
+        await sleep(50);
+        fire(tgt, 'drop', tc.x, tc.y);
+        fire(src, 'dragend', tc.x, tc.y);
+      } else {
+        // pointer mode: per librerie sortable basate su pointer/mouse events
+        const fire = (el, type, x, y, Ctor = PointerEvent) => el.dispatchEvent(new Ctor(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type.includes('up') ? 0 : 1, pointerId: 1, isPrimary: true,
+        }));
+        fire(src, 'pointerdown', sc.x, sc.y);
+        fire(src, 'mousedown', sc.x, sc.y, MouseEvent);
+        await sleep(50);
+        // movimento intermedio
+        const mid = { x: (sc.x + tc.x) / 2, y: (sc.y + tc.y) / 2 };
+        for (const p of [mid, tc]) {
+          fire(document, 'pointermove', p.x, p.y);
+          fire(document, 'mousemove', p.x, p.y, MouseEvent);
+          await sleep(50);
+        }
+        fire(tgt, 'pointerup', tc.x, tc.y);
+        fire(tgt, 'mouseup', tc.x, tc.y, MouseEvent);
+      }
+      return { dragged: srcSel, dropped_on: tgtSel, mode: dndMode };
+    },
+    args: [source_selector, target_selector, mode],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { dragged: false };
+}
+
+// --- clipboard ---
+
+async function cmdClipboard({ action, text, tab_id }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+  // La pagina deve essere focalizzata per navigator.clipboard
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.tabs.update(tabId, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    // World ISOLATED di proposito: le permission clipboardRead/clipboardWrite
+    // dell'estensione si applicano al suo isolated world, rendendo execCommand
+    // funzionante senza user gesture.
+    func: async (act, txt) => {
+      if (act === 'write') {
+        if (txt === undefined || txt === null) throw new Error('Missing required parameter: text');
+        try {
+          await navigator.clipboard.writeText(txt);
+          return { written: true, length: txt.length, method: 'clipboard-api' };
+        } catch (e) {
+          // Fallback execCommand
+          const ta = document.createElement('textarea');
+          ta.value = txt;
+          ta.style.cssText = 'position:fixed;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          if (!ok) throw new Error(`Clipboard write failed: ${e.message}`);
+          return { written: true, length: txt.length, method: 'execCommand' };
+        }
+      }
+      if (act === 'read') {
+        try {
+          const value = await navigator.clipboard.readText();
+          return { text: value, method: 'clipboard-api' };
+        } catch (e) {
+          const ta = document.createElement('textarea');
+          ta.style.cssText = 'position:fixed;opacity:0;';
+          document.body.appendChild(ta);
+          ta.focus();
+          const ok = document.execCommand('paste');
+          const value = ta.value;
+          ta.remove();
+          if (!ok) throw new Error(`Clipboard read failed: ${e.message} (page may need user gesture)`);
+          return { text: value, method: 'execCommand' };
+        }
+      }
+      throw new Error(`Unknown action: ${act}`);
+    },
+    args: [action, text ?? null],
+    world: 'ISOLATED',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- set_geolocation ---
+
+async function cmdSetGeolocation({ latitude, longitude, accuracy = 10, reset = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (lat, lng, acc, doReset) => {
+      if (doReset) {
+        if (window.__chromeBridge_origGeo) {
+          navigator.geolocation.getCurrentPosition = window.__chromeBridge_origGeo.getCurrentPosition;
+          navigator.geolocation.watchPosition = window.__chromeBridge_origGeo.watchPosition;
+          delete window.__chromeBridge_origGeo;
+        }
+        return { reset: true };
+      }
+      if (lat === null || lng === null) throw new Error('Missing required parameters: latitude, longitude');
+      if (!window.__chromeBridge_origGeo) {
+        window.__chromeBridge_origGeo = {
+          getCurrentPosition: navigator.geolocation.getCurrentPosition.bind(navigator.geolocation),
+          watchPosition: navigator.geolocation.watchPosition.bind(navigator.geolocation),
+        };
+      }
+      const makePosition = () => ({
+        coords: {
+          latitude: lat, longitude: lng, accuracy: acc,
+          altitude: null, altitudeAccuracy: null, heading: null, speed: null,
+        },
+        timestamp: Date.now(),
+      });
+      navigator.geolocation.getCurrentPosition = (success) => {
+        setTimeout(() => success(makePosition()), 10);
+      };
+      navigator.geolocation.watchPosition = (success) => {
+        setTimeout(() => success(makePosition()), 10);
+        return Math.floor(Math.random() * 1000000);
+      };
+      return { emulated: { latitude: lat, longitude: lng, accuracy: acc } };
+    },
+    args: [latitude ?? null, longitude ?? null, accuracy, reset],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
 }
 
 // --- Browser-level network log (webRequest) ---
