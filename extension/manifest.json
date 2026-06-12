@@ -7,7 +7,8 @@
     "tabs",
     "scripting",
     "alarms",
-    "storage"
+    "storage",
+    "cookies"
   ],
   "host_permissions": [
     "<all_urls>"

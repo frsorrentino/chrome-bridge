@@ -528,35 +528,42 @@ async function cmdGetPageInfo({ tab_id }) {
 
 async function cmdGetStorage({ type = 'all', tab_id }) {
   const tabId = await resolveTabId(tab_id);
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (storageType) => {
-      const data = {};
-      if (storageType === 'all' || storageType === 'localStorage') {
-        const ls = {};
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          ls[key] = localStorage.getItem(key);
+  const data = {};
+
+  if (type === 'all' || type === 'localStorage' || type === 'sessionStorage') {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (storageType) => {
+        const out = {};
+        if (storageType === 'all' || storageType === 'localStorage') {
+          const ls = {};
+          for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); }
+          out.localStorage = ls;
         }
-        data.localStorage = ls;
-      }
-      if (storageType === 'all' || storageType === 'sessionStorage') {
-        const ss = {};
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const key = sessionStorage.key(i);
-          ss[key] = sessionStorage.getItem(key);
+        if (storageType === 'all' || storageType === 'sessionStorage') {
+          const ss = {};
+          for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); }
+          out.sessionStorage = ss;
         }
-        data.sessionStorage = ss;
-      }
-      if (storageType === 'all' || storageType === 'cookies') {
-        data.cookies = document.cookie || '';
-      }
-      return data;
-    },
-    args: [type],
-    world: 'MAIN',
-  });
-  return results?.[0]?.result ?? {};
+        return out;
+      },
+      args: [type],
+      world: 'MAIN',
+    });
+    Object.assign(data, results?.[0]?.result ?? {});
+  }
+
+  if (type === 'all' || type === 'cookies') {
+    const tab = await chrome.tabs.get(tabId);
+    const cookies = await chrome.cookies.getAll({ url: tab.url });
+    data.cookies = cookies.map((c) => ({
+      name: c.name, value: c.value, domain: c.domain, path: c.path,
+      httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite,
+      session: c.session, expirationDate: c.expirationDate ?? null,
+    }));
+  }
+
+  return data;
 }
 
 // --- DevTools: get_performance ---
@@ -951,53 +958,52 @@ async function cmdSetStorage({ type, action, key, value, path, domain, expires, 
   if (!action) throw new Error('Missing required parameter: action');
   const tabId = await resolveTabId(tab_id);
 
+  if (type === 'cookie') {
+    const tab = await chrome.tabs.get(tabId);
+    const sameSiteMap = { Strict: 'strict', Lax: 'lax', None: 'no_restriction' };
+    if (action === 'set') {
+      if (!key) throw new Error('key is required for set action');
+      const details = { url: tab.url, name: key, value: value || '', path: path || '/' };
+      if (domain) details.domain = domain;
+      if (expires) details.expirationDate = Math.floor(new Date(expires).getTime() / 1000);
+      if (secure || sameSite === 'None') details.secure = true;
+      if (sameSite) details.sameSite = sameSiteMap[sameSite];
+      const c = await chrome.cookies.set(details);
+      if (!c) throw new Error(chrome.runtime.lastError?.message || 'cookies.set failed');
+      return { success: true, type: 'cookie', action: 'set', key };
+    }
+    if (action === 'delete') {
+      if (!key) throw new Error('key is required for delete action');
+      await chrome.cookies.remove({ url: tab.url, name: key });
+      return { success: true, type: 'cookie', action: 'delete', key };
+    }
+    if (action === 'clear') {
+      const cookies = await chrome.cookies.getAll({ url: tab.url });
+      for (const c of cookies) await chrome.cookies.remove({ url: tab.url, name: c.name });
+      return { success: true, type: 'cookie', action: 'clear', cleared: cookies.length };
+    }
+    throw new Error(`Invalid cookie action: ${action}`);
+  }
+
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (sType, sAction, sKey, sValue, cPath, cDomain, cExpires, cSecure, cSameSite) => {
-      if (sType === 'localStorage' || sType === 'sessionStorage') {
-        const storage = sType === 'localStorage' ? localStorage : sessionStorage;
-        if (sAction === 'set') {
-          if (!sKey) throw new Error('key is required for set action');
-          storage.setItem(sKey, sValue || '');
-          return { success: true, type: sType, action: 'set', key: sKey };
-        } else if (sAction === 'delete') {
-          if (!sKey) throw new Error('key is required for delete action');
-          storage.removeItem(sKey);
-          return { success: true, type: sType, action: 'delete', key: sKey };
-        } else if (sAction === 'clear') {
-          storage.clear();
-          return { success: true, type: sType, action: 'clear' };
-        }
-      } else if (sType === 'cookie') {
-        if (sAction === 'set') {
-          if (!sKey) throw new Error('key is required for set action');
-          let cookie = `${encodeURIComponent(sKey)}=${encodeURIComponent(sValue || '')}`;
-          cookie += `; path=${cPath || '/'}`;
-          if (cDomain) cookie += `; domain=${cDomain}`;
-          if (cExpires) cookie += `; expires=${cExpires}`;
-          if (cSameSite) {
-            cookie += `; SameSite=${cSameSite}`;
-            if (cSameSite === 'None') cookie += '; Secure';
-          }
-          if (cSecure && (!cSameSite || cSameSite !== 'None')) cookie += '; Secure';
-          document.cookie = cookie;
-          return { success: true, type: 'cookie', action: 'set', key: sKey };
-        } else if (sAction === 'delete') {
-          if (!sKey) throw new Error('key is required for delete action');
-          document.cookie = `${encodeURIComponent(sKey)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${cPath || '/'}`;
-          return { success: true, type: 'cookie', action: 'delete', key: sKey };
-        } else if (sAction === 'clear') {
-          const cookies = document.cookie.split(';');
-          for (const c of cookies) {
-            const name = c.split('=')[0].trim();
-            if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${cPath || '/'}`;
-          }
-          return { success: true, type: 'cookie', action: 'clear', cleared: cookies.length };
-        }
+    func: (sType, sAction, sKey, sValue) => {
+      const storage = sType === 'localStorage' ? localStorage : sessionStorage;
+      if (sAction === 'set') {
+        if (!sKey) throw new Error('key is required for set action');
+        storage.setItem(sKey, sValue || '');
+        return { success: true, type: sType, action: 'set', key: sKey };
+      } else if (sAction === 'delete') {
+        if (!sKey) throw new Error('key is required for delete action');
+        storage.removeItem(sKey);
+        return { success: true, type: sType, action: 'delete', key: sKey };
+      } else if (sAction === 'clear') {
+        storage.clear();
+        return { success: true, type: sType, action: 'clear' };
       }
-      throw new Error(`Invalid type/action: ${sType}/${sAction}`);
+      throw new Error(`Invalid action: ${sAction}`);
     },
-    args: [type, action, key || null, value || null, path || null, domain || null, expires || null, secure || false, sameSite || null],
+    args: [type, action, key || null, value || null],
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { success: false };
