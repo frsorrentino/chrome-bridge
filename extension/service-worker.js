@@ -972,21 +972,27 @@ async function cmdSetStorage({ type, action, key, value, path, domain, expires, 
       if (!key) throw new Error('key is required for set action');
       const details = { url: tab.url, name: key, value: value || '', path: path || '/' };
       if (domain) details.domain = domain;
-      if (expires) details.expirationDate = Math.floor(new Date(expires).getTime() / 1000);
+      if (expires) { const ts = Math.floor(new Date(expires).getTime() / 1000); if (Number.isNaN(ts)) throw new Error(`Invalid expires date: ${expires}`); details.expirationDate = ts; }
       if (secure || sameSite === 'None') details.secure = true;
       if (sameSite) details.sameSite = sameSiteMap[sameSite];
-      const c = await chrome.cookies.set(details);
-      if (!c) throw new Error(chrome.runtime.lastError?.message || 'cookies.set failed');
+      await chrome.cookies.set(details);
       return { success: true, type: 'cookie', action: 'set', key };
     }
     if (action === 'delete') {
       if (!key) throw new Error('key is required for delete action');
-      await chrome.cookies.remove({ url: tab.url, name: key });
-      return { success: true, type: 'cookie', action: 'delete', key };
+      const matches = (await chrome.cookies.getAll({ url: tab.url })).filter((c) => c.name === key);
+      for (const c of matches) {
+        const cookieUrl = (c.secure ? 'https://' : 'http://') + c.domain.replace(/^\./, '') + c.path;
+        await chrome.cookies.remove({ url: cookieUrl, name: c.name });
+      }
+      return { success: true, type: 'cookie', action: 'delete', key, removed: matches.length };
     }
     if (action === 'clear') {
       const cookies = await chrome.cookies.getAll({ url: tab.url });
-      for (const c of cookies) await chrome.cookies.remove({ url: tab.url, name: c.name });
+      for (const c of cookies) {
+        const cookieUrl = (c.secure ? 'https://' : 'http://') + c.domain.replace(/^\./, '') + c.path;
+        await chrome.cookies.remove({ url: cookieUrl, name: c.name });
+      }
       return { success: true, type: 'cookie', action: 'clear', cleared: cookies.length };
     }
     throw new Error(`Invalid cookie action: ${action}`);

@@ -526,7 +526,7 @@ export function registerTools(server, wsManager) {
   // --- accessibility_audit ---
   server.tool(
     'accessibility_audit',
-    'Run accessibility audit: missing alt, empty links, heading hierarchy, ARIA issues, contrast, form labels',
+    'Run accessibility audit: missing alt, empty links, heading hierarchy, ARIA issues, contrast, form labels. Contrast check is approximate (ignores background images/gradients and alpha compositing).',
     {
       scope: z.string().optional().describe('CSS selector to limit audit scope (default: whole page)'),
       checks: z.array(z.enum(['images', 'links', 'headings', 'aria', 'contrast', 'forms', 'all'])).optional().default(['all']).describe('Which checks to run'),
