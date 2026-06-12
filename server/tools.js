@@ -830,4 +830,22 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // --- network_rules ---
+  server.tool(
+    'network_rules',
+    'Manage network interception rules (browser-wide, not per-tab): block requests, redirect URLs (e.g. mock an API endpoint), set/remove request headers. Uses declarativeNetRequest — survives page reloads until cleared.',
+    {
+      action: z.enum(['block', 'redirect', 'modify_header', 'list', 'clear']).describe('Rule action'),
+      url_filter: z.string().optional().describe('URL filter pattern (declarativeNetRequest urlFilter syntax, e.g. "||example.com/api/*")'),
+      redirect_url: z.string().optional().describe('Target URL for redirect action'),
+      header: z.string().optional().describe('Header name for modify_header'),
+      header_value: z.string().optional().describe('Header value (omit to remove the header)'),
+      resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional().describe('Limit rule to these resource types'),
+    },
+    async ({ action, url_filter, redirect_url, header, header_value, resource_types }) => {
+      const data = await wsManager.sendCommand(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

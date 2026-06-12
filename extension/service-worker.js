@@ -233,6 +233,8 @@ async function executeCommand(msg) {
       return await cmdHandleDialogs(params);
     case 'find_text':
       return await cmdFindText(params);
+    case 'network_rules':
+      return await cmdNetworkRules(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -2110,6 +2112,52 @@ async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { count: 0, matches: [] };
+}
+
+// --- network_rules (declarativeNetRequest) ---
+// Nota: le regole dinamiche sono globali per il browser, non per-tab.
+
+async function cmdNetworkRules({ action, url_filter, redirect_url, header, header_value, resource_types }) {
+  if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'list') {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    return { count: rules.length, rules };
+  }
+
+  if (action === 'clear') {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: rules.map((r) => r.id),
+    });
+    return { cleared: rules.length };
+  }
+
+  if (!url_filter) throw new Error('Missing required parameter: url_filter');
+  const existing = await chrome.declarativeNetRequest.getDynamicRules();
+  const nextId = existing.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  const types = resource_types && resource_types.length > 0 ? resource_types : undefined;
+  const condition = { urlFilter: url_filter };
+  if (types) condition.resourceTypes = types;
+
+  let rule;
+  if (action === 'block') {
+    rule = { id: nextId, priority: 1, action: { type: 'block' }, condition };
+  } else if (action === 'redirect') {
+    if (!redirect_url) throw new Error('Missing required parameter: redirect_url');
+    rule = { id: nextId, priority: 1, action: { type: 'redirect', redirect: { url: redirect_url } }, condition };
+  } else if (action === 'modify_header') {
+    if (!header) throw new Error('Missing required parameter: header');
+    const op = header_value === undefined || header_value === null || header_value === ''
+      ? { header, operation: 'remove' }
+      : { header, operation: 'set', value: header_value };
+    rule = { id: nextId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [op] }, condition };
+  } else {
+    throw new Error(`Unknown action: ${action}`);
+  }
+
+  await chrome.declarativeNetRequest.updateDynamicRules({ addRules: [rule] });
+  return { added: rule };
 }
 
 // --- Browser-level network log (webRequest) ---

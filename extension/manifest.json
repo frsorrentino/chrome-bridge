@@ -11,7 +11,8 @@
     "storage",
     "cookies",
     "webNavigation",
-    "webRequest"
+    "webRequest",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -45,6 +45,7 @@ export const MessageType = Object.freeze({
   WAIT_FOR_NETWORK_IDLE: 'wait_for_network_idle',
   HANDLE_DIALOGS:        'handle_dialogs',
   FIND_TEXT:             'find_text',
+  NETWORK_RULES:         'network_rules',
 
   // Risposte (extension → server)
   RESULT: 'result',
