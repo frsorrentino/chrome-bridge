@@ -2,6 +2,8 @@
  * Costanti del protocollo e helper per la comunicazione WebSocket.
  */
 
+import { randomBytes } from 'node:crypto';
+
 // Tipi di messaggi WebSocket
 export const MessageType = Object.freeze({
   // Comandi (server → extension)
@@ -56,7 +58,8 @@ export const SCREENSHOT_TIMEOUT_MS = 10000;  // 10s per screenshot
 export const PING_INTERVAL_MS      = 15000;  // 15s heartbeat
 export const IDENT_TIMEOUT_MS      = 5000;   // tempo max per identificarsi
 
-// Contatore globale per ID univoci
+// Entropia per instance + contatore globale per ID univoci
+const instanceId = randomBytes(4).toString('hex');
 let messageCounter = 0;
 
 /**
@@ -69,7 +72,7 @@ let messageCounter = 0;
 export function createCommand(type, params = {}) {
   messageCounter += 1;
   return {
-    id: `msg_${messageCounter}_${Date.now()}`,
+    id: `msg_${instanceId}_${messageCounter}`,
     type,
     params,
     timestamp: Date.now(),

@@ -5,10 +5,8 @@
   "description": "Connects Chrome to Claude Code via WebSocket bridge",
   "permissions": [
     "tabs",
-    "activeTab",
     "scripting",
-    "alarms",
-    "debugger"
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
