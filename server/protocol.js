@@ -47,6 +47,9 @@ export const MessageType = Object.freeze({
   FIND_TEXT:             'find_text',
   NETWORK_RULES:         'network_rules',
   SCREENSHOT_DIFF:       'screenshot_diff',
+  WEB_VITALS:            'web_vitals',
+  LIST_EVENT_LISTENERS:  'list_event_listeners',
+  MONITOR_WEBSOCKET:     'monitor_websocket',
 
   // Risposte (extension → server)
   RESULT: 'result',

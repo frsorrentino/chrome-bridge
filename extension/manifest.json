@@ -20,7 +20,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["console-capture.js"],
+      "js": ["console-capture.js", "page-instrumentation.js"],
       "run_at": "document_start",
       "world": "MAIN"
     }

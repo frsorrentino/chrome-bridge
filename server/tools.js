@@ -874,4 +874,46 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // --- web_vitals ---
+  server.tool(
+    'web_vitals',
+    'Read Core Web Vitals collected since page load: CLS, LCP, FCP, TTFB, long tasks, max event duration (INP approximation). Requires the instrumentation content script (loaded at document_start).',
+    {
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WEB_VITALS, { tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- list_event_listeners ---
+  server.tool(
+    'list_event_listeners',
+    'List event listeners registered via addEventListener since page load (type, target, capture/once/passive). Counts by type plus the most recent entries.',
+    {
+      type: z.string().optional().describe('Filter by event type (e.g. "click")'),
+      limit: z.number().optional().default(100).describe('Max listener entries returned'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ type, limit, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- monitor_websocket ---
+  server.tool(
+    'monitor_websocket',
+    'Monitor WebSocket connections and messages (both directions, 500-char previews). First call installs the hook; connections opened before that are not captured.',
+    {
+      clear: z.boolean().optional().default(false).describe('Clear captured events after reading'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ clear, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

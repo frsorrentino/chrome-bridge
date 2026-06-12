@@ -35,7 +35,7 @@ let reconnectDelay = RECONNECT_BASE_MS;
 let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
 
 // Tracking per tool stateful (network monkey-patch)
-const injectedTabs = { network: new Set() };
+const injectedTabs = { network: new Set(), websocket: new Set() };
 
 // --- Keep-alive: impedisce che il service worker venga fermato ---
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
@@ -237,6 +237,12 @@ async function executeCommand(msg) {
       return await cmdNetworkRules(params);
     case 'screenshot_diff':
       return await cmdScreenshotDiff(params);
+    case 'web_vitals':
+      return await cmdWebVitals(params);
+    case 'list_event_listeners':
+      return await cmdListEventListeners(params);
+    case 'monitor_websocket':
+      return await cmdMonitorWebsocket(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -2292,6 +2298,121 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
   throw new Error(`Unknown action: ${action}`);
 }
 
+// --- web_vitals ---
+
+async function cmdWebVitals({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const v = window.__chromeBridge_vitals;
+      if (!v) return { available: false, note: 'Instrumentation not loaded (page opened before extension, or chrome:// page)' };
+      const nav = performance.getEntriesByType('navigation')[0];
+      const paint = {};
+      for (const p of performance.getEntriesByType('paint')) paint[p.name] = Math.round(p.startTime);
+      return {
+        available: true,
+        cls: Math.round(v.cls * 1000) / 1000,
+        lcp_ms: v.lcp,
+        fcp_ms: paint['first-contentful-paint'] ?? null,
+        ttfb_ms: nav ? Math.round(nav.responseStart - nav.requestStart) : null,
+        long_tasks: v.longTasks,
+        max_event_duration_ms: v.maxEventDelayMs,
+      };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { available: false };
+}
+
+// --- list_event_listeners ---
+
+async function cmdListEventListeners({ type, limit = 100, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (filterType, lim) => {
+      const all = window.__chromeBridge_listeners || [];
+      const filtered = filterType ? all.filter((l) => l.type === filterType) : all;
+      const byType = {};
+      for (const l of filtered) byType[l.type] = (byType[l.type] || 0) + 1;
+      return {
+        total: filtered.length,
+        by_type: byType,
+        listeners: filtered.slice(-lim),
+        note: window.__chromeBridge_listeners ? undefined : 'Instrumentation not loaded for this page',
+      };
+    },
+    args: [type ?? null, limit],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { total: 0, by_type: {}, listeners: [] };
+}
+
+// --- monitor_websocket (hook lazy, come ensureNetworkHook) ---
+
+async function ensureWsHook(tabId) {
+  if (injectedTabs.websocket.has(tabId)) return;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      if (window.__chromeBridge_wsHooked) return;
+      window.__chromeBridge_wsHooked = true;
+      window.__chromeBridge_wsLog = [];
+      const MAX = 500;
+      const PREVIEW = 500;
+      const push = (entry) => {
+        if (window.__chromeBridge_wsLog.length >= MAX) window.__chromeBridge_wsLog.shift();
+        window.__chromeBridge_wsLog.push(entry);
+      };
+      const preview = (data) => {
+        try {
+          if (typeof data === 'string') return data.substring(0, PREVIEW);
+          return `<binary ${data?.byteLength ?? data?.size ?? '?'} bytes>`;
+        } catch { return '<unreadable>'; }
+      };
+      const OrigWS = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
+        push({ event: 'open_attempt', url: String(url), timestamp: Date.now() });
+        ws.addEventListener('open', () => push({ event: 'open', url: String(url), timestamp: Date.now() }));
+        ws.addEventListener('close', (e) => push({ event: 'close', url: String(url), code: e.code, timestamp: Date.now() }));
+        ws.addEventListener('error', () => push({ event: 'error', url: String(url), timestamp: Date.now() }));
+        ws.addEventListener('message', (e) => push({ event: 'message', direction: 'in', url: String(url), data: preview(e.data), timestamp: Date.now() }));
+        const origSend = ws.send.bind(ws);
+        ws.send = (data) => {
+          push({ event: 'message', direction: 'out', url: String(url), data: preview(data), timestamp: Date.now() });
+          return origSend(data);
+        };
+        return ws;
+      };
+      window.WebSocket.prototype = OrigWS.prototype;
+      Object.setPrototypeOf(window.WebSocket, OrigWS);
+      for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) window.WebSocket[k] = OrigWS[k];
+    },
+    world: 'MAIN',
+  });
+  injectedTabs.websocket.add(tabId);
+}
+
+async function cmdMonitorWebsocket({ clear = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  await ensureWsHook(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (shouldClear) => {
+      const log = window.__chromeBridge_wsLog || [];
+      const out = [...log];
+      if (shouldClear) window.__chromeBridge_wsLog = [];
+      return out;
+    },
+    args: [clear],
+    world: 'MAIN',
+  });
+  const events = results?.[0]?.result ?? [];
+  return { count: events.length, events };
+}
+
 // --- Browser-level network log (webRequest) ---
 const browserNetLog = new Map(); // tabId → array
 
@@ -2316,11 +2437,13 @@ chrome.webRequest.onErrorOccurred.addListener((d) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     injectedTabs.network.delete(tabId);
+    injectedTabs.websocket.delete(tabId);
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.network.delete(tabId);
+  injectedTabs.websocket.delete(tabId);
   browserNetLog.delete(tabId);
 });
 
