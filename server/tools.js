@@ -5,14 +5,24 @@
  * e restituisce il risultato al client MCP.
  */
 
+import { readFile } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
 import { z } from 'zod';
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
+import { toHar } from './har.js';
 
 function truncateText(text, max) {
   if (typeof text !== 'string' || text.length <= max) return text;
   return text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — use max_length to raise the limit]`;
 }
+
+const MIME_BY_EXT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
+  '.txt': 'text/plain', '.csv': 'text/csv', '.json': 'application/json',
+  '.zip': 'application/zip', '.mp4': 'video/mp4', '.webm': 'video/webm',
+};
 
 /**
  * Registra tutti i tool MCP.
@@ -334,17 +344,20 @@ export function registerTools(server, wsManager) {
   // --- monitor_network ---
   server.tool(
     'monitor_network',
-    'Monitor network requests (XHR and fetch). First call installs the capture hook; subsequent calls read accumulated requests.',
+    'Monitor network requests. source=page captures XHR/fetch via in-page hook (first call installs it); source=browser captures all requests incl. static assets via webRequest. format=har exports HAR 1.2.',
     {
       clear: z.boolean().optional().default(false).describe('Clear captured requests after reading'),
+      source: z.enum(['page', 'browser']).optional().default('page').describe('page = fetch/XHR hook; browser = all requests incl. static assets via webRequest'),
+      format: z.enum(['json', 'har']).optional().default('json').describe('Output format'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ clear, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { clear, tab_id });
+    async ({ clear, source, format, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
+      const out = format === 'har' ? toHar(data.requests ?? []) : data;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify(out, null, 2),
         }],
       };
     }
@@ -733,6 +746,87 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, bypass_cache, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- upload_file ---
+  server.tool(
+    'upload_file',
+    'Set a file on an input[type=file] element. Reads the file from the server filesystem and injects it via DataTransfer (max 10MB).',
+    {
+      selector: z.string().describe('CSS selector of the file input'),
+      path: z.string().describe('Absolute path of the file on the server machine'),
+      mime_type: z.string().optional().describe('MIME type (default: inferred from extension)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, path, mime_type, tab_id }) => {
+      const buf = await readFile(path);
+      if (buf.length > 10 * 1024 * 1024) throw new Error(`File too large: ${buf.length} bytes (max 10MB)`);
+      const mime = mime_type || MIME_BY_EXT[extname(path).toLowerCase()] || 'application/octet-stream';
+      const data = await wsManager.sendCommand(MessageType.UPLOAD_FILE, {
+        selector, name: basename(path), mime_type: mime, content_b64: buf.toString('base64'), tab_id,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- wait_for_navigation ---
+  server.tool(
+    'wait_for_navigation',
+    'Wait for the tab to finish navigating (e.g. after a click that triggers a page load). Resolves when tab status is complete.',
+    {
+      timeout: z.number().optional().default(15000).describe('Max wait in ms'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ timeout, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- wait_for_network_idle ---
+  server.tool(
+    'wait_for_network_idle',
+    'Wait until no XHR/fetch requests are in flight for idle_ms. Useful after actions that trigger async loading.',
+    {
+      idle_ms: z.number().optional().default(500).describe('Quiet period in ms'),
+      timeout: z.number().optional().default(15000).describe('Max wait in ms'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ idle_ms, timeout, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms, timeout, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- handle_dialogs ---
+  server.tool(
+    'handle_dialogs',
+    'Auto-handle JS dialogs (alert/confirm/prompt): accept or dismiss future dialogs, log intercepted ones. action=reset restores native dialogs and returns the log. Does not cover beforeunload or browser-native dialogs.',
+    {
+      action: z.enum(['accept', 'dismiss', 'reset']).optional().default('accept').describe('Policy for future dialogs, or reset'),
+      prompt_text: z.string().optional().describe('Text returned by window.prompt when accepting'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ action, prompt_text, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.HANDLE_DIALOGS, { action, prompt_text, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- find_text ---
+  server.tool(
+    'find_text',
+    'Find text occurrences on the page. Returns parent element selector, surrounding context, visibility and page position for each match.',
+    {
+      text: z.string().describe('Text to search for'),
+      case_sensitive: z.boolean().optional().default(false).describe('Case-sensitive match'),
+      max_results: z.number().optional().default(20).describe('Max matches to return'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ text, case_sensitive, max_results, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );

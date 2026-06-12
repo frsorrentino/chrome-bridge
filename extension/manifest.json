@@ -10,7 +10,8 @@
     "alarms",
     "storage",
     "cookies",
-    "webNavigation"
+    "webNavigation",
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"

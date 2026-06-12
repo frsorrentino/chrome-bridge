@@ -40,6 +40,11 @@ export const MessageType = Object.freeze({
   PRESS_KEY:            'press_key',
   GET_FRAMES:           'get_frames',
   TAB_ACTION:           'tab_action',
+  UPLOAD_FILE:           'upload_file',
+  WAIT_FOR_NAVIGATION:   'wait_for_navigation',
+  WAIT_FOR_NETWORK_IDLE: 'wait_for_network_idle',
+  HANDLE_DIALOGS:        'handle_dialogs',
+  FIND_TEXT:             'find_text',
 
   // Risposte (extension → server)
   RESULT: 'result',
@@ -96,6 +101,9 @@ export function createCommand(type, params = {}) {
 export function getTimeout(type) {
   if (type === MessageType.SCREENSHOT || type === MessageType.ELEMENT_SCREENSHOT) return SCREENSHOT_TIMEOUT_MS;
   if (type === MessageType.FULL_PAGE_SCREENSHOT) return 120000;
-  if (type === MessageType.WAIT_FOR_ELEMENT) return 60000;
+  if (type === MessageType.WAIT_FOR_ELEMENT
+    || type === MessageType.WAIT_FOR_NAVIGATION
+    || type === MessageType.WAIT_FOR_NETWORK_IDLE
+    || type === MessageType.UPLOAD_FILE) return 60000;
   return COMMAND_TIMEOUT_MS;
 }

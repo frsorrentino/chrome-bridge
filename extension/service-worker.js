@@ -223,6 +223,16 @@ async function executeCommand(msg) {
       return await cmdGetFrames(params);
     case 'tab_action':
       return await cmdTabAction(params);
+    case 'upload_file':
+      return await cmdUploadFile(params);
+    case 'wait_for_navigation':
+      return await cmdWaitForNavigation(params);
+    case 'wait_for_network_idle':
+      return await cmdWaitForNetworkIdle(params);
+    case 'handle_dialogs':
+      return await cmdHandleDialogs(params);
+    case 'find_text':
+      return await cmdFindText(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -849,76 +859,100 @@ async function cmdReadConsole({ clear = false, level = 'all', tab_id }) {
 
 // --- DevTools: monitor_network (stateful) ---
 
-async function cmdMonitorNetwork({ clear = false, tab_id }) {
-  const tabId = await resolveTabId(tab_id);
-  const needsInjection = !injectedTabs.network.has(tabId);
+async function ensureNetworkHook(tabId) {
+  if (injectedTabs.network.has(tabId)) return;
 
-  if (needsInjection) {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        if (window.__chromeBridge_networkHooked) return;
-        window.__chromeBridge_networkHooked = true;
-        window.__chromeBridge_networkRequests = [];
-        const MAX = 1000;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      if (window.__chromeBridge_networkHooked) return;
+      window.__chromeBridge_networkHooked = true;
+      window.__chromeBridge_networkRequests = [];
+      window.__chromeBridge_inflight = 0;
+      window.__chromeBridge_lastNetActivity = Date.now();
+      const MAX = 1000;
 
-        // --- Patch fetch ---
-        const origFetch = window.fetch.bind(window);
-        window.fetch = async (...args) => {
-          const req = args[0];
-          const url = typeof req === 'string' ? req : req?.url || String(req);
-          const method = (args[1]?.method || (req?.method) || 'GET').toUpperCase();
-          const entry = { type: 'fetch', method, url, startTime: Date.now(), status: null, duration: null, error: null };
-          try {
-            const resp = await origFetch(...args);
-            entry.status = resp.status;
-            entry.duration = Date.now() - entry.startTime;
-            if (window.__chromeBridge_networkRequests.length < MAX) {
-              window.__chromeBridge_networkRequests.push(entry);
-            }
-            return resp;
-          } catch (err) {
-            entry.error = err.message;
-            entry.duration = Date.now() - entry.startTime;
-            if (window.__chromeBridge_networkRequests.length < MAX) {
-              window.__chromeBridge_networkRequests.push(entry);
-            }
-            throw err;
+      // --- Patch fetch ---
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const req = args[0];
+        const url = typeof req === 'string' ? req : req?.url || String(req);
+        const method = (args[1]?.method || (req?.method) || 'GET').toUpperCase();
+        const entry = { type: 'fetch', method, url, startTime: Date.now(), status: null, duration: null, error: null };
+        window.__chromeBridge_inflight += 1;
+        window.__chromeBridge_lastNetActivity = Date.now();
+        try {
+          const resp = await origFetch(...args);
+          entry.status = resp.status;
+          entry.duration = Date.now() - entry.startTime;
+          if (window.__chromeBridge_networkRequests.length < MAX) {
+            window.__chromeBridge_networkRequests.push(entry);
           }
-        };
+          window.__chromeBridge_inflight -= 1;
+          window.__chromeBridge_lastNetActivity = Date.now();
+          return resp;
+        } catch (err) {
+          entry.error = err.message;
+          entry.duration = Date.now() - entry.startTime;
+          if (window.__chromeBridge_networkRequests.length < MAX) {
+            window.__chromeBridge_networkRequests.push(entry);
+          }
+          window.__chromeBridge_inflight -= 1;
+          window.__chromeBridge_lastNetActivity = Date.now();
+          throw err;
+        }
+      };
 
-        // --- Patch XMLHttpRequest ---
-        const OrigXHR = window.XMLHttpRequest;
-        const origOpen = OrigXHR.prototype.open;
-        const origSend = OrigXHR.prototype.send;
-        OrigXHR.prototype.open = function (method, url, ...rest) {
-          this.__cb_method = method;
-          this.__cb_url = url;
-          return origOpen.call(this, method, url, ...rest);
-        };
-        OrigXHR.prototype.send = function (...args) {
-          const entry = { type: 'xhr', method: (this.__cb_method || 'GET').toUpperCase(), url: this.__cb_url || '', startTime: Date.now(), status: null, duration: null, error: null };
-          this.addEventListener('load', () => {
-            entry.status = this.status;
-            entry.duration = Date.now() - entry.startTime;
-            if (window.__chromeBridge_networkRequests.length < MAX) {
-              window.__chromeBridge_networkRequests.push(entry);
-            }
-          });
-          this.addEventListener('error', () => {
-            entry.error = 'Network error';
-            entry.duration = Date.now() - entry.startTime;
-            if (window.__chromeBridge_networkRequests.length < MAX) {
-              window.__chromeBridge_networkRequests.push(entry);
-            }
-          });
-          return origSend.apply(this, args);
-        };
-      },
-      world: 'MAIN',
-    });
-    injectedTabs.network.add(tabId);
+      // --- Patch XMLHttpRequest ---
+      const OrigXHR = window.XMLHttpRequest;
+      const origOpen = OrigXHR.prototype.open;
+      const origSend = OrigXHR.prototype.send;
+      OrigXHR.prototype.open = function (method, url, ...rest) {
+        this.__cb_method = method;
+        this.__cb_url = url;
+        return origOpen.call(this, method, url, ...rest);
+      };
+      OrigXHR.prototype.send = function (...args) {
+        const entry = { type: 'xhr', method: (this.__cb_method || 'GET').toUpperCase(), url: this.__cb_url || '', startTime: Date.now(), status: null, duration: null, error: null };
+        this.addEventListener('load', () => {
+          entry.status = this.status;
+          entry.duration = Date.now() - entry.startTime;
+          if (window.__chromeBridge_networkRequests.length < MAX) {
+            window.__chromeBridge_networkRequests.push(entry);
+          }
+        });
+        this.addEventListener('error', () => {
+          entry.error = 'Network error';
+          entry.duration = Date.now() - entry.startTime;
+          if (window.__chromeBridge_networkRequests.length < MAX) {
+            window.__chromeBridge_networkRequests.push(entry);
+          }
+        });
+        // loadend copre load, error e abort: traccia sempre la fine dell'in-flight
+        this.addEventListener('loadend', () => {
+          window.__chromeBridge_inflight -= 1;
+          window.__chromeBridge_lastNetActivity = Date.now();
+        });
+        window.__chromeBridge_inflight += 1;
+        window.__chromeBridge_lastNetActivity = Date.now();
+        return origSend.apply(this, args);
+      };
+    },
+    world: 'MAIN',
+  });
+  injectedTabs.network.add(tabId);
+}
+
+async function cmdMonitorNetwork({ clear = false, source = 'page', tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  if (source === 'browser') {
+    const requests = browserNetLog.get(tabId) ?? [];
+    if (clear) browserNetLog.set(tabId, []);
+    return { count: requests.length, requests: [...requests] };
   }
+
+  await ensureNetworkHook(tabId);
 
   // Leggi le richieste
   const results = await chrome.scripting.executeScript({
@@ -1901,6 +1935,202 @@ async function cmdGetFrames({ tab_id }) {
   };
 }
 
+// --- upload_file ---
+
+async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  if (!content_b64) throw new Error('Missing required parameter: content_b64');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, fname, mime, b64) => {
+      const el = document.querySelector(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      if (!(el instanceof HTMLInputElement) || el.type !== 'file') throw new Error('Element is not an input[type=file]');
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const file = new File([bytes], fname, { type: mime });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.files = dt.files;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { uploaded: fname, size: bytes.length, mime };
+    },
+    args: [selector, name, mime_type, content_b64],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { uploaded: false };
+}
+
+// --- wait_for_navigation ---
+
+async function cmdWaitForNavigation({ timeout = 15000, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const start = Date.now();
+  const tab = await chrome.tabs.get(tabId);
+
+  if (tab.status === 'complete') {
+    // Attendi che una navigazione parta (entro min(timeout, 5s))
+    const started = await new Promise((resolve) => {
+      const listener = (id, info) => {
+        if (id === tabId && info.status === 'loading') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve(true);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(false); }, Math.min(timeout, 5000));
+    });
+    if (!started) {
+      const t = await chrome.tabs.get(tabId);
+      return { navigated: false, url: t.url, note: 'No navigation started' };
+    }
+  }
+
+  await waitForComplete(tabId, timeout - (Date.now() - start));
+  const t = await chrome.tabs.get(tabId);
+  return { navigated: true, url: t.url, title: t.title, elapsed: Date.now() - start };
+}
+
+// --- wait_for_network_idle ---
+
+async function cmdWaitForNetworkIdle({ idle_ms = 500, timeout = 15000, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  await ensureNetworkHook(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (idleMs, tout) => new Promise((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        const inflight = window.__chromeBridge_inflight || 0;
+        const last = window.__chromeBridge_lastNetActivity || start;
+        if (inflight === 0 && Date.now() - last >= idleMs) {
+          resolve({ idle: true, elapsed: Date.now() - start });
+          return;
+        }
+        if (Date.now() - start >= tout) {
+          resolve({ idle: false, inflight, elapsed: Date.now() - start });
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    }),
+    args: [idle_ms, timeout],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { idle: false };
+}
+
+// --- handle_dialogs ---
+
+async function cmdHandleDialogs({ action = 'accept', prompt_text, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (act, promptText) => {
+      if (act === 'reset') {
+        if (window.__chromeBridge_origDialogs) {
+          window.alert = window.__chromeBridge_origDialogs.alert;
+          window.confirm = window.__chromeBridge_origDialogs.confirm;
+          window.prompt = window.__chromeBridge_origDialogs.prompt;
+          delete window.__chromeBridge_origDialogs;
+        }
+        const log = window.__chromeBridge_dialogs || [];
+        window.__chromeBridge_dialogs = [];
+        return { reset: true, dialogs: log };
+      }
+      if (!window.__chromeBridge_origDialogs) {
+        window.__chromeBridge_origDialogs = { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
+        window.__chromeBridge_dialogs = [];
+      }
+      window.__chromeBridge_dialogPolicy = { action: act, promptText: promptText ?? null };
+      const push = (type, message) => {
+        window.__chromeBridge_dialogs.push({ type, message: String(message ?? ''), timestamp: Date.now() });
+        if (window.__chromeBridge_dialogs.length > 100) window.__chromeBridge_dialogs.shift();
+      };
+      window.alert = (msg) => { push('alert', msg); };
+      window.confirm = (msg) => { push('confirm', msg); return window.__chromeBridge_dialogPolicy.action === 'accept'; };
+      window.prompt = (msg, def) => {
+        push('prompt', msg);
+        const p = window.__chromeBridge_dialogPolicy;
+        return p.action === 'accept' ? (p.promptText ?? def ?? '') : null;
+      };
+      return { installed: true, policy: act, dialogs: window.__chromeBridge_dialogs };
+    },
+    args: [action, prompt_text ?? null],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- find_text ---
+
+async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab_id }) {
+  if (!text) throw new Error('Missing required parameter: text');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (needleRaw, caseSensitive, maxResults) => {
+      const needle = caseSensitive ? needleRaw : needleRaw.toLowerCase();
+      const matches = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => {
+          const p = n.parentElement;
+          if (!p || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const selectorFor = (el) => {
+        if (el.id) return `#${el.id}`;
+        const tag = el.tagName.toLowerCase();
+        const cls = el.classList.length ? `.${[...el.classList].slice(0, 2).join('.')}` : '';
+        return `${tag}${cls}`;
+      };
+      let node;
+      while ((node = walker.nextNode()) && matches.length < maxResults) {
+        const hay = caseSensitive ? node.textContent : node.textContent.toLowerCase();
+        let idx = hay.indexOf(needle);
+        while (idx !== -1 && matches.length < maxResults) {
+          const parent = node.parentElement;
+          const rect = parent.getBoundingClientRect();
+          const ctx = node.textContent.substring(Math.max(0, idx - 40), idx + needleRaw.length + 40);
+          matches.push({
+            selector: selectorFor(parent),
+            context: ctx.trim(),
+            visible: rect.width > 0 && rect.height > 0,
+            position: { x: Math.round(rect.x), y: Math.round(rect.y + window.scrollY) },
+          });
+          idx = hay.indexOf(needle, idx + 1);
+        }
+      }
+      return { count: matches.length, matches };
+    },
+    args: [text, case_sensitive, max_results],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, matches: [] };
+}
+
+// --- Browser-level network log (webRequest) ---
+const browserNetLog = new Map(); // tabId → array
+
+function pushNetEntry(tabId, entry) {
+  if (tabId < 0) return;
+  let arr = browserNetLog.get(tabId);
+  if (!arr) { arr = []; browserNetLog.set(tabId, arr); }
+  if (arr.length >= 500) arr.shift();
+  arr.push(entry);
+}
+
+chrome.webRequest.onCompleted.addListener((d) => {
+  pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: d.statusCode, startTime: d.timeStamp, duration: null, fromCache: d.fromCache, ip: d.ip || null });
+}, { urls: ['<all_urls>'] });
+
+chrome.webRequest.onErrorOccurred.addListener((d) => {
+  pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: 0, startTime: d.timeStamp, duration: null, error: d.error });
+}, { urls: ['<all_urls>'] });
+
 // --- Tab lifecycle: cleanup injection state ---
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -1911,6 +2141,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.network.delete(tabId);
+  browserNetLog.delete(tabId);
 });
 
 // --- Avvia la connessione ---
