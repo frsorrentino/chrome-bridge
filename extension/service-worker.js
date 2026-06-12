@@ -1262,6 +1262,8 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     world: 'MAIN',
   });
 
+  if (!shots.length) throw new Error('No captures (page dimensions unavailable)');
+
   if (!stitch) {
     return {
       captures: shots.map((s) => s.dataUrl.replace(/^data:image\/png;base64,/, '')),
@@ -1303,7 +1305,7 @@ async function cmdElementScreenshot({ selector, tab_id }) {
     func: (sel) => {
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
-      el.scrollIntoView({ block: 'center', inline: 'center' });
+      el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
       const r = el.getBoundingClientRect();
       return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
     },
@@ -1313,7 +1315,7 @@ async function cmdElementScreenshot({ selector, tab_id }) {
   const rect = res?.[0]?.result;
   if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
 
-  // Delay per rendering post-scroll (scrollIntoView default è istantaneo)
+  // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
   await new Promise((r) => setTimeout(r, 300));
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
   const bitmap = await dataUrlToBitmap(dataUrl);
