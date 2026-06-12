@@ -3094,7 +3094,7 @@ async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab
       const stableSelector = (el) => {
         if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) return `#${el.id}`;
         const testid = el.getAttribute('data-testid');
-        if (testid) return `[data-testid="${testid}"]`;
+        if (testid) return `[data-testid="${testid.replace(/"/g, '\\"')}"]`;
         const parts = [];
         let node = el;
         while (node && node.nodeType === 1 && node !== document.documentElement) {
@@ -3210,7 +3210,7 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, max_scrolls 
 
           if (mode === 'network_idle') {
             const inflight = window.__chromeBridge_inflight || 0;
-            const last = window.__chromeBridge_lastNetActivity || 0;
+            const last = window.__chromeBridge_lastNetActivity || Date.now();
             if (inflight === 0 && Date.now() - last >= settleMs) { resolve({ stopped_reason: 'network_idle', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
           }
 
