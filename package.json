@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/test-devtools.js"
+    "test": "node test/test-devtools.js",
+    "test:unit": "node --test 'test/unit/*.test.js'"
   },
   "keywords": [
     "mcp",

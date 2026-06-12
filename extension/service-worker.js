@@ -51,6 +51,7 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[chrome-bridge] Connected to MCP server');
+    ws.send(JSON.stringify({ type: 'ext_init' }));
     setConnectionState('connected');
     reconnectDelay = RECONNECT_BASE_MS; // Reset backoff
   };

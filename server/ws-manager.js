@@ -14,13 +14,13 @@
  */
 
 import WebSocket, { WebSocketServer } from 'ws';
-import { DEFAULT_PORT, PING_INTERVAL_MS, getTimeout, createCommand, MessageType } from './protocol.js';
-
-const RELAY_INIT = 'relay_init';
+import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, getTimeout, createCommand, MessageType } from './protocol.js';
 
 export class WSManager {
-  constructor(port = DEFAULT_PORT) {
+  constructor(port = DEFAULT_PORT, opts = {}) {
     this.port = port;
+    this.identTimeout = opts.identTimeout ?? IDENT_TIMEOUT_MS;
+    this.token = opts.token ?? process.env.CHROME_BRIDGE_TOKEN ?? null;
     this.mode = null;            // 'primary' | 'relay'
 
     // --- primary mode ---
@@ -152,55 +152,76 @@ export class WSManager {
         reject(err);
       });
 
-      this.wss.on('connection', (ws) => {
-        this._handleNewConnection(ws);
+      this.wss.on('connection', (ws, req) => {
+        this._handleNewConnection(ws, req);
       });
     });
   }
 
   /**
-   * Gestisce una nuova connessione WebSocket.
-   * Attende il primo messaggio per distinguere relay client da Chrome extension.
+   * Ogni connessione DEVE identificarsi col primo messaggio:
+   * - { type: 'ext_init', token? }  → estensione Chrome (Origin chrome-extension://)
+   * - { type: 'relay_init' }        → relay client (solo loopback)
+   * Connessioni mute o non valide vengono terminate.
    */
-  _handleNewConnection(ws) {
+  _handleNewConnection(ws, req) {
+    const origin = req.headers.origin || '';
+    const remote = req.socket.remoteAddress || '';
+    const isLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
     let identified = false;
+
+    const idTimer = setTimeout(() => {
+      if (!identified) {
+        console.error(`[chrome-bridge] Unidentified connection from ${remote} — terminating`);
+        ws.terminate();
+      }
+    }, this.identTimeout);
 
     const onFirstMessage = (raw) => {
       let msg;
       try {
         msg = JSON.parse(raw.toString());
       } catch {
-        console.error('[chrome-bridge] Invalid JSON from new connection');
+        clearTimeout(idTimer);
+        ws.terminate();
         return;
       }
 
-      if (msg.type === RELAY_INIT) {
-        // È un relay client (altra istanza MCP)
-        identified = true;
-        ws.removeListener('message', onFirstMessage);
+      identified = true;
+      clearTimeout(idTimer);
+      ws.removeListener('message', onFirstMessage);
+
+      if (msg.type === MessageType.RELAY_INIT) {
+        if (!isLoopback) {
+          console.error(`[chrome-bridge] relay_init from non-loopback ${remote} — rejected`);
+          ws.terminate();
+          return;
+        }
         this._setupRelayClient(ws);
         return;
       }
 
-      // È l'estensione Chrome (primo messaggio è un pong o qualcosa d'altro)
-      identified = true;
-      ws.removeListener('message', onFirstMessage);
-      this._setupChromeClient(ws);
-      // Processa il messaggio corrente
-      this._handleChromeMessage(msg);
+      if (msg.type === MessageType.EXT_INIT) {
+        if (origin && !origin.startsWith('chrome-extension://')) {
+          console.error(`[chrome-bridge] ext_init with origin ${origin} — rejected`);
+          ws.terminate();
+          return;
+        }
+        if (this.token && msg.token !== this.token) {
+          console.error('[chrome-bridge] ext_init with invalid token — rejected');
+          ws.terminate();
+          return;
+        }
+        this._setupChromeClient(ws);
+        return;
+      }
+
+      console.error(`[chrome-bridge] Unexpected first message type "${msg.type}" — rejected`);
+      ws.terminate();
     };
 
     ws.on('message', onFirstMessage);
-
-    // Se non riceve messaggi entro 5s, assume sia Chrome extension
-    // (Chrome extension potrebbe non inviare nulla fino a un ping)
-    setTimeout(() => {
-      if (!identified) {
-        identified = true;
-        ws.removeListener('message', onFirstMessage);
-        this._setupChromeClient(ws);
-      }
-    }, 5000);
+    ws.on('close', () => clearTimeout(idTimer));
   }
 
   _setupChromeClient(ws) {
@@ -336,7 +357,7 @@ export class WSManager {
 
       this.relaySocket.on('open', () => {
         // Identifica questa connessione come relay
-        this.relaySocket.send(JSON.stringify({ type: RELAY_INIT }));
+        this.relaySocket.send(JSON.stringify({ type: MessageType.RELAY_INIT }));
         console.error(`[chrome-bridge] Connected as relay to existing server on port ${this.port}`);
         resolve();
       });
