@@ -9,6 +9,11 @@ import { z } from 'zod';
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 
+function truncateText(text, max) {
+  if (typeof text !== 'string' || text.length <= max) return text;
+  return text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — use max_length to raise the limit]`;
+}
+
 /**
  * Registra tutti i tool MCP.
  *
@@ -107,15 +112,16 @@ export function registerTools(server, wsManager) {
     'execute_js',
     'Execute JavaScript code in a Chrome tab page context',
     {
-      code:   z.string().describe('JavaScript code to execute'),
-      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      code:       z.string().describe('JavaScript code to execute'),
+      tab_id:     z.number().optional().describe('Tab ID (default: active tab)'),
+      max_length: z.number().optional().default(20000).describe('Max output chars (default 20000)'),
     },
-    async ({ code, tab_id }) => {
+    async ({ code, tab_id, max_length }) => {
       const data = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code, tab_id });
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: truncateText(JSON.stringify(data, null, 2), max_length),
         }],
       };
     }
@@ -165,15 +171,16 @@ export function registerTools(server, wsManager) {
     'read_page',
     'Read the content of a Chrome tab page',
     {
-      mode:   z.enum(['text', 'html', 'accessibility']).default('text').describe('Content mode: text (visible text), html (full HTML), accessibility (a11y tree)'),
-      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      mode:       z.enum(['text', 'html', 'accessibility']).default('text').describe('Content mode: text (visible text), html (full HTML), accessibility (a11y tree)'),
+      tab_id:     z.number().optional().describe('Tab ID (default: active tab)'),
+      max_length: z.number().optional().default(50000).describe('Max output chars (default 50000)'),
     },
-    async ({ mode, tab_id }) => {
+    async ({ mode, tab_id, max_length }) => {
       const data = await wsManager.sendCommand(MessageType.READ_PAGE, { mode, tab_id });
       return {
         content: [{
           type: 'text',
-          text: typeof data === 'string' ? data : JSON.stringify(data, null, 2),
+          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data, null, 2), max_length),
         }],
       };
     }
