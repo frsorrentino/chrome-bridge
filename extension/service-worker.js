@@ -1587,9 +1587,19 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
     func: (k, sel, mods) => {
       const el = sel ? document.querySelector(sel) : document.activeElement || document.body;
       if (sel && !document.querySelector(sel)) throw new Error(`Element not found: ${sel}`);
+      const keyToCode = (kk) => {
+        if (/^[a-z]$/i.test(kk)) return `Key${kk.toUpperCase()}`;
+        if (/^[0-9]$/.test(kk)) return `Digit${kk}`;
+        const map = {
+          ' ': 'Space', '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
+          '\\': 'Backslash', ';': 'Semicolon', "'": 'Quote', ',': 'Comma', '.': 'Period',
+          '/': 'Slash', '`': 'Backquote',
+        };
+        return map[kk] || kk;
+      };
       const opts = {
         key: k,
-        code: k.length === 1 ? `Key${k.toUpperCase()}` : k,
+        code: keyToCode(k),
         bubbles: true,
         cancelable: true,
         ctrlKey: mods.ctrl,
