@@ -31,7 +31,7 @@ export const MessageType = Object.freeze({
   FULL_PAGE_SCREENSHOT: 'full_page_screenshot',
   HIGHLIGHT_ELEMENTS:   'highlight_elements',
   ACCESSIBILITY_AUDIT:  'accessibility_audit',
-  CHECK_LINKS:          'check_links',
+  COLLECT_LINKS:        'collect_links',
   MEASURE_SPACING:      'measure_spacing',
   WATCH_DOM:            'watch_dom',
   EMULATE_MEDIA:        'emulate_media',
@@ -89,7 +89,7 @@ export function createCommand(type, params = {}) {
  */
 export function getTimeout(type) {
   if (type === MessageType.SCREENSHOT) return SCREENSHOT_TIMEOUT_MS;
-  if (type === MessageType.FULL_PAGE_SCREENSHOT || type === MessageType.CHECK_LINKS) return 120000;
+  if (type === MessageType.FULL_PAGE_SCREENSHOT) return 120000;
   if (type === MessageType.WAIT_FOR_ELEMENT) return 60000;
   return COMMAND_TIMEOUT_MS;
 }

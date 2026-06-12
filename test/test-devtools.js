@@ -352,13 +352,16 @@ async function testAccessibilityAudit(tabId) {
   }
 }
 
-async function testCheckLinks(tabId) {
-  const name = 'check_links';
+async function testCollectLinks(tabId) {
+  const name = 'collect_links';
   try {
-    const data = await wsManager.sendCommand(MessageType.CHECK_LINKS, { scope: 'all', max_links: 5, timeout: 5000, tab_id: tabId });
-    if (typeof data.total !== 'number') throw new Error('Missing total');
-    if (typeof data.checked !== 'number') throw new Error('Missing checked');
-    if (!Array.isArray(data.results)) throw new Error('results not array');
+    // L'estensione raccoglie solo i link dal DOM; la verifica HTTP avviene lato server (link-checker.js)
+    const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope: 'all', max_links: 5, tab_id: tabId });
+    if (!Array.isArray(data.links)) throw new Error('links not array');
+    if (typeof data.totalAnchors !== 'number') throw new Error('Missing totalAnchors');
+    if (data.links.length > 0 && (typeof data.links[0].url !== 'string' || typeof data.links[0].text !== 'string')) {
+      throw new Error('link entry missing url/text');
+    }
     ok(name);
   } catch (e) {
     fail(name, e.message);
@@ -497,7 +500,7 @@ async function main() {
     await testFullPageScreenshot(testTabId);
     await testHighlightElements(testTabId);
     await testAccessibilityAudit(testTabId);
-    await testCheckLinks(testTabId);
+    await testCollectLinks(testTabId);
     await testMeasureSpacing(testTabId);
     await testWatchDom(testTabId);
     await testEmulateMedia(testTabId);

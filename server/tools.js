@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { MessageType } from './protocol.js';
+import { checkLinksBatch } from './link-checker.js';
 
 /**
  * Registra tutti i tool MCP.
@@ -532,20 +533,22 @@ export function registerTools(server, wsManager) {
   // --- check_links ---
   server.tool(
     'check_links',
-    'Check all links on the page for broken URLs (HTTP status >= 400). Supports scope filtering.',
+    'Check links on the page for broken URLs. Links are collected in the page, then verified server-side (no CORS limits, real HTTP status for external links too).',
     {
-      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all').describe('Link scope: same-origin, external, or all'),
-      selector: z.string().optional().default('a[href]').describe('CSS selector to find links (default: a[href])'),
+      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all').describe('Link scope'),
+      selector: z.string().optional().default('a[href]').describe('CSS selector to find links'),
       timeout: z.number().optional().default(5000).describe('Per-link fetch timeout in ms'),
       max_links: z.number().optional().default(50).describe('Max links to check'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
     async ({ scope, selector, timeout, max_links, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.CHECK_LINKS, { scope, selector, timeout, max_links, tab_id });
+      const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
+      const results = await checkLinksBatch(data.links, timeout);
+      const broken = results.filter((r) => r.broken).length;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify({ total: data.links.length, checked: results.length, broken, results }, null, 2),
         }],
       };
     }

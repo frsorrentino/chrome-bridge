@@ -179,8 +179,8 @@ async function executeCommand(msg) {
       return await cmdHighlightElements(params);
     case 'accessibility_audit':
       return await cmdAccessibilityAudit(params);
-    case 'check_links':
-      return await cmdCheckLinks(params);
+    case 'collect_links':
+      return await cmdCollectLinks(params);
     case 'measure_spacing':
       return await cmdMeasureSpacing(params);
     case 'watch_dom':
@@ -1282,69 +1282,37 @@ async function cmdAccessibilityAudit({ scope, checks = ['all'], tab_id }) {
   return results?.[0]?.result ?? { summary: { total: 0, errors: 0, warnings: 0 }, violations: [] };
 }
 
-// --- check_links ---
+// --- collect_links ---
 
-async function cmdCheckLinks({ scope = 'all', selector = 'a[href]', timeout = 5000, max_links = 50, tab_id }) {
+async function cmdCollectLinks({ scope = 'all', selector = 'a[href]', max_links = 50, tab_id }) {
   const tabId = await resolveTabId(tab_id);
-
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (sel, linkScope, perLinkTimeout, maxLinks) => {
+    func: (sel, linkScope, maxLinks) => {
       const origin = location.origin;
       const skipPatterns = /^(javascript:|mailto:|tel:|#|data:)/i;
       const anchors = [...document.querySelectorAll(sel)].slice(0, 500);
       const seen = new Set();
       const links = [];
-
       for (const a of anchors) {
         const href = a.href;
         if (!href || skipPatterns.test(href) || seen.has(href)) continue;
         seen.add(href);
-
         try {
           const url = new URL(href);
           const isSameOrigin = url.origin === origin;
           if (linkScope === 'same-origin' && !isSameOrigin) continue;
           if (linkScope === 'external' && isSameOrigin) continue;
           links.push({ url: href, text: a.textContent.trim().substring(0, 100) });
-        } catch {
-          continue;
-        }
-
+        } catch { continue; }
         if (links.length >= maxLinks) break;
       }
-
-      const checkResults = await Promise.allSettled(links.map(async ({ url, text }) => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), perLinkTimeout);
-        try {
-          const resp = await fetch(url, { method: 'HEAD', mode: 'no-cors', signal: controller.signal });
-          clearTimeout(timer);
-          // no-cors: status=0 (opaque), not broken
-          return { url, text, status: resp.status, ok: resp.ok || resp.status === 0, broken: resp.status >= 400 };
-        } catch (headErr) {
-          clearTimeout(timer);
-          // Retry with GET for servers that reject HEAD
-          try {
-            const controller2 = new AbortController();
-            const timer2 = setTimeout(() => controller2.abort(), perLinkTimeout);
-            const resp = await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller2.signal });
-            clearTimeout(timer2);
-            return { url, text, status: resp.status, ok: resp.ok || resp.status === 0, broken: resp.status >= 400 };
-          } catch (getErr) {
-            return { url, text, status: 0, ok: false, broken: false, error: getErr.message || 'Network error' };
-          }
-        }
-      }));
-
-      const mapped = checkResults.map((r) => r.status === 'fulfilled' ? r.value : { url: '?', status: 0, ok: false, broken: false, error: r.reason?.message });
-      const broken = mapped.filter((r) => r.broken).length;
-      return { total: links.length, checked: mapped.length, broken, results: mapped };
+      return { links, totalAnchors: anchors.length };
     },
-    args: [selector, scope, timeout, max_links],
+    args: [selector, scope, max_links],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { total: 0, checked: 0, broken: 0, results: [] };
+  return results?.[0]?.result ?? { links: [], totalAnchors: 0 };
 }
 
 // --- measure_spacing ---
