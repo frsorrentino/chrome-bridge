@@ -217,6 +217,8 @@ async function executeCommand(msg) {
       return await cmdHover(params);
     case 'press_key':
       return await cmdPressKey(params);
+    case 'get_frames':
+      return await cmdGetFrames(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -230,6 +232,14 @@ async function resolveTabId(tab_id) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) throw new Error('No active tab found');
   return tab.id;
+}
+
+// --- Utility: target per chrome.scripting con frame opzionale ---
+
+function scriptTarget(tabId, frame_id) {
+  const target = { tabId };
+  if (frame_id !== undefined && frame_id !== null) target.frameIds = [frame_id];
+  return target;
 }
 
 // --- Implementazione comandi ---
@@ -293,7 +303,7 @@ async function cmdScreenshot({ tab_id }) {
   return { image: base64 };
 }
 
-async function cmdExecuteJs({ code, tab_id }) {
+async function cmdExecuteJs({ code, tab_id, frame_id }) {
   if (!code) throw new Error('Missing required parameter: code');
   const tabId = await resolveTabId(tab_id);
 
@@ -302,7 +312,7 @@ async function cmdExecuteJs({ code, tab_id }) {
   // Fallback: MAIN world per accesso a variabili della pagina.
   try {
     const results = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: scriptTarget(tabId, frame_id),
       func: (codeStr) => {
         // In ISOLATED world, eval non è soggetto alla CSP della pagina
         try {
@@ -323,7 +333,7 @@ async function cmdExecuteJs({ code, tab_id }) {
     // Fallback: prova MAIN world (funziona se la pagina non ha CSP restrittiva)
     try {
       const results = await chrome.scripting.executeScript({
-        target: { tabId },
+        target: scriptTarget(tabId, frame_id),
         func: (codeStr) => {
           try {
             return eval(codeStr);
@@ -345,12 +355,12 @@ async function cmdExecuteJs({ code, tab_id }) {
   }
 }
 
-async function cmdClick({ selector, tab_id }) {
+async function cmdClick({ selector, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
@@ -384,13 +394,13 @@ async function cmdClick({ selector, tab_id }) {
   return results?.[0]?.result ?? { clicked: true };
 }
 
-async function cmdTypeText({ selector, text, tab_id }) {
+async function cmdTypeText({ selector, text, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   if (text === undefined) throw new Error('Missing required parameter: text');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel, txt) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
@@ -430,12 +440,12 @@ async function cmdTypeText({ selector, text, tab_id }) {
   return results?.[0]?.result ?? { typed: true };
 }
 
-async function cmdReadPage({ mode = 'text', tab_id }) {
+async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
   const tabId = await resolveTabId(tab_id);
 
   if (mode === 'html') {
     const results = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: scriptTarget(tabId, frame_id),
       func: () => document.documentElement.outerHTML,
       world: 'MAIN',
     });
@@ -445,7 +455,7 @@ async function cmdReadPage({ mode = 'text', tab_id }) {
   if (mode === 'accessibility') {
     // Ritorna una struttura semplificata dell'a11y tree
     const results = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: scriptTarget(tabId, frame_id),
       func: () => {
         function walk(el, depth = 0) {
           if (depth > 10) return '';
@@ -466,7 +476,7 @@ async function cmdReadPage({ mode = 'text', tab_id }) {
 
   // mode === 'text' (default)
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: () => document.body.innerText,
     world: 'MAIN',
   });
@@ -502,10 +512,10 @@ async function cmdCreateTab({ url, active = true }) {
 
 // --- DevTools: get_page_info ---
 
-async function cmdGetPageInfo({ tab_id }) {
+async function cmdGetPageInfo({ tab_id, frame_id }) {
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: () => {
       const metas = [...document.querySelectorAll('meta')].map((m) => ({
         name: m.getAttribute('name') || m.getAttribute('property') || null,
@@ -649,11 +659,11 @@ async function cmdGetPerformance({ tab_id }) {
 
 // --- DevTools: query_dom ---
 
-async function cmdQueryDom({ selector, properties, limit = 50, tab_id }) {
+async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel, props, lim) => {
       function deepQueryAll(sel) {
         if (!sel.includes('>>>')) return [...document.querySelectorAll(sel)];
@@ -707,12 +717,12 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id }) {
 
 // --- DevTools: modify_dom ---
 
-async function cmdModifyDom({ selector, action, name, value, className, tab_id }) {
+async function cmdModifyDom({ selector, action, name, value, className, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   if (!action) throw new Error('Missing required parameter: action');
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel, act, attrName, attrValue, cls) => {
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
@@ -914,13 +924,13 @@ async function cmdMonitorNetwork({ clear = false, tab_id }) {
 
 // --- wait_for_element ---
 
-async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, visible = false, tab_id }) {
+async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, visible = false, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
   const clampedInterval = Math.max(interval, 50);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel, tout, intv, vis) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
@@ -977,11 +987,11 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
 
 // --- scroll_to ---
 
-async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, tab_id }) {
+async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, tab_id, frame_id }) {
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel, sx, sy, beh, offY) => {
       if (sel) {
         const el = document.querySelector(sel);
@@ -1075,12 +1085,12 @@ async function cmdSetStorage({ type, action, key, value, path, domain, expires, 
 
 // --- fill_form ---
 
-async function cmdFillForm({ fields, submit_selector, tab_id }) {
+async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
   if (!fields || !Array.isArray(fields)) throw new Error('Missing required parameter: fields');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (flds, submitSel) => {
       const report = [];
       for (const { selector, value } of flds) {
@@ -1686,12 +1696,12 @@ async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, 
 
 // --- hover ---
 
-async function cmdHover({ selector, tab_id }) {
+async function cmdHover({ selector, tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (sel) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
@@ -1729,12 +1739,12 @@ async function cmdHover({ selector, tab_id }) {
 
 // --- press_key ---
 
-async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = false, meta = false, tab_id }) {
+async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = false, meta = false, tab_id, frame_id }) {
   if (!key) throw new Error('Missing required parameter: key');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId },
+    target: scriptTarget(tabId, frame_id),
     func: (k, sel, mods) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
@@ -1792,6 +1802,20 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { pressed: true };
+}
+
+// --- get_frames ---
+
+async function cmdGetFrames({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const frames = await chrome.webNavigation.getAllFrames({ tabId });
+  return {
+    frames: (frames || []).map((f) => ({
+      frameId: f.frameId,
+      parentFrameId: f.parentFrameId,
+      url: f.url,
+    })),
+  };
 }
 
 // --- Tab lifecycle: cleanup injection state ---

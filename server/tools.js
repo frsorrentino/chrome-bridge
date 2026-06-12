@@ -114,10 +114,11 @@ export function registerTools(server, wsManager) {
     {
       code:       z.string().describe('JavaScript code to execute'),
       tab_id:     z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id:   z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
       max_length: z.number().optional().default(20000).describe('Max output chars (default 20000)'),
     },
-    async ({ code, tab_id, max_length }) => {
-      const data = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code, tab_id });
+    async ({ code, tab_id, frame_id, max_length }) => {
+      const data = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -134,9 +135,10 @@ export function registerTools(server, wsManager) {
     {
       selector: z.string().describe('CSS selector of the element to click'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.CLICK, { selector, tab_id });
+    async ({ selector, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.CLICK, { selector, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -154,9 +156,10 @@ export function registerTools(server, wsManager) {
       selector: z.string().describe('CSS selector of the input element'),
       text:     z.string().describe('Text to type'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, text, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, tab_id });
+    async ({ selector, text, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -173,10 +176,11 @@ export function registerTools(server, wsManager) {
     {
       mode:       z.enum(['text', 'html', 'accessibility']).default('text').describe('Content mode: text (visible text), html (full HTML), accessibility (a11y tree)'),
       tab_id:     z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id:   z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
       max_length: z.number().optional().default(50000).describe('Max output chars (default 50000)'),
     },
-    async ({ mode, tab_id, max_length }) => {
-      const data = await wsManager.sendCommand(MessageType.READ_PAGE, { mode, tab_id });
+    async ({ mode, tab_id, frame_id, max_length }) => {
+      const data = await wsManager.sendCommand(MessageType.READ_PAGE, { mode, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -192,9 +196,10 @@ export function registerTools(server, wsManager) {
     'Get page metadata: meta tags, scripts, stylesheets, links, and forms',
     {
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_PAGE_INFO, { tab_id });
+    async ({ tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.GET_PAGE_INFO, { tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -250,9 +255,10 @@ export function registerTools(server, wsManager) {
       properties: z.array(z.string()).optional().describe('Computed style properties to include (e.g. ["color", "font-size"])'),
       limit: z.number().optional().default(50).describe('Max elements to return (default 50)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, properties, limit, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.QUERY_DOM, { selector, properties, limit, tab_id });
+    async ({ selector, properties, limit, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.QUERY_DOM, { selector, properties, limit, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -273,9 +279,10 @@ export function registerTools(server, wsManager) {
       value: z.string().optional().describe('Value to set (for setAttribute, setStyle, setTextContent)'),
       className: z.string().optional().describe('Class name (for addClass/removeClass)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, action, name, value, className, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector, action, name, value, className, tab_id });
+    async ({ selector, action, name, value, className, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector, action, name, value, className, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -372,9 +379,10 @@ export function registerTools(server, wsManager) {
       interval: z.number().optional().default(200).describe('Poll interval in ms (default 200, min 50)'),
       visible: z.boolean().optional().default(false).describe('Also require the element to be visible'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, timeout, interval, visible, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, { selector, timeout, interval, visible, tab_id });
+    async ({ selector, timeout, interval, visible, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, { selector, timeout, interval, visible, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -395,9 +403,10 @@ export function registerTools(server, wsManager) {
       behavior: z.enum(['smooth', 'instant', 'auto']).optional().default('auto').describe('Scroll behavior'),
       offset_y: z.number().optional().default(0).describe('Vertical offset in px (e.g. for fixed headers)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, x, y, behavior, offset_y, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id });
+    async ({ selector, x, y, behavior, offset_y, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -445,9 +454,10 @@ export function registerTools(server, wsManager) {
       })).describe('Array of {selector, value} pairs to fill'),
       submit_selector: z.string().optional().describe('CSS selector of submit button to click after filling'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ fields, submit_selector, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id });
+    async ({ fields, submit_selector, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -642,9 +652,10 @@ export function registerTools(server, wsManager) {
     {
       selector: z.string().describe('CSS selector of the element to hover'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.HOVER, { selector, tab_id });
+    async ({ selector, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.HOVER, { selector, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -666,15 +677,29 @@ export function registerTools(server, wsManager) {
       alt: z.boolean().optional().default(false).describe('Hold Alt'),
       meta: z.boolean().optional().default(false).describe('Hold Meta/Cmd'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+      frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ key, selector, ctrl, shift, alt, meta, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id });
+    async ({ key, selector, ctrl, shift, alt, meta, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
           text: JSON.stringify(data, null, 2),
         }],
       };
+    }
+  );
+
+  // --- get_frames ---
+  server.tool(
+    'get_frames',
+    'List all frames (main + iframes) in a tab with their frameId, parent and URL. Use frameId with the frame_id parameter of DOM tools.',
+    {
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.GET_FRAMES, { tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
 }
