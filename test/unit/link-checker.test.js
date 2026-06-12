@@ -14,6 +14,8 @@ before(async () => {
       if (req.method === 'HEAD') { res.writeHead(405); res.end(); return; }
       res.writeHead(200); res.end('ok'); return;
     }
+    // /slow: accept the connection but never send a response → triggers AbortController timeout
+    if (req.url === '/slow') { return; }
     res.writeHead(500); res.end();
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -40,4 +42,16 @@ test('errore di rete → broken con error', async () => {
   const results = await checkLinksBatch([{ url: 'http://127.0.0.1:1/x', text: 'dead' }], 1000);
   assert.equal(results[0].broken, true);
   assert.ok(results[0].error);
+});
+
+test('timeout → broken con error che contiene "timeout"', async () => {
+  const results = await checkLinksBatch([{ url: `${base}/slow`, text: 'slow' }], 300);
+  assert.equal(results[0].broken, true);
+  assert.match(results[0].error, /timeout/);
+});
+
+test('schema non supportato (ftp) → broken con Unsupported scheme', async () => {
+  const results = await checkLinksBatch([{ url: 'ftp://example.com/x', text: 'ftp' }], 500);
+  assert.equal(results[0].broken, true);
+  assert.equal(results[0].error, 'Unsupported scheme');
 });

@@ -170,7 +170,7 @@ chrome-bridge/
 - `execute_js` uses ISOLATED world by default (bypasses page CSP), with MAIN world fallback
 - `chrome.debugger` is not used (doesn't work on ChromeOS)
 - Stateful tools (`read_console`, `monitor_network`, `watch_dom`) inject monkey-patches on first call and auto-cleanup on tab navigation/close
-- `full_page_screenshot` and `check_links` have 120s timeout; `wait_for_element` has 60s
+- `full_page_screenshot` has 120s timeout; `wait_for_element` has 60s
 
 ## License
 

@@ -543,12 +543,13 @@ export function registerTools(server, wsManager) {
     },
     async ({ scope, selector, timeout, max_links, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
-      const results = await checkLinksBatch(data.links, timeout);
+      const links = data.links ?? [];
+      const results = await checkLinksBatch(links, timeout);
       const broken = results.filter((r) => r.broken).length;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ total: data.links.length, checked: results.length, broken, results }, null, 2),
+          text: JSON.stringify({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }, null, 2),
         }],
       };
     }
