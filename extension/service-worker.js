@@ -349,10 +349,20 @@ async function cmdTypeText({ selector, text, tab_id }) {
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.focus();
-      el.value = txt;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') {
+        // Native setter: i controlled input React ignorano l'assegnazione diretta
+        const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) setter.call(el, txt); else el.value = txt;
+      } else if (el.isContentEditable) {
+        el.textContent = txt;
+      } else {
+        el.value = txt;
+      }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { typed: true };
+      return { typed: true, tagName: tag };
     },
     args: [selector, text],
     world: 'MAIN',
