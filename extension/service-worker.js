@@ -352,7 +352,20 @@ async function cmdClick({ selector, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel) => {
-      const el = document.querySelector(sel);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.scrollIntoView({ block: 'center', inline: 'center' });
       const rect = el.getBoundingClientRect();
@@ -379,7 +392,20 @@ async function cmdTypeText({ selector, text, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, txt) => {
-      const el = document.querySelector(sel);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.focus();
       const tag = el.tagName.toLowerCase();
@@ -629,7 +655,19 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, props, lim) => {
-      const els = [...document.querySelectorAll(sel)].slice(0, lim);
+      function deepQueryAll(sel) {
+        if (!sel.includes('>>>')) return [...document.querySelectorAll(sel)];
+        const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
+        let ctx = document;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
+          ctx = found.shadowRoot;
+        }
+        return [...ctx.querySelectorAll(last)];
+      }
+      const els = deepQueryAll(sel).slice(0, lim);
       return els.map((el) => {
         const attrs = {};
         for (const a of el.attributes) {
@@ -884,10 +922,23 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, tout, intv, vis) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       return new Promise((resolve) => {
         const start = Date.now();
         const check = () => {
-          const el = document.querySelector(sel);
+          const el = deepQuery(sel);
           if (el) {
             if (vis) {
               const style = getComputedStyle(el);
@@ -1642,7 +1693,20 @@ async function cmdHover({ selector, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel) => {
-      const el = document.querySelector(sel);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       const rect = el.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
@@ -1672,8 +1736,26 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (k, sel, mods) => {
-      const el = sel ? document.querySelector(sel) : document.activeElement || document.body;
-      if (sel && !document.querySelector(sel)) throw new Error(`Element not found: ${sel}`);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      let el;
+      if (sel) {
+        el = deepQuery(sel);
+        if (!el) throw new Error(`Element not found: ${sel}`);
+      } else {
+        el = document.activeElement || document.body;
+      }
       const keyToCode = (kk) => {
         if (/^[a-z]$/i.test(kk)) return `Key${kk.toUpperCase()}`;
         if (/^[0-9]$/.test(kk)) return `Digit${kk}`;

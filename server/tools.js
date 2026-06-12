@@ -130,7 +130,7 @@ export function registerTools(server, wsManager) {
   // --- click ---
   server.tool(
     'click',
-    'Click on an element identified by CSS selector',
+    'Click on an element identified by CSS selector. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector of the element to click'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
@@ -149,7 +149,7 @@ export function registerTools(server, wsManager) {
   // --- type_text ---
   server.tool(
     'type_text',
-    'Type text into an input element identified by CSS selector',
+    'Type text into an input element identified by CSS selector. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector of the input element'),
       text:     z.string().describe('Text to type'),
@@ -244,7 +244,7 @@ export function registerTools(server, wsManager) {
   // --- query_dom ---
   server.tool(
     'query_dom',
-    'Query DOM elements by CSS selector, returning structure, attributes, bounding rect, and computed styles',
+    'Query DOM elements by CSS selector, returning structure, attributes, bounding rect, and computed styles. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector to query'),
       properties: z.array(z.string()).optional().describe('Computed style properties to include (e.g. ["color", "font-size"])'),
@@ -365,7 +365,7 @@ export function registerTools(server, wsManager) {
   // --- wait_for_element ---
   server.tool(
     'wait_for_element',
-    'Wait for a CSS selector to appear in the DOM, with optional visibility check. Polls until found or timeout.',
+    'Wait for a CSS selector to appear in the DOM, with optional visibility check. Polls until found or timeout. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector to wait for'),
       timeout: z.number().optional().default(10000).describe('Max wait time in ms (default 10000)'),
@@ -638,7 +638,7 @@ export function registerTools(server, wsManager) {
   // --- hover ---
   server.tool(
     'hover',
-    'Hover over an element identified by CSS selector. Dispatches mouseenter and mouseover events.',
+    'Hover over an element identified by CSS selector. Dispatches mouseenter and mouseover events. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector of the element to hover'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
@@ -657,7 +657,7 @@ export function registerTools(server, wsManager) {
   // --- press_key ---
   server.tool(
     'press_key',
-    'Press a keyboard key with optional modifiers. Dispatches keydown, keypress (for printable), and keyup events.',
+    'Press a keyboard key with optional modifiers. Dispatches keydown, keypress (for printable), and keyup events. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       key: z.string().describe('Key to press (e.g. "Enter", "Escape", "Tab", "a", "ArrowDown")'),
       selector: z.string().optional().describe('CSS selector of element to target (default: document.activeElement)'),
