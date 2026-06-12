@@ -812,10 +812,24 @@ export function registerTools(server, wsManager) {
     'Wait for the tab to finish navigating (e.g. after a click that triggers a page load). Resolves when tab status is complete.',
     {
       timeout: z.number().optional().default(15000).describe('Max wait in ms'),
+      mode: z.enum(['load', 'spa']).optional().default('load').describe('load = full page navigation (status complete); spa = single-page route change (history.pushState/popstate/hashchange)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ timeout, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout, tab_id });
+    async ({ timeout, mode, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout, mode, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- dismiss_overlays ---
+  server.tool(
+    'dismiss_overlays',
+    'Dismiss cookie-consent banners and modal overlays by clicking the accept/agree button. Tries known consent frameworks (OneTrust, Cookiebot, Usercentrics) then a generic heuristic (accept-text button inside a fixed/high-z-index overlay). Idempotent.',
+    {
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.DISMISS_OVERLAYS, { tab_id });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );

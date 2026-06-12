@@ -82,4 +82,32 @@
     }
     return origAdd.call(this, type, fn, opts);
   };
+
+  // --- SPA route tracking ---
+  const routes = [];
+  window.__chromeBridge_routes = routes;
+  const MAX_ROUTES = 200;
+  const recordRoute = (type) => {
+    const url = location.href;
+    const last = routes[routes.length - 1];
+    if (last && last.url === url) return; // dedup consecutivi
+    if (routes.length >= MAX_ROUTES) routes.shift();
+    routes.push({ url, type, timestamp: Date.now() });
+    window.__chromeBridge_lastRoute = url;
+  };
+  recordRoute('initial');
+  const origPush = history.pushState;
+  history.pushState = function (...args) {
+    const r = origPush.apply(this, args);
+    recordRoute('pushState');
+    return r;
+  };
+  const origReplace = history.replaceState;
+  history.replaceState = function (...args) {
+    const r = origReplace.apply(this, args);
+    recordRoute('replaceState');
+    return r;
+  };
+  window.addEventListener('popstate', () => recordRoute('popstate'));
+  window.addEventListener('hashchange', () => recordRoute('hashchange'));
 })();

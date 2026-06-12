@@ -64,6 +64,7 @@ export const MessageType = Object.freeze({
   GET_INTERACTIVES:      'get_interactives',
   WAIT_FOR_FUNCTION:     'wait_for_function',
   SCROLL_UNTIL:          'scroll_until',
+  DISMISS_OVERLAYS:      'dismiss_overlays',
 
   // Risposte (extension → server)
   RESULT: 'result',

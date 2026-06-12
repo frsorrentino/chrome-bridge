@@ -227,6 +227,8 @@ async function executeCommand(msg) {
       return await cmdUploadFile(params);
     case 'wait_for_navigation':
       return await cmdWaitForNavigation(params);
+    case 'dismiss_overlays':
+      return await cmdDismissOverlays(params);
     case 'wait_for_network_idle':
       return await cmdWaitForNetworkIdle(params);
     case 'handle_dialogs':
@@ -2060,9 +2062,37 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id })
 
 // --- wait_for_navigation ---
 
-async function cmdWaitForNavigation({ timeout = 15000, tab_id }) {
+async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id }) {
   const tabId = await resolveTabId(tab_id);
   const start = Date.now();
+
+  if (mode === 'spa') {
+    // baseline route corrente
+    const baseRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.__chromeBridge_lastRoute || location.href,
+      world: 'MAIN',
+    });
+    const baseline = baseRes?.[0]?.result ?? null;
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (base, tout) => new Promise((resolve) => {
+        const startT = Date.now();
+        const check = () => {
+          const cur = window.__chromeBridge_lastRoute || location.href;
+          if (cur !== base) { resolve({ navigated: true, mode: 'spa', url: cur, elapsed: Date.now() - startT }); return; }
+          if (Date.now() - startT >= tout) { resolve({ navigated: false, mode: 'spa', url: cur, note: 'No SPA route change within timeout' }); return; }
+          setTimeout(check, 100);
+        };
+        check();
+      }),
+      args: [baseline, timeout],
+      world: 'MAIN',
+    });
+    return res?.[0]?.result ?? { navigated: false, mode: 'spa' };
+  }
+
+  // mode === 'load' : navigazione full-page (tab.status complete)
   const tab = await chrome.tabs.get(tabId);
 
   if (tab.status === 'complete') {
@@ -2085,7 +2115,67 @@ async function cmdWaitForNavigation({ timeout = 15000, tab_id }) {
 
   const completed = await waitForComplete(tabId, Math.max(0, timeout - (Date.now() - start)));
   const t = await chrome.tabs.get(tabId);
-  return { navigated: completed, url: t.url, title: t.title, elapsed: Date.now() - start };
+  return { navigated: completed, mode: 'load', url: t.url, title: t.title, elapsed: Date.now() - start };
+}
+
+// --- dismiss_overlays ---
+
+async function cmdDismissOverlays({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const dismissed = [];
+      const clickIfVisible = (el, why) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        if (rect.width === 0 || rect.height === 0 || style.visibility === 'hidden' || style.display === 'none') return false;
+        const sel = el.id ? `#${el.id}` : (el.getAttribute('data-testid') ? `[data-testid="${el.getAttribute('data-testid')}"]` : el.tagName.toLowerCase());
+        el.click();
+        dismissed.push({ selector: sel, text: (el.textContent || '').trim().substring(0, 60), why });
+        return true;
+      };
+
+      // 1. Selettori noti di framework consent
+      const known = [
+        '#onetrust-accept-btn-handler',
+        '#CybotCookiebotDialogBodyButtonAccept',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+        'button[mode="primary"][data-testid="uc-accept-all-button"]',
+        '.cc-allow', '.cookie-accept', '#accept-cookies',
+        'button[aria-label*="accept" i]',
+        '[data-cookiebanner="accept_button"]',
+      ];
+      for (const k of known) {
+        if (dismissed.length >= 5) break;
+        try { if (clickIfVisible(document.querySelector(k), 'known')) continue; } catch {}
+      }
+
+      // 2. Euristica generica: bottone con testo accetta/accept dentro overlay fixed/sticky o z-index alto
+      if (dismissed.length === 0) {
+        const reText = /^(accetta|accetto|accept all|accept|agree|consenti|ok|got it|i agree|allow all)$/i;
+        const candidates = [...document.querySelectorAll('button, [role=button], a')].filter((el) => {
+          const t = (el.textContent || '').trim();
+          return t.length <= 30 && reText.test(t);
+        });
+        for (const el of candidates) {
+          // verifica che sia in un contenitore overlay (fixed/sticky o z-index alto risalendo i parent)
+          let node = el, inOverlay = false;
+          for (let i = 0; i < 6 && node; i++) {
+            const s = getComputedStyle(node);
+            if (s.position === 'fixed' || s.position === 'sticky' || (parseInt(s.zIndex) || 0) >= 100) { inOverlay = true; break; }
+            node = node.parentElement;
+          }
+          if (inOverlay && clickIfVisible(el, 'heuristic')) break;
+        }
+      }
+
+      return { count: dismissed.length, dismissed };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, dismissed: [] };
 }
 
 // --- wait_for_network_idle ---
