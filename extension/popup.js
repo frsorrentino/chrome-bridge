@@ -28,10 +28,16 @@ chrome.runtime.sendMessage({ type: 'getConnectionState' }, (response) => {
 
 const portInput = document.getElementById('port');
 const tokenInput = document.getElementById('token');
+const wsUrlLabel = document.getElementById('ws-url');
 chrome.storage.local.get({ port: 8765, token: '' }, (cfg) => {
   portInput.value = cfg.port;
   tokenInput.value = cfg.token;
+  if (wsUrlLabel) wsUrlLabel.textContent = `ws://localhost:${cfg.port}`;
 });
 document.getElementById('save').addEventListener('click', () => {
-  chrome.storage.local.set({ port: parseInt(portInput.value, 10) || 8765, token: tokenInput.value });
+  const p = parseInt(portInput.value, 10);
+  const port = (p >= 1 && p <= 65535) ? p : 8765;
+  const token = tokenInput.value.trim();
+  chrome.storage.local.set({ port, token });
+  if (wsUrlLabel) wsUrlLabel.textContent = `ws://localhost:${port}`;
 });

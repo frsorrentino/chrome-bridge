@@ -30,6 +30,7 @@ const RECONNECT_MAX_MS = 30000;
 const KEEPALIVE_ALARM = 'chrome-bridge-keepalive';
 
 let ws = null;
+let reconnectTimer = null;
 let reconnectDelay = RECONNECT_BASE_MS;
 let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
 
@@ -54,6 +55,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // --- WebSocket connection ---
 
 function connect() {
+  clearTimeout(reconnectTimer);
+
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
@@ -68,6 +71,8 @@ function connect() {
     return;
   }
 
+  const socket = ws;
+
   ws.onopen = () => {
     console.log('[chrome-bridge] Connected to MCP server');
     const init = { type: 'ext_init' };
@@ -78,6 +83,7 @@ function connect() {
   };
 
   ws.onclose = () => {
+    if (ws !== socket) return;
     console.log('[chrome-bridge] Disconnected from MCP server');
     ws = null;
     setConnectionState('disconnected');
@@ -125,7 +131,7 @@ function connect() {
 }
 
 function scheduleReconnect() {
-  setTimeout(() => {
+  reconnectTimer = setTimeout(() => {
     reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
     connect();
   }, reconnectDelay);
