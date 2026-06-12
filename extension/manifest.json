@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chrome Bridge for Claude Code",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Connects Chrome to Claude Code via WebSocket bridge",
   "minimum_chrome_version": "111",
   "permissions": [
