@@ -51,6 +51,9 @@ export const MessageType = Object.freeze({
   RELAY_INIT: 'relay_init',
 });
 
+// Versione
+export const VERSION               = '1.1.0';
+
 // Configurazione
 export const DEFAULT_PORT          = 8765;
 export const COMMAND_TIMEOUT_MS    = 30000;  // 30s per comandi normali

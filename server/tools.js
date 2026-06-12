@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { MessageType } from './protocol.js';
+import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 
 /**
@@ -16,18 +16,24 @@ import { checkLinksBatch } from './link-checker.js';
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
  */
 export function registerTools(server, wsManager) {
+  const startedAt = Date.now();
 
   // --- get_status ---
   server.tool(
     'get_status',
-    'Check if the Chrome extension is connected',
+    'Check bridge status: extension connection, server mode (primary/relay), port, version',
     {},
     async () => {
-      const connected = wsManager.isConnected();
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ connected }, null, 2),
+          text: JSON.stringify({
+            connected: wsManager.isConnected(),
+            mode: wsManager.mode,
+            port: wsManager.port,
+            version: VERSION,
+            uptime_sec: Math.round((Date.now() - startedAt) / 1000),
+          }, null, 2),
         }],
       };
     }

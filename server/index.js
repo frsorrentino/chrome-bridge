@@ -12,7 +12,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WSManager } from './ws-manager.js';
 import { registerTools } from './tools.js';
-import { DEFAULT_PORT } from './protocol.js';
+import { DEFAULT_PORT, VERSION } from './protocol.js';
 
 const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
 
@@ -20,7 +20,7 @@ async function main() {
   // 1. Crea il server MCP
   const mcpServer = new McpServer({
     name: 'chrome-bridge',
-    version: '1.0.0',
+    version: VERSION,
   });
 
   // 2. Avvia il WebSocket server
