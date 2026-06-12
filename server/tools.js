@@ -916,4 +916,47 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // --- seo_audit ---
+  server.tool(
+    'seo_audit',
+    'SEO audit: title/description lengths, canonical, robots, h1 count, Open Graph, Twitter card, JSON-LD validity, hreflang, lang, viewport, favicon',
+    {
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SEO_AUDIT, { tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- extract_table ---
+  server.tool(
+    'extract_table',
+    'Extract an HTML table as structured JSON (headers from thead, rows as objects). Use index to pick among multiple tables.',
+    {
+      selector: z.string().optional().default('table').describe('CSS selector for tables'),
+      index: z.number().optional().default(0).describe('Which matching table to extract (0-based)'),
+      max_rows: z.number().optional().default(100).describe('Max rows returned'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, index, max_rows, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- unused_css ---
+  server.tool(
+    'unused_css',
+    'Find CSS selectors with no matching element in the current DOM (approximate — dynamic states and JS-toggled classes can cause false positives). Cross-origin stylesheets are not readable.',
+    {
+      max_selectors: z.number().optional().default(200).describe('Max unused selectors listed'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ max_selectors, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.UNUSED_CSS, { max_selectors, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

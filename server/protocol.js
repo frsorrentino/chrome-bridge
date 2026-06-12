@@ -50,6 +50,9 @@ export const MessageType = Object.freeze({
   WEB_VITALS:            'web_vitals',
   LIST_EVENT_LISTENERS:  'list_event_listeners',
   MONITOR_WEBSOCKET:     'monitor_websocket',
+  SEO_AUDIT:             'seo_audit',
+  EXTRACT_TABLE:         'extract_table',
+  UNUSED_CSS:            'unused_css',
 
   // Risposte (extension → server)
   RESULT: 'result',

@@ -243,6 +243,12 @@ async function executeCommand(msg) {
       return await cmdListEventListeners(params);
     case 'monitor_websocket':
       return await cmdMonitorWebsocket(params);
+    case 'seo_audit':
+      return await cmdSeoAudit(params);
+    case 'extract_table':
+      return await cmdExtractTable(params);
+    case 'unused_css':
+      return await cmdUnusedCss(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -2411,6 +2417,267 @@ async function cmdMonitorWebsocket({ clear = false, tab_id }) {
   });
   const events = results?.[0]?.result ?? [];
   return { count: events.length, events };
+}
+
+// --- seo_audit ---
+
+async function cmdSeoAudit({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const findings = [];
+      const add = (type, severity, message, value) => {
+        const f = { type, severity, message };
+        if (value !== undefined) f.value = value;
+        findings.push(f);
+      };
+
+      // Title
+      const title = (document.title || '').trim();
+      if (!title) add('title', 'error', 'Missing <title>');
+      else if (title.length < 15) add('title', 'warning', 'Title too short', title.length);
+      else if (title.length > 60) add('title', 'warning', 'Title too long', title.length);
+
+      // Meta description
+      const descEl = document.querySelector('meta[name="description"]');
+      const desc = descEl ? (descEl.getAttribute('content') || '').trim() : '';
+      if (!desc) add('meta_description', 'error', 'Missing meta description');
+      else if (desc.length < 50) add('meta_description', 'warning', 'Meta description too short', desc.length);
+      else if (desc.length > 160) add('meta_description', 'warning', 'Meta description too long', desc.length);
+
+      // Canonical
+      const canonical = document.querySelector('link[rel="canonical"]');
+      if (!canonical) {
+        add('canonical', 'warning', 'Missing canonical link');
+      } else {
+        add('canonical', 'info', 'Canonical present', canonical.href);
+        const stripHash = (u) => u.split('#')[0];
+        if (canonical.href && stripHash(canonical.href) !== stripHash(location.href)) {
+          add('canonical', 'info', 'Canonical differs from current URL', canonical.href);
+        }
+      }
+
+      // Robots meta
+      const robots = document.querySelector('meta[name="robots"]');
+      if (!robots) {
+        add('robots', 'info', 'No robots meta (default: index,follow)');
+      } else {
+        const content = robots.getAttribute('content') || '';
+        if (content.toLowerCase().includes('noindex')) add('robots', 'warning', 'Page is noindex', content);
+      }
+
+      // h1 count
+      const h1Count = document.querySelectorAll('h1').length;
+      if (h1Count === 0) add('h1', 'error', 'No h1 on page');
+      else if (h1Count > 1) add('h1', 'warning', 'Multiple h1 elements', h1Count);
+
+      // Open Graph
+      for (const prop of ['og:title', 'og:description', 'og:image']) {
+        if (!document.querySelector(`meta[property="${prop}"]`)) {
+          add('open_graph', 'warning', `Missing ${prop}`);
+        }
+      }
+
+      // Twitter card
+      if (!document.querySelector('meta[name="twitter:card"]')) {
+        add('twitter_card', 'info', 'Missing twitter:card meta');
+      }
+
+      // JSON-LD
+      const ldScripts = [...document.querySelectorAll('script[type="application/ld+json"]')];
+      ldScripts.forEach((script, i) => {
+        try {
+          const data = JSON.parse(script.textContent);
+          const types = [];
+          const collect = (node) => {
+            if (!node || typeof node !== 'object') return;
+            if (Array.isArray(node)) { node.forEach(collect); return; }
+            if (node['@type']) types.push(...[].concat(node['@type']));
+            if (node['@graph']) collect(node['@graph']);
+          };
+          collect(data);
+          add('json_ld', 'info', `JSON-LD block ${i + 1}/${ldScripts.length} is valid`, types.length ? types.join(', ') : 'no @type');
+        } catch (e) {
+          add('json_ld', 'error', `JSON-LD block ${i + 1}/${ldScripts.length} parse error: ${e.message}`);
+        }
+      });
+
+      // hreflang
+      const hreflangCount = document.querySelectorAll('link[rel="alternate"][hreflang]').length;
+      if (hreflangCount > 0) add('hreflang', 'info', 'hreflang alternates present', hreflangCount);
+
+      // lang attribute
+      if (!document.documentElement.getAttribute('lang')) {
+        add('lang', 'warning', 'Missing lang attribute on <html>');
+      }
+
+      // Viewport meta
+      if (!document.querySelector('meta[name="viewport"]')) {
+        add('viewport', 'error', 'No viewport meta (not mobile-friendly)');
+      }
+
+      // Favicon
+      if (!document.querySelector('link[rel*="icon"]')) {
+        add('favicon', 'info', 'No favicon link found');
+      }
+
+      // Images without alt
+      const noAltCount = [...document.querySelectorAll('img')].filter((img) => !img.hasAttribute('alt')).length;
+      if (noAltCount > 0) {
+        add('images', 'warning', `${noAltCount} images without alt attribute (accessibility_audit has details)`, noAltCount);
+      }
+
+      const errors = findings.filter((f) => f.severity === 'error').length;
+      const warnings = findings.filter((f) => f.severity === 'warning').length;
+      const info = findings.filter((f) => f.severity === 'info').length;
+      return {
+        summary: { errors, warnings, info },
+        findings,
+        page: { title, url: location.href },
+      };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { summary: { errors: 0, warnings: 0, info: 0 }, findings: [], page: {} };
+}
+
+// --- extract_table ---
+
+async function cmdExtractTable({ selector = 'table', index = 0, max_rows = 100, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, idx, maxRows) => {
+      const tables = document.querySelectorAll(sel);
+      const table = tables[idx];
+      if (!table) {
+        throw new Error(`No table found for selector "${sel}" at index ${idx} (${tables.length} found)`);
+      }
+
+      const cellText = (cell) => (cell.textContent || '').trim();
+
+      // Headers: thead th, or first row's th/td as fallback
+      let headers = [];
+      let bodyRows;
+      const thead = table.querySelector('thead');
+      if (thead && thead.rows.length > 0) {
+        headers = [...thead.rows[0].cells].map(cellText);
+        bodyRows = table.tBodies.length
+          ? [].concat(...[...table.tBodies].map((tb) => [...tb.rows]))
+          : [...table.rows].filter((r) => !thead.contains(r));
+      } else {
+        const allRows = [...table.rows];
+        if (allRows.length > 0 && [...allRows[0].cells].some((c) => c.tagName === 'TH')) {
+          headers = [...allRows[0].cells].map(cellText);
+          bodyRows = allRows.slice(1);
+        } else {
+          bodyRows = allRows;
+        }
+      }
+
+      const rowCount = bodyRows.length;
+      const capped = bodyRows.slice(0, maxRows);
+      const headersUsable = headers.length > 0
+        && headers.every((h) => h !== '')
+        && new Set(headers).size === headers.length;
+
+      const rows = capped.map((tr) => {
+        const cells = [...tr.cells].map(cellText);
+        if (!headersUsable) return cells;
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = cells[i] ?? ''; });
+        return obj;
+      });
+
+      return {
+        caption: table.caption ? cellText(table.caption) : null,
+        headers,
+        row_count: rowCount,
+        rows,
+        truncated: rowCount > maxRows,
+        tables_found: tables.length,
+      };
+    },
+    args: [selector, index, max_rows],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { headers: [], rows: [], row_count: 0, truncated: false, tables_found: 0 };
+}
+
+// --- unused_css ---
+
+async function cmdUnusedCss({ max_selectors = 200, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (maxSelectors) => {
+      const sheets = [];
+      const unusedSelectors = [];
+      let totalUnused = 0;
+      let totalChecked = 0;
+      let totalSkipped = 0;
+
+      for (const sheet of document.styleSheets) {
+        const sheetInfo = { href: sheet.href || 'inline', accessible: true, total_rules: 0, unused_count: 0 };
+        let rules;
+        try {
+          rules = sheet.cssRules;
+        } catch {
+          sheetInfo.accessible = false;
+          sheets.push(sheetInfo);
+          continue;
+        }
+
+        // Flatten media/supports rules one level
+        const styleRules = [];
+        for (const rule of rules) {
+          if (rule instanceof CSSStyleRule) {
+            styleRules.push(rule);
+          } else if ((rule instanceof CSSMediaRule || rule instanceof CSSSupportsRule) && rule.cssRules) {
+            for (const inner of rule.cssRules) {
+              if (inner instanceof CSSStyleRule) styleRules.push(inner);
+            }
+          }
+        }
+        sheetInfo.total_rules = styleRules.length;
+
+        for (const rule of styleRules) {
+          const selectors = (rule.selectorText || '').split(',');
+          for (const rawSel of selectors) {
+            const cleaned = rawSel.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, '').trim();
+            if (!cleaned || /^[>+~\s]*$/.test(cleaned)) continue;
+            totalChecked++;
+            let matched;
+            try {
+              matched = document.querySelector(cleaned) !== null;
+            } catch {
+              totalSkipped++;
+              continue;
+            }
+            if (!matched) {
+              totalUnused++;
+              sheetInfo.unused_count++;
+              if (unusedSelectors.length < maxSelectors) unusedSelectors.push(rawSel.trim());
+            }
+          }
+        }
+        sheets.push(sheetInfo);
+      }
+
+      return {
+        sheets,
+        unused_selectors: unusedSelectors,
+        total_unused: totalUnused,
+        total_checked: totalChecked,
+        skipped: totalSkipped,
+        note: 'Approximate: only current DOM state; dynamic/JS-toggled selectors may be falsely reported',
+      };
+    },
+    args: [max_selectors],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { sheets: [], unused_selectors: [], total_unused: 0, total_checked: 0 };
 }
 
 // --- Browser-level network log (webRequest) ---
