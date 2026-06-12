@@ -21,13 +21,17 @@ export class WSManager {
     this.port = port;
     this.identTimeout = opts.identTimeout ?? IDENT_TIMEOUT_MS;
     this.token = opts.token ?? process.env.CHROME_BRIDGE_TOKEN ?? null;
+    this.pingIntervalMs = opts.pingInterval ?? PING_INTERVAL_MS;
+    this.pongGrace = opts.pongGrace ?? 10000;
+    this.lastPong = 0;
+    this.stopped = false;
     this.mode = null;            // 'primary' | 'relay'
 
     // --- primary mode ---
     this.wss = null;
     this.client = null;          // Connessione Chrome extension
     this.relayClients = new Set();
-    this.pendingRelay = new Map(); // command id → relay WebSocket
+    this.pendingRelay = new Map(); // command id → { ws: relay WebSocket, ts: timestamp }
     this.pingInterval = null;
 
     // --- relay mode ---
@@ -98,6 +102,8 @@ export class WSManager {
    * Chiude tutto.
    */
   async stop() {
+    this.stopped = true;
+
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
@@ -225,10 +231,12 @@ export class WSManager {
 
     if (this.client) {
       console.error('[chrome-bridge] Replacing existing Chrome connection');
+      this._rejectAllPending('Replaced by new extension connection');
       this.client.close(1000, 'Replaced by new connection');
     }
 
     this.client = ws;
+    this.lastPong = Date.now();
 
     ws.on('message', (raw) => {
       let msg;
@@ -248,9 +256,9 @@ export class WSManager {
         // Rigetta pending locali
         this._rejectAllPending('Extension disconnected');
         // Notifica relay clients
-        for (const [id, relaySock] of this.pendingRelay) {
-          if (relaySock.readyState === WebSocket.OPEN) {
-            relaySock.send(JSON.stringify({
+        for (const [id, entry] of this.pendingRelay) {
+          if (entry.ws.readyState === WebSocket.OPEN) {
+            entry.ws.send(JSON.stringify({
               id,
               type: MessageType.ERROR,
               error: 'Chrome extension disconnected',
@@ -290,7 +298,7 @@ export class WSManager {
       }
 
       // Traccia quale relay ha inviato questo comando
-      this.pendingRelay.set(msg.id, ws);
+      this.pendingRelay.set(msg.id, { ws, ts: Date.now() });
       this.client.send(JSON.stringify(msg));
     });
 
@@ -298,8 +306,8 @@ export class WSManager {
       console.error('[chrome-bridge] Relay client disconnected');
       this.relayClients.delete(ws);
       // Pulisci pending relay per questo client
-      for (const [id, sock] of this.pendingRelay) {
-        if (sock === ws) {
+      for (const [id, entry] of this.pendingRelay) {
+        if (entry.ws === ws) {
           this.pendingRelay.delete(id);
         }
       }
@@ -316,15 +324,16 @@ export class WSManager {
    */
   _handleChromeMessage(msg) {
     if (msg.type === MessageType.PONG) {
+      this.lastPong = Date.now();
       return;
     }
 
     // Risposta per un relay client?
-    const relaySock = this.pendingRelay.get(msg.id);
-    if (relaySock) {
+    const entry = this.pendingRelay.get(msg.id);
+    if (entry) {
       this.pendingRelay.delete(msg.id);
-      if (relaySock.readyState === WebSocket.OPEN) {
-        relaySock.send(JSON.stringify(msg));
+      if (entry.ws.readyState === WebSocket.OPEN) {
+        entry.ws.send(JSON.stringify(msg));
       }
       return;
     }
@@ -399,12 +408,15 @@ export class WSManager {
    * poi ritenta con backoff se la porta non è ancora libera.
    */
   async _promoteToPrimary() {
+    if (this.stopped) return;
+
     const MAX_ATTEMPTS = 5;
     const BASE_DELAY_MS = 500;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const delay = BASE_DELAY_MS * attempt;
       await new Promise(r => setTimeout(r, delay));
+      if (this.stopped) return;
 
       console.error(`[chrome-bridge] Promotion attempt ${attempt}/${MAX_ATTEMPTS}...`);
 
@@ -441,12 +453,23 @@ export class WSManager {
   _startPing() {
     this.pingInterval = setInterval(() => {
       if (this.client && this.client.readyState === WebSocket.OPEN) {
+        // Half-open detection: nessun pong da troppo tempo → terminate
+        if (this.lastPong && Date.now() - this.lastPong > this.pingIntervalMs * 2 + this.pongGrace) {
+          console.error('[chrome-bridge] Extension unresponsive (no pong) — terminating connection');
+          this.client.terminate();
+          return;
+        }
         this.client.send(JSON.stringify({
           type: MessageType.PING,
           timestamp: Date.now(),
         }));
       }
-    }, PING_INTERVAL_MS);
+      // Sweep pendingRelay scaduti (entry più vecchie di 120s)
+      const cutoff = Date.now() - 120000;
+      for (const [id, entry] of this.pendingRelay) {
+        if (entry.ts < cutoff) this.pendingRelay.delete(id);
+      }
+    }, this.pingIntervalMs);
   }
 
   _rejectAllPending(reason) {

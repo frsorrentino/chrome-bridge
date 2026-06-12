@@ -98,3 +98,34 @@ test('relay_init da loopback → accettato come relay', async () => {
   ws.close();
   await new Promise((r) => setTimeout(r, 100));
 });
+
+test('client che non risponde ai ping viene terminato', async () => {
+  const m = new WSManager(0, { identTimeout: 200, pingInterval: 100, pongGrace: 250 });
+  await m.start();
+  const p = m.wss.address().port;
+  const ws = new WebSocket(`ws://127.0.0.1:${p}`, { headers: { origin: 'chrome-extension://abc' } });
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'ext_init' }));
+  await waitFor(() => m.isConnected());
+  assert.equal(m.isConnected(), true);
+  // non rispondiamo mai ai ping JSON → entro pingInterval*2 + grace deve scollegare
+  const closed = await waitClose(ws, 2000);
+  assert.equal(closed, true);
+  await m.stop();
+});
+
+test('stop() impedisce promozione successiva', async () => {
+  const m = new WSManager(0, { identTimeout: 200 });
+  await m.start();
+  const oldPort = m.wss.address().port;
+  await m.stop();
+  assert.equal(m.stopped, true);
+  await m._promoteToPrimary(); // deve essere no-op
+  // nessun nuovo server in ascolto sulla vecchia porta
+  const probe = new WebSocket(`ws://127.0.0.1:${oldPort}`);
+  const failed = await new Promise((resolve) => {
+    probe.on('error', () => resolve(true));
+    probe.on('open', () => { probe.close(); resolve(false); });
+  });
+  assert.equal(failed, true);
+});
