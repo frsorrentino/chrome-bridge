@@ -1,12 +1,47 @@
 {
-  "name": "chrome-bridge",
+  "name": "chrome-bridge-mcp",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
-  "description": "MCP server bridge between Claude Code (Crostini) and Chrome (ChromeOS) via WebSocket",
+  "description": "MCP server with 31 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
   "main": "server/index.js",
+  "bin": {
+    "chrome-bridge-mcp": "server/index.js"
+  },
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node test/test-devtools.js"
+  },
+  "keywords": [
+    "mcp",
+    "chrome",
+    "browser-automation",
+    "claude-code",
+    "chromeos",
+    "crostini",
+    "devtools",
+    "websocket",
+    "chrome-extension",
+    "accessibility",
+    "testing"
+  ],
+  "author": "frsorrentino",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frsorrentino/chrome-bridge.git"
+  },
+  "homepage": "https://github.com/frsorrentino/chrome-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/frsorrentino/chrome-bridge/issues"
+  },
+  "files": [
+    "server/",
+    "extension/",
+    "install.sh",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

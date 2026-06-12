@@ -97,13 +97,21 @@ Claude Code <--stdio--> MCP Server <--WebSocket:8765--> Chrome Extension
 
 ## Install
 
+### From npm
+
+```bash
+npm install -g chrome-bridge-mcp
+```
+
+### From source
+
 ```bash
 git clone git@github.com:frsorrentino/chrome-bridge.git
 cd chrome-bridge
 ./install.sh
 ```
 
-Or manually:
+### Manual setup
 
 ```bash
 # 1. Install dependencies

@@ -34,7 +34,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
 
-  console.error('[chrome-bridge] MCP server ready (stdio + WebSocket)');
+  console.error(`[chrome-bridge] MCP server ready (stdio + WebSocket, mode: ${wsManager.mode})`);
 
   // 5. Graceful shutdown
   const shutdown = async () => {

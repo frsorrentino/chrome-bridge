@@ -1,94 +1,81 @@
 /**
- * Gestisce il server WebSocket e la connessione con l'estensione Chrome.
+ * Gestisce la connessione con l'estensione Chrome via WebSocket.
  *
- * - Accetta una sola connessione alla volta (nuova sostituisce la vecchia)
- * - Gestisce ping/pong heartbeat
- * - Invia comandi con promise + timeout
+ * Supporta due modalità:
+ * - PRIMARY: avvia un WebSocket server sulla porta configurata.
+ *   Accetta la connessione dell'estensione Chrome e, opzionalmente,
+ *   connessioni relay da altre istanze MCP.
+ * - RELAY: se la porta è già occupata (altra istanza primary attiva),
+ *   si connette come client al server esistente e inoltra i comandi.
+ *
+ * Dall'esterno (tools.js) l'interfaccia è identica in entrambe le modalità:
+ * - isConnected() → boolean
+ * - sendCommand(type, params) → Promise<data>
  */
 
-import { WebSocketServer } from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import { DEFAULT_PORT, PING_INTERVAL_MS, getTimeout, createCommand, MessageType } from './protocol.js';
+
+const RELAY_INIT = 'relay_init';
 
 export class WSManager {
   constructor(port = DEFAULT_PORT) {
     this.port = port;
+    this.mode = null;            // 'primary' | 'relay'
+
+    // --- primary mode ---
     this.wss = null;
-    this.client = null;         // Connessione attiva (una sola)
-    this.pending = new Map();   // id → { resolve, reject, timer }
+    this.client = null;          // Connessione Chrome extension
+    this.relayClients = new Set();
+    this.pendingRelay = new Map(); // command id → relay WebSocket
     this.pingInterval = null;
+
+    // --- relay mode ---
+    this.relaySocket = null;
+
+    // --- shared ---
+    this.pending = new Map();    // id → { resolve, reject, timer }
   }
 
+  // ─── Public API ────────────────────────────────────────────────
+
   /**
-   * Avvia il WebSocket server.
-   * @returns {Promise<void>}
+   * Avvia il manager: tenta primary, fallback relay.
    */
-  start() {
-    return new Promise((resolve, reject) => {
-      this.wss = new WebSocketServer({
-        host: '127.0.0.1',
-        port: this.port,
-      });
-
-      this.wss.on('listening', () => {
-        console.error(`[chrome-bridge] WebSocket server listening on 127.0.0.1:${this.port}`);
-        this._startPing();
-        resolve();
-      });
-
-      this.wss.on('error', (err) => {
-        console.error(`[chrome-bridge] WebSocket server error:`, err.message);
-        reject(err);
-      });
-
-      this.wss.on('connection', (ws) => {
-        console.error('[chrome-bridge] Chrome extension connected');
-
-        // Chiudi connessione precedente se esiste
-        if (this.client) {
-          console.error('[chrome-bridge] Replacing existing connection');
-          this.client.close(1000, 'Replaced by new connection');
-        }
-
-        this.client = ws;
-
-        ws.on('message', (raw) => {
-          this._handleMessage(raw);
-        });
-
-        ws.on('close', () => {
-          console.error('[chrome-bridge] Chrome extension disconnected');
-          if (this.client === ws) {
-            this.client = null;
-            this._rejectAllPending('Extension disconnected');
-          }
-        });
-
-        ws.on('error', (err) => {
-          console.error('[chrome-bridge] WebSocket client error:', err.message);
-        });
-      });
-    });
+  async start() {
+    try {
+      await this._startPrimary();
+      this.mode = 'primary';
+    } catch (err) {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[chrome-bridge] Port ${this.port} in use — connecting as relay`);
+        await this._startRelay();
+        this.mode = 'relay';
+      } else {
+        throw err;
+      }
+    }
   }
 
   /**
-   * Verifica se l'estensione è connessa.
-   * @returns {boolean}
+   * Verifica se è possibile inviare comandi.
    */
   isConnected() {
-    return this.client !== null && this.client.readyState === 1; // WebSocket.OPEN
+    if (this.mode === 'relay') {
+      return this.relaySocket !== null && this.relaySocket.readyState === WebSocket.OPEN;
+    }
+    return this.client !== null && this.client.readyState === WebSocket.OPEN;
   }
 
   /**
-   * Invia un comando all'estensione e attende la risposta.
-   *
-   * @param {string} type - Tipo di comando
-   * @param {object} params - Parametri
-   * @returns {Promise<any>} Dati della risposta
+   * Invia un comando all'estensione Chrome e attende la risposta.
+   * Funziona identicamente in primary e relay mode.
    */
   sendCommand(type, params = {}) {
     return new Promise((resolve, reject) => {
       if (!this.isConnected()) {
-        reject(new Error('Chrome extension not connected'));
+        const target = this.mode === 'relay' ? 'Relay connection' : 'Chrome extension';
+        reject(new Error(`${target} not connected`));
         return;
       }
 
@@ -102,28 +89,230 @@ export class WSManager {
 
       this.pending.set(command.id, { resolve, reject, timer });
 
-      this.client.send(JSON.stringify(command));
+      const socket = this.mode === 'relay' ? this.relaySocket : this.client;
+      socket.send(JSON.stringify(command));
     });
   }
 
   /**
-   * Gestisce un messaggio ricevuto dall'estensione.
+   * Chiude tutto.
    */
-  _handleMessage(raw) {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      console.error('[chrome-bridge] Invalid JSON received');
+  async stop() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+
+    this._rejectAllPending('Server shutting down');
+
+    if (this.mode === 'relay') {
+      if (this.relaySocket) {
+        this.relaySocket.close(1000, 'MCP shutting down');
+        this.relaySocket = null;
+      }
       return;
     }
 
-    // Gestisci pong heartbeat
+    // primary mode — terminate forzato per evitare hang sull'handshake
+    for (const relay of this.relayClients) {
+      relay.terminate();
+    }
+    this.relayClients.clear();
+    this.pendingRelay.clear();
+
+    if (this.client) {
+      this.client.terminate();
+      this.client = null;
+    }
+
+    if (this.wss) {
+      return new Promise((resolve) => {
+        this.wss.close(() => resolve());
+      });
+    }
+  }
+
+  // ─── Primary mode ──────────────────────────────────────────────
+
+  _startPrimary() {
+    return new Promise((resolve, reject) => {
+      this.wss = new WebSocketServer({
+        host: '0.0.0.0',
+        port: this.port,
+      });
+
+      this.wss.on('listening', () => {
+        console.error(`[chrome-bridge] WebSocket server listening on 0.0.0.0:${this.port}`);
+        this._startPing();
+        resolve();
+      });
+
+      this.wss.on('error', (err) => {
+        console.error(`[chrome-bridge] WebSocket server error:`, err.message);
+        reject(err);
+      });
+
+      this.wss.on('connection', (ws) => {
+        this._handleNewConnection(ws);
+      });
+    });
+  }
+
+  /**
+   * Gestisce una nuova connessione WebSocket.
+   * Attende il primo messaggio per distinguere relay client da Chrome extension.
+   */
+  _handleNewConnection(ws) {
+    let identified = false;
+
+    const onFirstMessage = (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        console.error('[chrome-bridge] Invalid JSON from new connection');
+        return;
+      }
+
+      if (msg.type === RELAY_INIT) {
+        // È un relay client (altra istanza MCP)
+        identified = true;
+        ws.removeListener('message', onFirstMessage);
+        this._setupRelayClient(ws);
+        return;
+      }
+
+      // È l'estensione Chrome (primo messaggio è un pong o qualcosa d'altro)
+      identified = true;
+      ws.removeListener('message', onFirstMessage);
+      this._setupChromeClient(ws);
+      // Processa il messaggio corrente
+      this._handleChromeMessage(msg);
+    };
+
+    ws.on('message', onFirstMessage);
+
+    // Se non riceve messaggi entro 5s, assume sia Chrome extension
+    // (Chrome extension potrebbe non inviare nulla fino a un ping)
+    setTimeout(() => {
+      if (!identified) {
+        identified = true;
+        ws.removeListener('message', onFirstMessage);
+        this._setupChromeClient(ws);
+      }
+    }, 5000);
+  }
+
+  _setupChromeClient(ws) {
+    console.error('[chrome-bridge] Chrome extension connected');
+
+    if (this.client) {
+      console.error('[chrome-bridge] Replacing existing Chrome connection');
+      this.client.close(1000, 'Replaced by new connection');
+    }
+
+    this.client = ws;
+
+    ws.on('message', (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        console.error('[chrome-bridge] Invalid JSON received');
+        return;
+      }
+      this._handleChromeMessage(msg);
+    });
+
+    ws.on('close', () => {
+      console.error('[chrome-bridge] Chrome extension disconnected');
+      if (this.client === ws) {
+        this.client = null;
+        // Rigetta pending locali
+        this._rejectAllPending('Extension disconnected');
+        // Notifica relay clients
+        for (const [id, relaySock] of this.pendingRelay) {
+          if (relaySock.readyState === WebSocket.OPEN) {
+            relaySock.send(JSON.stringify({
+              id,
+              type: MessageType.ERROR,
+              error: 'Chrome extension disconnected',
+            }));
+          }
+        }
+        this.pendingRelay.clear();
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[chrome-bridge] Chrome client error:', err.message);
+    });
+  }
+
+  _setupRelayClient(ws) {
+    console.error('[chrome-bridge] Relay client connected');
+    this.relayClients.add(ws);
+
+    ws.on('message', (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        console.error('[chrome-bridge] Invalid JSON from relay client');
+        return;
+      }
+
+      // Il relay client invia comandi da inoltrare a Chrome
+      if (!this.client || this.client.readyState !== WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          type: MessageType.ERROR,
+          error: 'Chrome extension not connected',
+        }));
+        return;
+      }
+
+      // Traccia quale relay ha inviato questo comando
+      this.pendingRelay.set(msg.id, ws);
+      this.client.send(JSON.stringify(msg));
+    });
+
+    ws.on('close', () => {
+      console.error('[chrome-bridge] Relay client disconnected');
+      this.relayClients.delete(ws);
+      // Pulisci pending relay per questo client
+      for (const [id, sock] of this.pendingRelay) {
+        if (sock === ws) {
+          this.pendingRelay.delete(id);
+        }
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[chrome-bridge] Relay client error:', err.message);
+    });
+  }
+
+  /**
+   * Gestisce un messaggio dall'estensione Chrome.
+   * Smista le risposte: ai pending locali o ai relay client.
+   */
+  _handleChromeMessage(msg) {
     if (msg.type === MessageType.PONG) {
       return;
     }
 
-    // Gestisci risposta a un comando pending
+    // Risposta per un relay client?
+    const relaySock = this.pendingRelay.get(msg.id);
+    if (relaySock) {
+      this.pendingRelay.delete(msg.id);
+      if (relaySock.readyState === WebSocket.OPEN) {
+        relaySock.send(JSON.stringify(msg));
+      }
+      return;
+    }
+
+    // Risposta per un comando locale
     const pending = this.pending.get(msg.id);
     if (!pending) {
       return;
@@ -139,12 +328,102 @@ export class WSManager {
     }
   }
 
+  // ─── Relay mode ────────────────────────────────────────────────
+
+  _startRelay() {
+    return new Promise((resolve, reject) => {
+      this.relaySocket = new WebSocket(`ws://127.0.0.1:${this.port}`);
+
+      this.relaySocket.on('open', () => {
+        // Identifica questa connessione come relay
+        this.relaySocket.send(JSON.stringify({ type: RELAY_INIT }));
+        console.error(`[chrome-bridge] Connected as relay to existing server on port ${this.port}`);
+        resolve();
+      });
+
+      this.relaySocket.on('message', (raw) => {
+        let msg;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+
+        const pending = this.pending.get(msg.id);
+        if (!pending) return;
+
+        this.pending.delete(msg.id);
+        clearTimeout(pending.timer);
+
+        if (msg.type === MessageType.ERROR) {
+          pending.reject(new Error(msg.error || 'Unknown error'));
+        } else {
+          pending.resolve(msg.data);
+        }
+      });
+
+      this.relaySocket.on('close', () => {
+        console.error('[chrome-bridge] Relay connection closed');
+        this.relaySocket = null;
+        this._rejectAllPending('Relay connection closed');
+        this._promoteToPrimary();
+      });
+
+      this.relaySocket.on('error', (err) => {
+        console.error('[chrome-bridge] Relay connection error:', err.message);
+        reject(err);
+      });
+    });
+  }
+
   /**
-   * Avvia il ping heartbeat periodico.
+   * Promozione: quando il primary muore, il relay tenta di diventare primary.
+   * Attende un breve intervallo per dare tempo al vecchio WSS di chiudersi,
+   * poi ritenta con backoff se la porta non è ancora libera.
    */
+  async _promoteToPrimary() {
+    const MAX_ATTEMPTS = 5;
+    const BASE_DELAY_MS = 500;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const delay = BASE_DELAY_MS * attempt;
+      await new Promise(r => setTimeout(r, delay));
+
+      console.error(`[chrome-bridge] Promotion attempt ${attempt}/${MAX_ATTEMPTS}...`);
+
+      try {
+        await this._startPrimary();
+        this.mode = 'primary';
+        console.error('[chrome-bridge] Promoted to primary successfully');
+        return;
+      } catch (err) {
+        if (err.code === 'EADDRINUSE') {
+          // Porta occupata: un altro relay ha vinto, o il vecchio server non ha ancora chiuso
+          console.error(`[chrome-bridge] Port still in use (attempt ${attempt})`);
+          // All'ultimo tentativo, prova a riconnettersi come relay
+          if (attempt === MAX_ATTEMPTS) {
+            console.error('[chrome-bridge] Reconnecting as relay to new primary');
+            try {
+              await this._startRelay();
+              this.mode = 'relay';
+              return;
+            } catch (relayErr) {
+              console.error('[chrome-bridge] Failed to reconnect as relay:', relayErr.message);
+            }
+          }
+        } else {
+          console.error('[chrome-bridge] Promotion failed:', err.message);
+          return;
+        }
+      }
+    }
+  }
+
+  // ─── Shared helpers ────────────────────────────────────────────
+
   _startPing() {
     this.pingInterval = setInterval(() => {
-      if (this.isConnected()) {
+      if (this.client && this.client.readyState === WebSocket.OPEN) {
         this.client.send(JSON.stringify({
           type: MessageType.PING,
           timestamp: Date.now(),
@@ -153,37 +432,11 @@ export class WSManager {
     }, PING_INTERVAL_MS);
   }
 
-  /**
-   * Rifiuta tutte le richieste pending.
-   */
   _rejectAllPending(reason) {
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
       entry.reject(new Error(reason));
     }
     this.pending.clear();
-  }
-
-  /**
-   * Chiude il server WebSocket.
-   */
-  async stop() {
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
-    }
-
-    this._rejectAllPending('Server shutting down');
-
-    if (this.client) {
-      this.client.close(1000, 'Server shutting down');
-      this.client = null;
-    }
-
-    if (this.wss) {
-      return new Promise((resolve) => {
-        this.wss.close(() => resolve());
-      });
-    }
   }
 }
