@@ -317,8 +317,10 @@ async function testFullPageScreenshot(tabId) {
   const name = 'full_page_screenshot';
   try {
     const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls: 3, delay: 100, tab_id: tabId });
-    if (!Array.isArray(data.captures)) throw new Error('Missing captures array');
-    if (data.captures.length < 1) throw new Error('No captures');
+    // stitch=true (default) restituisce { image }, stitch=false { captures }
+    const hasImage = typeof data.image === 'string' && data.image.length > 0;
+    const hasCaptures = Array.isArray(data.captures) && data.captures.length >= 1;
+    if (!hasImage && !hasCaptures) throw new Error('Missing image or captures array');
     if (typeof data.scrollHeight !== 'number') throw new Error('Missing scrollHeight');
     ok(name);
   } catch (e) {

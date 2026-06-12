@@ -201,6 +201,8 @@ async function executeCommand(msg) {
       return await cmdViewportResize(params);
     case 'full_page_screenshot':
       return await cmdFullPageScreenshot(params);
+    case 'element_screenshot':
+      return await cmdElementScreenshot(params);
     case 'highlight_elements':
       return await cmdHighlightElements(params);
     case 'accessibility_audit':
@@ -240,6 +242,24 @@ function scriptTarget(tabId, frame_id) {
   const target = { tabId };
   if (frame_id !== undefined && frame_id !== null) target.frameIds = [frame_id];
   return target;
+}
+
+// --- Helper immagini (OffscreenCanvas nel service worker) ---
+
+async function dataUrlToBitmap(dataUrl) {
+  const blob = await (await fetch(dataUrl)).blob();
+  return await createImageBitmap(blob);
+}
+
+async function canvasToBase64(canvas) {
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 
 // --- Implementazione comandi ---
@@ -1196,13 +1216,13 @@ async function cmdViewportResize({ preset, width, height, tab_id }) {
 
 // --- full_page_screenshot ---
 
-async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, tab_id }) {
-  // Chrome quota: max 2 captureVisibleTab al secondo — clamp a 500ms
-  const safeDelay = Math.max(delay, 500);
+async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = true, tab_id }) {
   const tabId = await resolveTabId(tab_id);
   const tab = await chrome.tabs.get(tabId);
   await chrome.tabs.update(tabId, { active: true });
   await chrome.windows.update(tab.windowId, { focused: true });
+  // Chrome quota: max 2 captureVisibleTab al secondo — clamp a 500ms
+  const safeDelay = Math.max(delay, 500);
 
   // Get page dimensions
   const dimResults = await chrome.scripting.executeScript({
@@ -1210,26 +1230,28 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, tab_id }) 
     func: () => ({
       scrollHeight: document.documentElement.scrollHeight,
       viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
       originalScrollY: window.scrollY,
     }),
     world: 'MAIN',
   });
-  const dims = dimResults?.[0]?.result ?? {};
-  const { scrollHeight, viewportHeight, originalScrollY } = dims;
-  const captures = [];
+  const { scrollHeight, viewportHeight, viewportWidth, originalScrollY } = dimResults?.[0]?.result ?? {};
   const steps = Math.min(Math.ceil(scrollHeight / viewportHeight), max_scrolls);
+  const shots = [];
 
   for (let i = 0; i < steps; i++) {
-    const scrollY = i * viewportHeight;
-    await chrome.scripting.executeScript({
+    const target = Math.min(i * viewportHeight, Math.max(0, scrollHeight - viewportHeight));
+    const sRes = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (sy) => window.scrollTo(0, sy),
-      args: [scrollY],
+      func: (sy) => { window.scrollTo(0, sy); return window.scrollY; },
+      args: [target],
       world: 'MAIN',
     });
+    const actualY = sRes?.[0]?.result ?? target;
     await new Promise((r) => setTimeout(r, safeDelay));
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    captures.push(dataUrl.replace(/^data:image\/png;base64,/, ''));
+    shots.push({ dataUrl, y: actualY });
+    if (actualY + viewportHeight >= scrollHeight) break;
   }
 
   // Restore scroll position
@@ -1240,7 +1262,70 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, tab_id }) 
     world: 'MAIN',
   });
 
-  return { captures, scrollHeight, viewportHeight, totalCaptures: captures.length };
+  if (!stitch) {
+    return {
+      captures: shots.map((s) => s.dataUrl.replace(/^data:image\/png;base64,/, '')),
+      scrollHeight, viewportHeight, totalCaptures: shots.length,
+    };
+  }
+
+  // Stitching su OffscreenCanvas (limite hard Chrome ~16384px per lato)
+  const MAX_CANVAS_H = 16384;
+  const first = await dataUrlToBitmap(shots[0].dataUrl);
+  const dpr = first.width / viewportWidth;
+  const fullH = Math.min(Math.round(scrollHeight * dpr), MAX_CANVAS_H);
+  const canvas = new OffscreenCanvas(first.width, fullH);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(first, 0, Math.round(shots[0].y * dpr));
+  for (let i = 1; i < shots.length; i++) {
+    const bmp = await dataUrlToBitmap(shots[i].dataUrl);
+    ctx.drawImage(bmp, 0, Math.round(shots[i].y * dpr));
+  }
+  return {
+    image: await canvasToBase64(canvas),
+    stitched: true,
+    scrollHeight, viewportHeight, totalCaptures: shots.length,
+    truncated: scrollHeight * dpr > MAX_CANVAS_H,
+  };
+}
+
+// --- element_screenshot ---
+
+async function cmdElementScreenshot({ selector, tab_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.tabs.update(tabId, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+
+  const res = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+    },
+    args: [selector],
+    world: 'MAIN',
+  });
+  const rect = res?.[0]?.result;
+  if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
+
+  // Delay per rendering post-scroll (scrollIntoView default è istantaneo)
+  await new Promise((r) => setTimeout(r, 300));
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const bitmap = await dataUrlToBitmap(dataUrl);
+  const { dpr } = rect;
+  const sx = Math.max(0, Math.round(rect.x * dpr));
+  const sy = Math.max(0, Math.round(rect.y * dpr));
+  const sw = Math.min(Math.round(rect.width * dpr), bitmap.width - sx);
+  const sh = Math.min(Math.round(rect.height * dpr), bitmap.height - sy);
+  if (sw <= 0 || sh <= 0) throw new Error('Element is outside the visible viewport');
+  const canvas = new OffscreenCanvas(sw, sh);
+  canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  return { image: await canvasToBase64(canvas), width: sw, height: sh };
 }
 
 // --- highlight_elements ---

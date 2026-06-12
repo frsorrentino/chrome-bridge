@@ -29,6 +29,7 @@ export const MessageType = Object.freeze({
   FILL_FORM:            'fill_form',
   VIEWPORT_RESIZE:      'viewport_resize',
   FULL_PAGE_SCREENSHOT: 'full_page_screenshot',
+  ELEMENT_SCREENSHOT:   'element_screenshot',
   HIGHLIGHT_ELEMENTS:   'highlight_elements',
   ACCESSIBILITY_AUDIT:  'accessibility_audit',
   COLLECT_LINKS:        'collect_links',
@@ -92,7 +93,7 @@ export function createCommand(type, params = {}) {
  * @returns {number} Timeout in millisecondi
  */
 export function getTimeout(type) {
-  if (type === MessageType.SCREENSHOT) return SCREENSHOT_TIMEOUT_MS;
+  if (type === MessageType.SCREENSHOT || type === MessageType.ELEMENT_SCREENSHOT) return SCREENSHOT_TIMEOUT_MS;
   if (type === MessageType.FULL_PAGE_SCREENSHOT) return 120000;
   if (type === MessageType.WAIT_FOR_ELEMENT) return 60000;
   return COMMAND_TIMEOUT_MS;

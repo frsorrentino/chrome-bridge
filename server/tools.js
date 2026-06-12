@@ -488,23 +488,42 @@ export function registerTools(server, wsManager) {
     }
   );
 
+  // --- element_screenshot ---
+  server.tool(
+    'element_screenshot',
+    'Screenshot of a single element (scrolled into view, cropped via OffscreenCanvas). Returns base64 PNG. Brings tab to foreground.',
+    {
+      selector: z.string().describe('CSS selector of the element'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ selector, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.ELEMENT_SCREENSHOT, { selector, tab_id });
+      if (data && data.image) {
+        return { content: [{ type: 'image', data: data.image, mimeType: 'image/png' }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
   // --- full_page_screenshot ---
   server.tool(
     'full_page_screenshot',
-    'Capture full page by scrolling and taking multiple viewport screenshots. Returns array of PNG images. Note: brings the tab to foreground and focuses its window.',
+    'Capture full page by scrolling and taking viewport screenshots, stitched into a single PNG via OffscreenCanvas (or one image per viewport with stitch=false). Note: brings the tab to foreground and focuses its window.',
     {
       max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
       delay: z.number().optional().default(500).describe('Delay between captures in ms (min 500, Chrome quota is 2 captures/sec)'),
+      stitch: z.boolean().optional().default(true).describe('Stitch captures into one PNG (default true). false returns one image per viewport.'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ max_scrolls, delay, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, tab_id });
-      // data.captures is array of base64 PNGs
+    async ({ max_scrolls, delay, stitch, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
+      if (data.image) {
+        const note = `Full page: ${data.totalCaptures} captures stitched, scrollHeight=${data.scrollHeight}${data.truncated ? ' (truncated at 16384px canvas limit)' : ''}`;
+        return { content: [{ type: 'text', text: note }, { type: 'image', data: data.image, mimeType: 'image/png' }] };
+      }
       const content = [{ type: 'text', text: `Full page screenshot: ${data.captures?.length || 0} captures, scrollHeight=${data.scrollHeight}, viewportHeight=${data.viewportHeight}` }];
-      if (data.captures && data.captures.length > 0) {
-        for (const img of data.captures) {
-          content.push({ type: 'image', data: img, mimeType: 'image/png' });
-        }
+      for (const img of data.captures || []) {
+        content.push({ type: 'image', data: img, mimeType: 'image/png' });
       }
       return { content };
     }
