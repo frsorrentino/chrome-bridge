@@ -29,6 +29,24 @@ const MIME_BY_EXT = {
 };
 
 /**
+ * Dopo un'azione (click/type/fill), attende navigazione o network idle se richiesto.
+ *
+ * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
+ * @param {'none'|'navigation'|'networkidle'} wait_after - tipo di attesa
+ * @param {number} [tab_id] - tab target
+ * @returns {Promise<object|null>} risultato dell'attesa, o null se none
+ */
+async function applyWaitAfter(wsManager, wait_after, tab_id) {
+  if (wait_after === 'navigation') {
+    return await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id });
+  }
+  if (wait_after === 'networkidle') {
+    return await wsManager.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
+  }
+  return null;
+}
+
+/**
  * Registra tutti i tool MCP.
  *
  * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
@@ -148,15 +166,19 @@ export function registerTools(server, wsManager) {
     'Click on an element identified by CSS selector. Supports shadow DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
     {
       selector: z.string().describe('CSS selector of the element to click'),
+      force:    z.boolean().optional().default(false).describe('Skip the occlusion check and click even if covered by another element'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After clicking, wait for navigation to complete or the network to go idle'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
       frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.CLICK, { selector, tab_id, frame_id });
+    async ({ selector, force, wait_after, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.CLICK, { selector, force, frame_id, tab_id });
+      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      const out = waited ? { ...data, wait_after: waited } : data;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify(out, null, 2),
         }],
       };
     }
@@ -170,15 +192,18 @@ export function registerTools(server, wsManager) {
       selector: z.string().describe('CSS selector of the input element'),
       text:     z.string().describe('Text to type'),
       mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value directly (fast); keys = per-character key events (for autocomplete/masked inputs)'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After typing, wait for navigation to complete or the network to go idle'),
       tab_id:   z.number().optional().describe('Tab ID (default: active tab)'),
       frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ selector, text, mode, tab_id, frame_id }) => {
+    async ({ selector, text, mode, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, mode, tab_id, frame_id });
+      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      const out = waited ? { ...data, wait_after: waited } : data;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify(out, null, 2),
         }],
       };
     }
@@ -472,15 +497,18 @@ export function registerTools(server, wsManager) {
         value: z.string().describe('Value to set'),
       })).describe('Array of {selector, value} pairs to fill'),
       submit_selector: z.string().optional().describe('CSS selector of submit button to click after filling'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After filling/submitting, wait for navigation to complete or the network to go idle'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
       frame_id: z.number().optional().describe('Frame ID to target (from get_frames; default: main frame)'),
     },
-    async ({ fields, submit_selector, tab_id, frame_id }) => {
+    async ({ fields, submit_selector, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
+      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      const out = waited ? { ...data, wait_after: waited } : data;
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: JSON.stringify(out, null, 2),
         }],
       };
     }

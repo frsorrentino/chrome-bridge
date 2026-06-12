@@ -432,13 +432,13 @@ async function cmdExecuteJs({ code, tab_id, frame_id }) {
   }
 }
 
-async function cmdClick({ selector, tab_id, frame_id }) {
+async function cmdClick({ selector, tab_id, frame_id, force = false }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
-    func: (sel) => {
+    func: (sel, forceClick) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
         const parts = sel.split('>>>').map((s) => s.trim());
@@ -456,15 +456,24 @@ async function cmdClick({ selector, tab_id, frame_id }) {
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.scrollIntoView({ block: 'center', inline: 'center' });
       const rect = el.getBoundingClientRect();
-      const opts = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      if (!forceClick && cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
+        const top = document.elementFromPoint(cx, cy);
+        if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+          const occluderSel = top.id ? `#${top.id}` : top.tagName.toLowerCase() + (top.className && typeof top.className === 'string' ? `.${top.className.trim().split(/\s+/)[0]}` : '');
+          return { clicked: false, occluded: true, occluder: { selector: occluderSel, tag: top.tagName.toLowerCase(), text: (top.textContent || '').trim().substring(0, 80) } };
+        }
+      }
+      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
       el.dispatchEvent(new PointerEvent('pointerdown', opts));
       el.dispatchEvent(new MouseEvent('mousedown', opts));
       el.dispatchEvent(new PointerEvent('pointerup', opts));
       el.dispatchEvent(new MouseEvent('mouseup', opts));
       el.click();
-      return { tagName: el.tagName, text: el.textContent?.substring(0, 100) };
+      return { clicked: true, tagName: el.tagName, text: el.textContent?.substring(0, 100) };
     },
-    args: [selector],
+    args: [selector, force],
     world: 'MAIN',
   });
 
