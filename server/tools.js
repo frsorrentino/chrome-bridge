@@ -471,7 +471,7 @@ export function registerTools(server, wsManager) {
     'Capture full page by scrolling and taking multiple viewport screenshots. Returns array of PNG images.',
     {
       max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
-      delay: z.number().optional().default(200).describe('Delay between captures in ms (default 200)'),
+      delay: z.number().optional().default(500).describe('Delay between captures in ms (min 500, Chrome quota is 2 captures/sec)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
     async ({ max_scrolls, delay, tab_id }) => {

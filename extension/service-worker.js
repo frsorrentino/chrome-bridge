@@ -1077,7 +1077,9 @@ async function cmdViewportResize({ preset, width, height, tab_id }) {
 
 // --- full_page_screenshot ---
 
-async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 200, tab_id }) {
+async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, tab_id }) {
+  // Chrome quota: max 2 captureVisibleTab al secondo — clamp a 500ms
+  const safeDelay = Math.max(delay, 500);
   const tabId = await resolveTabId(tab_id);
   const tab = await chrome.tabs.get(tabId);
   await chrome.tabs.update(tabId, { active: true });
@@ -1106,7 +1108,7 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 200, tab_id }) 
       args: [scrollY],
       world: 'MAIN',
     });
-    await new Promise((r) => setTimeout(r, delay));
+    await new Promise((r) => setTimeout(r, safeDelay));
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
     captures.push(dataUrl.replace(/^data:image\/png;base64,/, ''));
   }
