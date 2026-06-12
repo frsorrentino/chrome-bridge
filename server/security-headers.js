@@ -10,12 +10,14 @@ export function evaluateSecurityHeaders(headers, url) {
   const add = (severity, header, message) => findings.push({ severity, header, message });
 
   const csp = headers['content-security-policy'];
+  // Wildcard "nuda" (token * isolato), non sottodomini tipo *.example.com
+  const cspBareWildcard = !!csp && /default-src[^;]*(?:^|\s)\*(?=\s|;|$)/.test(csp);
   if (!csp) {
     add('warning', 'content-security-policy', 'No Content-Security-Policy header');
   } else {
     if (csp.includes("'unsafe-inline'")) add('warning', 'content-security-policy', "CSP allows 'unsafe-inline'");
     if (csp.includes("'unsafe-eval'")) add('warning', 'content-security-policy', "CSP allows 'unsafe-eval'");
-    if (/default-src[^;]*\*/.test(csp)) add('warning', 'content-security-policy', 'CSP default-src allows any origin (*)');
+    if (cspBareWildcard) add('warning', 'content-security-policy', 'CSP default-src allows any origin (*)');
   }
 
   if (isHttps && !headers['strict-transport-security']) {
@@ -40,7 +42,7 @@ export function evaluateSecurityHeaders(headers, url) {
   }
 
   const server = headers['server'];
-  if (server && /[\d.]+/.test(server)) {
+  if (server && /\/[\d.]+/.test(server)) {
     add('info', 'server', `Server header leaks software version: "${server}"`);
   }
   const powered = headers['x-powered-by'];
@@ -57,7 +59,7 @@ export function evaluateSecurityHeaders(headers, url) {
       info: findings.filter((f) => f.severity === 'info').length,
     },
     grade_hints: {
-      csp: !!csp && !csp.includes("'unsafe-inline'") && !csp.includes("'unsafe-eval'"),
+      csp: !!csp && !csp.includes("'unsafe-inline'") && !csp.includes("'unsafe-eval'") && !cspBareWildcard,
       hsts: !isHttps || !!headers['strict-transport-security'],
       nosniff: headers['x-content-type-options']?.toLowerCase() === 'nosniff',
       clickjacking: !!hasFrameProtection,

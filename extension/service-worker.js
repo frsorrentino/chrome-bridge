@@ -2985,6 +2985,7 @@ chrome.webRequest.onErrorOccurred.addListener((d) => {
 // --- Cattura header risposta main_frame (per security_headers) ---
 const mainFrameHeaders = new Map(); // tabId → { url, status, headers: {name(lc): value}, capturedAt }
 
+// Limite: header duplicati (es. CSP multiple) vengono sovrascritti — vince l'ultimo, solo quello viene auditato.
 chrome.webRequest.onHeadersReceived.addListener((d) => {
   if (d.tabId < 0 || d.type !== 'main_frame') return;
   const headers = {};

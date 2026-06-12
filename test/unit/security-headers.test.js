@@ -29,6 +29,27 @@ test('segnala header mancanti e CSP unsafe-inline', () => {
   assert.match(messages, /version/i); // Server header leak
 });
 
+test('CSP con wildcard di sottodominio non segnala any origin', () => {
+  const result = evaluateSecurityHeaders({
+    'content-security-policy': "default-src 'self' *.example.com",
+    'strict-transport-security': 'max-age=31536000',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+  }, 'https://example.com/');
+  const anyOrigin = result.findings.find((f) => f.message.includes('any origin'));
+  assert.equal(anyOrigin, undefined);
+  assert.equal(result.grade_hints.csp, true);
+});
+
+test('CSP con wildcard nuda segnala any origin e csp hint false', () => {
+  const result = evaluateSecurityHeaders({
+    'content-security-policy': 'default-src *',
+  }, 'https://example.com/');
+  const anyOrigin = result.findings.find((f) => f.message.includes('any origin'));
+  assert.ok(anyOrigin);
+  assert.equal(result.grade_hints.csp, false);
+});
+
 test('http URL: HSTS non applicabile', () => {
   const result = evaluateSecurityHeaders({}, 'http://localhost:3000/');
   const hsts = result.findings.find((f) => f.message.includes('Strict-Transport-Security'));

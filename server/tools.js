@@ -1097,7 +1097,7 @@ export function registerTools(server, wsManager) {
   // --- session_fixture ---
   server.tool(
     'session_fixture',
-    'Save or restore a session fixture (localStorage + sessionStorage + cookies) as a named JSON file under ~/.config/chrome-bridge/sessions/. Useful to snapshot a logged-in state and restore it later. Restore overwrites existing keys but does not clear others.',
+    'Save or restore a session fixture (localStorage + sessionStorage + cookies) as a named JSON file under ~/.config/chrome-bridge/sessions/. Useful to snapshot a logged-in state and restore it later. Restore overwrites existing keys but does not clear others. The fixture records the page origin at save time; restore refuses to run if the current tab is on a different origin (navigate there first).',
     {
       action: z.enum(['save', 'restore', 'list']).describe('Operation'),
       name: z.string().optional().describe('Fixture name (required for save/restore)'),
@@ -1113,16 +1113,31 @@ export function registerTools(server, wsManager) {
       if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
       const file = join(SESSIONS_DIR, `${name}.json`);
 
+      // Origin del tab target (match per tab_id, altrimenti tab attivo)
+      const getTabOrigin = async () => {
+        const tabs = await wsManager.sendCommand(MessageType.GET_TABS);
+        const list = Array.isArray(tabs) ? tabs : [];
+        const tab = tab_id != null ? list.find((t) => t.id === tab_id) : list.find((t) => t.active);
+        try { return tab?.url ? new URL(tab.url).origin : null; } catch { return null; }
+      };
+
       if (action === 'save') {
         const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type: 'all', tab_id });
+        const origin = await getTabOrigin();
         await mkdir(SESSIONS_DIR, { recursive: true });
-        await writeFile(file, JSON.stringify({ savedAt: new Date().toISOString(), ...data }, null, 2));
-        return { content: [{ type: 'text', text: JSON.stringify({ saved: name, localStorage: Object.keys(data.localStorage || {}).length, sessionStorage: Object.keys(data.sessionStorage || {}).length, cookies: (data.cookies || []).length }, null, 2) }] };
+        await writeFile(file, JSON.stringify({ savedAt: new Date().toISOString(), origin, ...data }, null, 2));
+        return { content: [{ type: 'text', text: JSON.stringify({ saved: name, origin, localStorage: Object.keys(data.localStorage || {}).length, sessionStorage: Object.keys(data.sessionStorage || {}).length, cookies: (data.cookies || []).length }, null, 2) }] };
       }
 
       // restore
       const fixture = JSON.parse(await readFile(file, 'utf8'));
-      const restored = { localStorage: 0, sessionStorage: 0, cookies: 0 };
+      if (fixture.origin) {
+        const currentOrigin = await getTabOrigin();
+        if (currentOrigin && currentOrigin !== fixture.origin) {
+          throw new Error(`Fixture was saved on ${fixture.origin}, current tab is ${currentOrigin} — cookies/storage would attach to the wrong site. Navigate there first.`);
+        }
+      }
+      const restored = { localStorage: 0, sessionStorage: 0, cookies: 0, cookie_errors: [] };
       for (const storageType of ['localStorage', 'sessionStorage']) {
         for (const [k, v] of Object.entries(fixture[storageType] || {})) {
           await wsManager.sendCommand(MessageType.SET_STORAGE, { type: storageType, action: 'set', key: k, value: v, tab_id });
@@ -1130,16 +1145,21 @@ export function registerTools(server, wsManager) {
         }
       }
       for (const c of fixture.cookies || []) {
-        await wsManager.sendCommand(MessageType.SET_STORAGE, {
-          type: 'cookie', action: 'set', key: c.name, value: c.value,
-          path: c.path, domain: c.domain && c.domain.startsWith('.') ? c.domain : undefined,
-          expires: c.expirationDate ? new Date(c.expirationDate * 1000).toUTCString() : undefined,
-          secure: c.secure, sameSite: c.sameSite === 'no_restriction' ? 'None' : c.sameSite === 'strict' ? 'Strict' : c.sameSite === 'lax' ? 'Lax' : undefined,
-          http_only: c.httpOnly,
-          tab_id,
-        });
-        restored.cookies++;
+        try {
+          await wsManager.sendCommand(MessageType.SET_STORAGE, {
+            type: 'cookie', action: 'set', key: c.name, value: c.value,
+            path: c.path, domain: c.domain && c.domain.startsWith('.') ? c.domain : undefined,
+            expires: c.expirationDate ? new Date(c.expirationDate * 1000).toUTCString() : undefined,
+            secure: c.secure, sameSite: c.sameSite === 'no_restriction' ? 'None' : c.sameSite === 'strict' ? 'Strict' : c.sameSite === 'lax' ? 'Lax' : undefined,
+            http_only: c.httpOnly,
+            tab_id,
+          });
+          restored.cookies++;
+        } catch (err) {
+          restored.cookie_errors.push({ name: c.name, error: err.message });
+        }
       }
+      if (restored.cookie_errors.length === 0) delete restored.cookie_errors;
       return { content: [{ type: 'text', text: JSON.stringify({ restored: name, ...restored }, null, 2) }] };
     }
   );
