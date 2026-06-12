@@ -34,8 +34,8 @@ let reconnectTimer = null;
 let reconnectDelay = RECONNECT_BASE_MS;
 let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
 
-// Tracking per tool stateful (console/network monkey-patch)
-const injectedTabs = { console: new Set(), network: new Set() };
+// Tracking per tool stateful (network monkey-patch)
+const injectedTabs = { network: new Set() };
 
 // --- Keep-alive: impedisce che il service worker venga fermato ---
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
@@ -822,45 +822,13 @@ async function cmdInjectCss({ css, tab_id }) {
   return { success: true, injectedLength: css.length };
 }
 
-// --- DevTools: read_console (stateful) ---
+// --- DevTools: read_console ---
+// Hook installed at document_start via console-capture.js content script (MAIN world).
+// This function only reads the accumulated logs.
 
 async function cmdReadConsole({ clear = false, level = 'all', tab_id }) {
   const tabId = await resolveTabId(tab_id);
-  const needsInjection = !injectedTabs.console.has(tabId);
 
-  if (needsInjection) {
-    // Inject monkey-patch nel MAIN world
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        if (window.__chromeBridge_consoleHooked) return;
-        window.__chromeBridge_consoleHooked = true;
-        window.__chromeBridge_consoleLogs = [];
-        const MAX = 1000;
-        const originals = {};
-        for (const method of ['log', 'warn', 'error', 'info', 'debug']) {
-          originals[method] = console[method].bind(console);
-          console[method] = (...args) => {
-            if (window.__chromeBridge_consoleLogs.length < MAX) {
-              window.__chromeBridge_consoleLogs.push({
-                level: method,
-                args: args.map((a) => {
-                  try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
-                  catch { return String(a); }
-                }),
-                timestamp: Date.now(),
-              });
-            }
-            originals[method](...args);
-          };
-        }
-      },
-      world: 'MAIN',
-    });
-    injectedTabs.console.add(tabId);
-  }
-
-  // Leggi i log
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (shouldClear, filterLevel) => {
@@ -1937,13 +1905,11 @@ async function cmdGetFrames({ tab_id }) {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
-    injectedTabs.console.delete(tabId);
     injectedTabs.network.delete(tabId);
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  injectedTabs.console.delete(tabId);
   injectedTabs.network.delete(tabId);
 });
 

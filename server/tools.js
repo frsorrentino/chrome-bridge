@@ -314,7 +314,7 @@ export function registerTools(server, wsManager) {
   // --- read_console ---
   server.tool(
     'read_console',
-    'Read captured console messages (log, warn, error, info, debug). First call installs the capture hook; subsequent calls read accumulated messages.',
+    'Read console messages captured from page load (hook installed at document_start), including uncaught errors and unhandled rejections.',
     {
       clear: z.boolean().optional().default(false).describe('Clear captured messages after reading'),
       level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('Filter by log level'),

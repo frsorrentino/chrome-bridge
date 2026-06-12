@@ -14,6 +14,14 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["console-capture.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
