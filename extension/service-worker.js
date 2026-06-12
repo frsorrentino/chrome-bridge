@@ -616,10 +616,10 @@ async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
     await chrome.tabs.reload(tabId, { bypassCache: bypass_cache });
   } else if (action === 'back') {
     try { await chrome.tabs.goBack(tabId); }
-    catch { throw new Error('Cannot go back: no previous history entry'); }
+    catch (e) { throw new Error(`Cannot go back: ${e.message || 'no previous history entry'}`); }
   } else if (action === 'forward') {
     try { await chrome.tabs.goForward(tabId); }
-    catch { throw new Error('Cannot go forward: no next history entry'); }
+    catch (e) { throw new Error(`Cannot go forward: ${e.message || 'no next history entry'}`); }
   } else {
     throw new Error(`Unknown action: ${action}`);
   }
