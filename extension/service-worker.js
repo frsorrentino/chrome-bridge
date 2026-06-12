@@ -611,15 +611,33 @@ async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
     return { action, activated: tabId };
   }
 
+  // Fallback per back/forward: su ChromeOS chrome.tabs.goBack può fallire
+  // anche con history valida — in quel caso usa history.back()/forward() in pagina.
+  const historyFallback = async (direction) => {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (dir) => {
+        if (window.history.length <= 1) return { moved: false };
+        if (dir === 'back') window.history.back(); else window.history.forward();
+        return { moved: true };
+      },
+      args: [direction],
+      world: 'MAIN',
+    });
+    if (!res?.[0]?.result?.moved) {
+      throw new Error(`Cannot go ${direction}: no history entry in that direction`);
+    }
+  };
+
   const done = waitForComplete(tabId);
   if (action === 'reload') {
     await chrome.tabs.reload(tabId, { bypassCache: bypass_cache });
   } else if (action === 'back') {
     try { await chrome.tabs.goBack(tabId); }
-    catch (e) { throw new Error(`Cannot go back: ${e.message || 'no previous history entry'}`); }
+    catch { await historyFallback('back'); }
   } else if (action === 'forward') {
     try { await chrome.tabs.goForward(tabId); }
-    catch (e) { throw new Error(`Cannot go forward: ${e.message || 'no next history entry'}`); }
+    catch { await historyFallback('forward'); }
   } else {
     throw new Error(`Unknown action: ${action}`);
   }
