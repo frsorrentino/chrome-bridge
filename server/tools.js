@@ -5,12 +5,16 @@
  * e restituisce il risultato al client MCP.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
+import { evaluateSecurityHeaders } from './security-headers.js';
+
+const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
 
 function truncateText(text, max) {
   if (typeof text !== 'string' || text.length <= max) return text;
@@ -444,10 +448,11 @@ export function registerTools(server, wsManager) {
       expires: z.string().optional().describe('Cookie expires (UTC date string)'),
       secure: z.boolean().optional().describe('Cookie Secure flag'),
       sameSite: z.enum(['Strict', 'Lax', 'None']).optional().describe('Cookie SameSite attribute'),
+      http_only: z.boolean().optional().describe('Cookie HttpOnly flag'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ type, action, key, value, path, domain, expires, secure, sameSite, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, tab_id });
+    async ({ type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id });
       return {
         content: [{
           type: 'text',
@@ -1068,6 +1073,74 @@ export function registerTools(server, wsManager) {
       if (action === 'set' && !username) throw new Error('username is required for action=set');
       const data = await wsManager.sendCommand(MessageType.HTTP_AUTH, { action, username, password });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- security_headers ---
+  server.tool(
+    'security_headers',
+    'Audit HTTP security headers of the current page (CSP, HSTS, X-Content-Type-Options, clickjacking protection, Referrer-Policy, Permissions-Policy, version leaks). Headers are captured from real navigations — reload the page if none are available.',
+    {
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.GET_RESPONSE_HEADERS, { tab_id });
+      if (!data.available) {
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+      const result = evaluateSecurityHeaders(data.headers, data.url);
+      result.status = data.status;
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // --- session_fixture ---
+  server.tool(
+    'session_fixture',
+    'Save or restore a session fixture (localStorage + sessionStorage + cookies) as a named JSON file under ~/.config/chrome-bridge/sessions/. Useful to snapshot a logged-in state and restore it later. Restore overwrites existing keys but does not clear others.',
+    {
+      action: z.enum(['save', 'restore', 'list']).describe('Operation'),
+      name: z.string().optional().describe('Fixture name (required for save/restore)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ action, name, tab_id }) => {
+      if (action === 'list') {
+        const { readdir } = await import('node:fs/promises');
+        let files = [];
+        try { files = (await readdir(SESSIONS_DIR)).filter((f) => f.endsWith('.json')); } catch {}
+        return { content: [{ type: 'text', text: JSON.stringify({ fixtures: files.map((f) => f.replace(/\.json$/, '')) }, null, 2) }] };
+      }
+      if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
+      const file = join(SESSIONS_DIR, `${name}.json`);
+
+      if (action === 'save') {
+        const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type: 'all', tab_id });
+        await mkdir(SESSIONS_DIR, { recursive: true });
+        await writeFile(file, JSON.stringify({ savedAt: new Date().toISOString(), ...data }, null, 2));
+        return { content: [{ type: 'text', text: JSON.stringify({ saved: name, localStorage: Object.keys(data.localStorage || {}).length, sessionStorage: Object.keys(data.sessionStorage || {}).length, cookies: (data.cookies || []).length }, null, 2) }] };
+      }
+
+      // restore
+      const fixture = JSON.parse(await readFile(file, 'utf8'));
+      const restored = { localStorage: 0, sessionStorage: 0, cookies: 0 };
+      for (const storageType of ['localStorage', 'sessionStorage']) {
+        for (const [k, v] of Object.entries(fixture[storageType] || {})) {
+          await wsManager.sendCommand(MessageType.SET_STORAGE, { type: storageType, action: 'set', key: k, value: v, tab_id });
+          restored[storageType]++;
+        }
+      }
+      for (const c of fixture.cookies || []) {
+        await wsManager.sendCommand(MessageType.SET_STORAGE, {
+          type: 'cookie', action: 'set', key: c.name, value: c.value,
+          path: c.path, domain: c.domain && c.domain.startsWith('.') ? c.domain : undefined,
+          expires: c.expirationDate ? new Date(c.expirationDate * 1000).toUTCString() : undefined,
+          secure: c.secure, sameSite: c.sameSite === 'no_restriction' ? 'None' : c.sameSite === 'strict' ? 'Strict' : c.sameSite === 'lax' ? 'Lax' : undefined,
+          http_only: c.httpOnly,
+          tab_id,
+        });
+        restored.cookies++;
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({ restored: name, ...restored }, null, 2) }] };
     }
   );
 }

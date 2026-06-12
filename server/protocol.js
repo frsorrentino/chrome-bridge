@@ -60,6 +60,7 @@ export const MessageType = Object.freeze({
   SAVE_PAGE:             'save_page',
   SET_ZOOM:              'set_zoom',
   HTTP_AUTH:             'http_auth',
+  GET_RESPONSE_HEADERS:  'get_response_headers',
 
   // Risposte (extension → server)
   RESULT: 'result',

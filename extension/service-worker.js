@@ -263,6 +263,8 @@ async function executeCommand(msg) {
       return await cmdSetZoom(params);
     case 'http_auth':
       return await cmdHttpAuth(params);
+    case 'get_response_headers':
+      return await cmdGetResponseHeaders(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -1129,7 +1131,7 @@ async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, ta
 
 // --- set_storage ---
 
-async function cmdSetStorage({ type, action, key, value, path, domain, expires, secure, sameSite, tab_id }) {
+async function cmdSetStorage({ type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id }) {
   if (!type) throw new Error('Missing required parameter: type');
   if (!action) throw new Error('Missing required parameter: action');
   const tabId = await resolveTabId(tab_id);
@@ -1144,6 +1146,7 @@ async function cmdSetStorage({ type, action, key, value, path, domain, expires, 
       if (expires) { const ts = Math.floor(new Date(expires).getTime() / 1000); if (Number.isNaN(ts)) throw new Error(`Invalid expires date: ${expires}`); details.expirationDate = ts; }
       if (secure || sameSite === 'None') details.secure = true;
       if (sameSite) details.sameSite = sameSiteMap[sameSite];
+      if (http_only) details.httpOnly = true;
       await chrome.cookies.set(details);
       return { success: true, type: 'cookie', action: 'set', key };
     }
@@ -2979,6 +2982,27 @@ chrome.webRequest.onErrorOccurred.addListener((d) => {
   pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: 0, startTime: d.timeStamp, duration: null, error: d.error });
 }, { urls: ['<all_urls>'] });
 
+// --- Cattura header risposta main_frame (per security_headers) ---
+const mainFrameHeaders = new Map(); // tabId → { url, status, headers: {name(lc): value}, capturedAt }
+
+chrome.webRequest.onHeadersReceived.addListener((d) => {
+  if (d.tabId < 0 || d.type !== 'main_frame') return;
+  const headers = {};
+  for (const h of d.responseHeaders || []) {
+    headers[h.name.toLowerCase()] = h.value ?? '';
+  }
+  mainFrameHeaders.set(d.tabId, { url: d.url, status: d.statusCode, headers, capturedAt: Date.now() });
+}, { urls: ['<all_urls>'], types: ['main_frame'] }, ['responseHeaders']);
+
+async function cmdGetResponseHeaders({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const entry = mainFrameHeaders.get(tabId);
+  if (!entry) {
+    return { available: false, note: 'No headers captured for this tab — reload the page (headers are captured from navigations after the extension loaded)' };
+  }
+  return { available: true, ...entry };
+}
+
 // --- http_auth (credenziali per HTTP Basic/Digest auth) ---
 
 let httpAuthCreds = null; // { username, password }
@@ -3026,6 +3050,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.network.delete(tabId);
   injectedTabs.websocket.delete(tabId);
   browserNetLog.delete(tabId);
+  mainFrameHeaders.delete(tabId);
 });
 
 // --- Avvia la connessione ---
