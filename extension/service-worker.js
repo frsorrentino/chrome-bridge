@@ -18,7 +18,7 @@ let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnec
 const injectedTabs = { console: new Set(), network: new Set(), dom: new Set() };
 
 // --- Keep-alive: impedisce che il service worker venga fermato ---
-chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 }); // ~24s
+chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     // Il solo fatto che l'handler esista tiene il service worker attivo
