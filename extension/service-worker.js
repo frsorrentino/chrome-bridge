@@ -35,7 +35,7 @@ let reconnectDelay = RECONNECT_BASE_MS;
 let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
 
 // Tracking per tool stateful (console/network monkey-patch)
-const injectedTabs = { console: new Set(), network: new Set(), dom: new Set() };
+const injectedTabs = { console: new Set(), network: new Set() };
 
 // --- Keep-alive: impedisce che il service worker venga fermato ---
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
@@ -354,6 +354,13 @@ async function cmdClick({ selector, tab_id }) {
     func: (sel) => {
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = el.getBoundingClientRect();
+      const opts = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+      el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new PointerEvent('pointerup', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
       el.click();
       return { tagName: el.tagName, text: el.textContent?.substring(0, 100) };
     },
@@ -1454,7 +1461,6 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
 
 async function cmdWatchDom({ selector = 'body', attributes = true, childList = true, characterData = false, subtree = true, clear = false, stop = false, tab_id }) {
   const tabId = await resolveTabId(tab_id);
-  const needsInjection = !injectedTabs.dom.has(tabId);
 
   if (stop) {
     await chrome.scripting.executeScript({
@@ -1469,45 +1475,48 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
       },
       world: 'MAIN',
     });
-    injectedTabs.dom.delete(tabId);
     return { stopped: true, count: 0, mutations: [] };
   }
 
-  if (needsInjection) {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (sel, opts) => {
-        if (window.__chromeBridge_domWatcherHooked) return;
-        window.__chromeBridge_domWatcherHooked = true;
+  // Always inject: idempotent via in-page guard; handles selector change by re-observing.
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, opts) => {
+      if (window.__chromeBridge_domWatcherHooked && window.__chromeBridge_domWatchSelector !== sel) {
+        if (window.__chromeBridge_domObserver) window.__chromeBridge_domObserver.disconnect();
+        window.__chromeBridge_domWatcherHooked = false;
         window.__chromeBridge_domMutations = [];
-        const MAX = 1000;
-        const target = document.querySelector(sel) || document.body;
-        const observer = new MutationObserver((mutationList) => {
-          for (const m of mutationList) {
-            if (window.__chromeBridge_domMutations.length >= MAX) break;
-            const entry = {
-              type: m.type,
-              target: m.target.tagName ? m.target.tagName.toLowerCase() : '#text',
-              timestamp: Date.now(),
-            };
-            if (m.type === 'attributes') entry.attributeName = m.attributeName;
-            if (m.type === 'childList') {
-              entry.addedNodes = m.addedNodes.length;
-              entry.removedNodes = m.removedNodes.length;
-            }
-            // Skip our own highlight overlays
-            if (m.target.hasAttribute && m.target.hasAttribute('data-chrome-bridge-highlight')) continue;
-            window.__chromeBridge_domMutations.push(entry);
+      }
+      if (window.__chromeBridge_domWatcherHooked) return;
+      window.__chromeBridge_domWatcherHooked = true;
+      window.__chromeBridge_domWatchSelector = sel;
+      window.__chromeBridge_domMutations = [];
+      const MAX = 1000;
+      const target = document.querySelector(sel) || document.body;
+      const observer = new MutationObserver((mutationList) => {
+        for (const m of mutationList) {
+          if (window.__chromeBridge_domMutations.length >= MAX) break;
+          const entry = {
+            type: m.type,
+            target: m.target.tagName ? m.target.tagName.toLowerCase() : '#text',
+            timestamp: Date.now(),
+          };
+          if (m.type === 'attributes') entry.attributeName = m.attributeName;
+          if (m.type === 'childList') {
+            entry.addedNodes = m.addedNodes.length;
+            entry.removedNodes = m.removedNodes.length;
           }
-        });
-        observer.observe(target, opts);
-        window.__chromeBridge_domObserver = observer;
-      },
-      args: [selector, { attributes, childList, characterData, subtree }],
-      world: 'MAIN',
-    });
-    injectedTabs.dom.add(tabId);
-  }
+          // Skip our own highlight overlays
+          if (m.target.hasAttribute && m.target.hasAttribute('data-chrome-bridge-highlight')) continue;
+          window.__chromeBridge_domMutations.push(entry);
+        }
+      });
+      observer.observe(target, opts);
+      window.__chromeBridge_domObserver = observer;
+    },
+    args: [selector, { attributes, childList, characterData, subtree }],
+    world: 'MAIN',
+  });
 
   // Read mutations
   const results = await chrome.scripting.executeScript({
@@ -1703,14 +1712,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     injectedTabs.console.delete(tabId);
     injectedTabs.network.delete(tabId);
-    injectedTabs.dom.delete(tabId);
   }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.console.delete(tabId);
   injectedTabs.network.delete(tabId);
-  injectedTabs.dom.delete(tabId);
 });
 
 // --- Avvia la connessione ---

@@ -82,7 +82,7 @@ export function registerTools(server, wsManager) {
   // --- screenshot ---
   server.tool(
     'screenshot',
-    'Take a screenshot of a Chrome tab (returns base64 PNG image)',
+    'Take a screenshot of a Chrome tab (returns base64 PNG image). Note: brings the tab to foreground and focuses its window.',
     {
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
@@ -481,7 +481,7 @@ export function registerTools(server, wsManager) {
   // --- full_page_screenshot ---
   server.tool(
     'full_page_screenshot',
-    'Capture full page by scrolling and taking multiple viewport screenshots. Returns array of PNG images.',
+    'Capture full page by scrolling and taking multiple viewport screenshots. Returns array of PNG images. Note: brings the tab to foreground and focuses its window.',
     {
       max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
       delay: z.number().optional().default(500).describe('Delay between captures in ms (min 500, Chrome quota is 2 captures/sec)'),
