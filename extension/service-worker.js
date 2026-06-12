@@ -461,7 +461,7 @@ async function cmdClick({ selector, tab_id, frame_id, force = false }) {
       if (!forceClick && cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
         const top = document.elementFromPoint(cx, cy);
         if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-          const occluderSel = top.id ? `#${top.id}` : top.tagName.toLowerCase() + (top.className && typeof top.className === 'string' ? `.${top.className.trim().split(/\s+/)[0]}` : '');
+          const occluderSel = top.id ? `#${top.id}` : top.tagName.toLowerCase() + (typeof top.className === 'string' && top.className.trim() ? `.${top.className.trim().split(/\s+/)[0]}` : '');
           return { clicked: false, occluded: true, occluder: { selector: occluderSel, tag: top.tagName.toLowerCase(), text: (top.textContent || '').trim().substring(0, 80) } };
         }
       }

@@ -173,7 +173,8 @@ export function registerTools(server, wsManager) {
     },
     async ({ selector, force, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.CLICK, { selector, force, frame_id, tab_id });
-      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
+      const waited = data?.occluded ? null : await applyWaitAfter(wsManager, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
       return {
         content: [{
