@@ -56,6 +56,10 @@ export const MessageType = Object.freeze({
   DRAG_AND_DROP:         'drag_and_drop',
   CLIPBOARD:             'clipboard',
   SET_GEOLOCATION:       'set_geolocation',
+  MANAGE_DOWNLOADS:      'manage_downloads',
+  SAVE_PAGE:             'save_page',
+  SET_ZOOM:              'set_zoom',
+  HTTP_AUTH:             'http_auth',
 
   // Risposte (extension → server)
   RESULT: 'result',
@@ -117,6 +121,8 @@ export function getTimeout(type) {
   if (type === MessageType.WAIT_FOR_ELEMENT
     || type === MessageType.WAIT_FOR_NAVIGATION
     || type === MessageType.WAIT_FOR_NETWORK_IDLE
-    || type === MessageType.UPLOAD_FILE) return 60000;
+    || type === MessageType.UPLOAD_FILE
+    || type === MessageType.MANAGE_DOWNLOADS
+    || type === MessageType.SAVE_PAGE) return 60000;
   return COMMAND_TIMEOUT_MS;
 }

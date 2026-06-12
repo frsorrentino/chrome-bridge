@@ -255,6 +255,14 @@ async function executeCommand(msg) {
       return await cmdClipboard(params);
     case 'set_geolocation':
       return await cmdSetGeolocation(params);
+    case 'manage_downloads':
+      return await cmdManageDownloads(params);
+    case 'save_page':
+      return await cmdSavePage(params);
+    case 'set_zoom':
+      return await cmdSetZoom(params);
+    case 'http_auth':
+      return await cmdHttpAuth(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -303,8 +311,7 @@ async function dataUrlToBitmap(dataUrl) {
   return await createImageBitmap(blob);
 }
 
-async function canvasToBase64(canvas) {
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
+async function blobToBase64(blob) {
   const buf = new Uint8Array(await blob.arrayBuffer());
   let bin = '';
   const CHUNK = 0x8000;
@@ -312,6 +319,10 @@ async function canvasToBase64(canvas) {
     bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
   }
   return btoa(bin);
+}
+
+async function canvasToBase64(canvas) {
+  return blobToBase64(await canvas.convertToBlob({ type: 'image/png' }));
 }
 
 // --- Implementazione comandi ---
@@ -2864,6 +2875,72 @@ async function cmdSetGeolocation({ latitude, longitude, accuracy = 10, reset = f
   return results?.[0]?.result ?? {};
 }
 
+// --- manage_downloads ---
+
+async function cmdManageDownloads({ action, timeout = 30000, limit = 10 }) {
+  if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'list') {
+    const items = await chrome.downloads.search({ orderBy: ['-startTime'], limit });
+    return {
+      downloads: items.map((d) => ({
+        id: d.id, url: d.url, filename: d.filename, state: d.state,
+        bytesReceived: d.bytesReceived, totalBytes: d.totalBytes,
+        startTime: d.startTime, error: d.error || null,
+      })),
+    };
+  }
+
+  if (action === 'wait_for_complete') {
+    const started = Date.now();
+    // Trova il download più recente non completato, o attendi che ne parta uno
+    const poll = async () => {
+      const items = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 5 });
+      return items.find((d) => d.state === 'in_progress') || items.find((d) => d.state === 'complete' && new Date(d.startTime).getTime() >= started - 5000) || null;
+    };
+    while (Date.now() - started < timeout) {
+      const d = await poll();
+      if (d && d.state === 'complete') {
+        return { completed: true, id: d.id, filename: d.filename, url: d.url, totalBytes: d.totalBytes };
+      }
+      if (d && d.state === 'interrupted') {
+        return { completed: false, error: d.error, filename: d.filename };
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { completed: false, error: 'timeout', note: `No download completed within ${timeout}ms` };
+  }
+
+  throw new Error(`Unknown action: ${action}`);
+}
+
+// --- save_page (MHTML via pageCapture) ---
+
+async function cmdSavePage({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const blob = await new Promise((resolve, reject) => {
+    chrome.pageCapture.saveAsMHTML({ tabId }, (data) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(data);
+    });
+  });
+  return { mhtml_b64: await blobToBase64(blob), size: blob.size };
+}
+
+// --- set_zoom ---
+
+async function cmdSetZoom({ factor, reset = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (reset) {
+    await chrome.tabs.setZoom(tabId, 0); // 0 = default zoom
+  } else if (factor !== undefined && factor !== null) {
+    if (factor < 0.25 || factor > 5) throw new Error('factor must be between 0.25 and 5');
+    await chrome.tabs.setZoom(tabId, factor);
+  }
+  const current = await chrome.tabs.getZoom(tabId);
+  return { zoom: current };
+}
+
 // --- Browser-level network log (webRequest) ---
 const browserNetLog = new Map(); // tabId → array
 
@@ -2882,6 +2959,40 @@ chrome.webRequest.onCompleted.addListener((d) => {
 chrome.webRequest.onErrorOccurred.addListener((d) => {
   pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: 0, startTime: d.timeStamp, duration: null, error: d.error });
 }, { urls: ['<all_urls>'] });
+
+// --- http_auth (credenziali per HTTP Basic/Digest auth) ---
+
+let httpAuthCreds = null; // { username, password }
+const httpAuthAttempted = new Set(); // requestId già serviti (anti-loop)
+
+chrome.webRequest.onAuthRequired.addListener(
+  (details, callback) => {
+    if (!httpAuthCreds || httpAuthAttempted.has(details.requestId)) {
+      callback({});
+      return;
+    }
+    httpAuthAttempted.add(details.requestId);
+    if (httpAuthAttempted.size > 500) httpAuthAttempted.clear();
+    callback({ authCredentials: { username: httpAuthCreds.username, password: httpAuthCreds.password } });
+  },
+  { urls: ['<all_urls>'] },
+  ['asyncBlocking']
+);
+
+async function cmdHttpAuth({ action, username, password }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  if (action === 'set') {
+    if (!username) throw new Error('Missing required parameter: username');
+    httpAuthCreds = { username, password: password || '' };
+    return { set: true, username };
+  }
+  if (action === 'clear') {
+    httpAuthCreds = null;
+    httpAuthAttempted.clear();
+    return { cleared: true };
+  }
+  throw new Error(`Unknown action: ${action}`);
+}
 
 // --- Tab lifecycle: cleanup injection state ---
 

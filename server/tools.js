@@ -5,7 +5,7 @@
  * e restituisce il risultato al client MCP.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import { z } from 'zod';
 import { MessageType, VERSION } from './protocol.js';
@@ -1006,6 +1006,66 @@ export function registerTools(server, wsManager) {
     },
     async ({ latitude, longitude, accuracy, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- manage_downloads ---
+  server.tool(
+    'manage_downloads',
+    'List recent downloads or wait for an in-progress/new download to complete (e.g. after clicking an export button). Files land in the ChromeOS Downloads folder, not the server filesystem.',
+    {
+      action: z.enum(['list', 'wait_for_complete']).describe('Operation'),
+      timeout: z.number().optional().default(30000).describe('Max wait in ms (wait_for_complete)'),
+      limit: z.number().optional().default(10).describe('Max items returned (list)'),
+    },
+    async ({ action, timeout, limit }) => {
+      const data = await wsManager.sendCommand(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- save_page ---
+  server.tool(
+    'save_page',
+    'Save the full page (DOM, styles, images) as an MHTML archive file on the server filesystem.',
+    {
+      output_path: z.string().describe('Absolute file path to write (e.g. /tmp/page.mhtml)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ output_path, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SAVE_PAGE, { tab_id });
+      await writeFile(output_path, Buffer.from(data.mhtml_b64, 'base64'));
+      return { content: [{ type: 'text', text: JSON.stringify({ saved: output_path, size: data.size }, null, 2) }] };
+    }
+  );
+
+  // --- set_zoom ---
+  server.tool(
+    'set_zoom',
+    'Get or set the tab zoom factor (0.25–5). Call without factor to read current zoom; reset restores default.',
+    {
+      factor: z.number().optional().describe('Zoom factor (1 = 100%)'),
+      reset: z.boolean().optional().default(false).describe('Restore default zoom'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ factor, reset, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SET_ZOOM, { factor, reset, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- http_auth ---
+  server.tool(
+    'http_auth',
+    'Provide credentials for HTTP Basic/Digest auth dialogs (browser-wide until cleared). Credentials are kept in extension memory only.',
+    {
+      action: z.enum(['set', 'clear']).describe('set credentials or clear them'),
+      username: z.string().optional().describe('Username (for set)'),
+      password: z.string().optional().describe('Password (for set)'),
+    },
+    async ({ action, username, password }) => {
+      const data = await wsManager.sendCommand(MessageType.HTTP_AUTH, { action, username, password });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );

@@ -14,7 +14,10 @@
     "webRequest",
     "declarativeNetRequest",
     "clipboardRead",
-    "clipboardWrite"
+    "clipboardWrite",
+    "downloads",
+    "pageCapture",
+    "webRequestAuthProvider"
   ],
   "host_permissions": [
     "<all_urls>"
