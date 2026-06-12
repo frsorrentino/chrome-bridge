@@ -45,3 +45,6 @@ h1 {
   color: #888;
   font-family: monospace;
 }
+
+.config { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.config input { width: 100%; box-sizing: border-box; }

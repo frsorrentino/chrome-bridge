@@ -25,3 +25,13 @@ chrome.runtime.sendMessage({ type: 'getConnectionState' }, (response) => {
     updateUI(response.state);
   }
 });
+
+const portInput = document.getElementById('port');
+const tokenInput = document.getElementById('token');
+chrome.storage.local.get({ port: 8765, token: '' }, (cfg) => {
+  portInput.value = cfg.port;
+  tokenInput.value = cfg.token;
+});
+document.getElementById('save').addEventListener('click', () => {
+  chrome.storage.local.set({ port: parseInt(portInput.value, 10) || 8765, token: tokenInput.value });
+});

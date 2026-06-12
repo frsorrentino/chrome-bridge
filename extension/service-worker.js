@@ -5,7 +5,26 @@
  * Riceve comandi, li esegue tramite Chrome APIs, e invia le risposte.
  */
 
-const WS_URL = 'ws://localhost:8765';
+const DEFAULT_PORT = 8765;
+let wsUrl = `ws://localhost:${DEFAULT_PORT}`;
+let extToken = '';
+
+async function loadConfig() {
+  const cfg = await chrome.storage.local.get({ port: DEFAULT_PORT, token: '' });
+  wsUrl = `ws://localhost:${cfg.port}`;
+  extToken = cfg.token || '';
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.port || changes.token) {
+    loadConfig().then(() => {
+      // Chiudi e lascia che scheduleReconnect riconnetta col nuovo URL
+      if (ws) { try { ws.close(); } catch {} } else { connect(); }
+    });
+  }
+});
+
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 const KEEPALIVE_ALARM = 'chrome-bridge-keepalive';
@@ -42,7 +61,7 @@ function connect() {
   setConnectionState('connecting');
 
   try {
-    ws = new WebSocket(WS_URL);
+    ws = new WebSocket(wsUrl);
   } catch (err) {
     console.error('[chrome-bridge] WebSocket creation error:', err);
     scheduleReconnect();
@@ -51,8 +70,9 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[chrome-bridge] Connected to MCP server');
-    // Token configurabile via chrome.storage arriverà col supporto popup (vedi piano); senza token il server accetta solo se CHROME_BRIDGE_TOKEN non è impostato.
-    ws.send(JSON.stringify({ type: 'ext_init' }));
+    const init = { type: 'ext_init' };
+    if (extToken) init.token = extToken;
+    ws.send(JSON.stringify(init));
     setConnectionState('connected');
     reconnectDelay = RECONNECT_BASE_MS; // Reset backoff
   };
@@ -1652,4 +1672,4 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // --- Avvia la connessione ---
-connect();
+loadConfig().then(connect);

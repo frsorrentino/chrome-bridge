@@ -12,6 +12,11 @@
       <span id="status-text">Disconnected</span>
     </div>
     <p class="info">WebSocket: ws://localhost:8765</p>
+    <div class="config">
+      <label>Port <input type="number" id="port" min="1" max="65535"></label>
+      <label>Token <input type="password" id="token" placeholder="(none)"></label>
+      <button id="save">Save &amp; Reconnect</button>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>
