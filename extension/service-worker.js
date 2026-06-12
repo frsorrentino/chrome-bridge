@@ -221,9 +221,29 @@ async function executeCommand(msg) {
       return await cmdPressKey(params);
     case 'get_frames':
       return await cmdGetFrames(params);
+    case 'tab_action':
+      return await cmdTabAction(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
+}
+
+// --- Utility: waitForComplete ---
+
+function waitForComplete(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(true);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(false);
+    }, timeoutMs);
+  });
 }
 
 // --- Utility: risolvi tab_id ---
@@ -281,23 +301,9 @@ async function cmdNavigate({ url, tab_id }) {
 
   // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
   // può emettere 'complete' prima che il listener esista
-  const waitComplete = new Promise((resolve) => {
-    const listener = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-    // Timeout di sicurezza
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, 15000);
-  });
-
+  const done = waitForComplete(tabId);
   await chrome.tabs.update(tabId, { url });
-  await waitComplete;
+  await done;
 
   const updatedTab = await chrome.tabs.get(tabId);
   return { url: updatedTab.url, title: updatedTab.title, tabId };
@@ -511,23 +517,45 @@ async function cmdCreateTab({ url, active = true }) {
   const tab = await chrome.tabs.create(opts);
   // Attendi caricamento se c'è un URL
   if (url) {
-    await new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === tab.id && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 15000);
-    });
+    await waitForComplete(tab.id);
     const updated = await chrome.tabs.get(tab.id);
     return { id: updated.id, url: updated.url, title: updated.title };
   }
   return { id: tab.id, url: tab.url || 'chrome://newtab', title: tab.title || '' };
+}
+
+// --- tab_action ---
+
+async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+
+  if (action === 'close') {
+    await chrome.tabs.remove(tabId);
+    return { action, closed: tabId };
+  }
+  if (action === 'activate') {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    return { action, activated: tabId };
+  }
+
+  const done = waitForComplete(tabId);
+  if (action === 'reload') {
+    await chrome.tabs.reload(tabId, { bypassCache: bypass_cache });
+  } else if (action === 'back') {
+    try { await chrome.tabs.goBack(tabId); }
+    catch { throw new Error('Cannot go back: no previous history entry'); }
+  } else if (action === 'forward') {
+    try { await chrome.tabs.goForward(tabId); }
+    catch { throw new Error('Cannot go forward: no next history entry'); }
+  } else {
+    throw new Error(`Unknown action: ${action}`);
+  }
+  await done;
+  const t = await chrome.tabs.get(tabId);
+  return { action, url: t.url, title: t.title, tabId };
 }
 
 // --- DevTools: get_page_info ---

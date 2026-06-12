@@ -39,6 +39,7 @@ export const MessageType = Object.freeze({
   HOVER:                'hover',
   PRESS_KEY:            'press_key',
   GET_FRAMES:           'get_frames',
+  TAB_ACTION:           'tab_action',
 
   // Risposte (extension → server)
   RESULT: 'result',

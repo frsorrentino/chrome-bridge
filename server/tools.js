@@ -721,4 +721,19 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // --- tab_action ---
+  server.tool(
+    'tab_action',
+    'Tab lifecycle actions: close, activate (focus), reload (optional cache bypass), back, forward',
+    {
+      action: z.enum(['close', 'activate', 'reload', 'back', 'forward']).describe('Action to perform'),
+      bypass_cache: z.boolean().optional().default(false).describe('For reload: bypass HTTP cache'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ action, bypass_cache, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }
