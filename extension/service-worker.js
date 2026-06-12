@@ -2808,15 +2808,8 @@ async function cmdClipboard({ action, text, tab_id }) {
           const value = await navigator.clipboard.readText();
           return { text: value, method: 'clipboard-api' };
         } catch (e) {
-          const ta = document.createElement('textarea');
-          ta.style.cssText = 'position:fixed;opacity:0;';
-          document.body.appendChild(ta);
-          ta.focus();
-          const ok = document.execCommand('paste');
-          const value = ta.value;
-          ta.remove();
-          if (!ok) throw new Error(`Clipboard read failed: ${e.message} (page may need user gesture)`);
-          return { text: value, method: 'execCommand' };
+          // Nessun fallback: execCommand('paste') è stato rimosso da Chrome 86+.
+          throw new Error(`Clipboard read failed: ${e.message} (page may need focus)`);
         }
       }
       throw new Error(`Unknown action: ${act}`);
