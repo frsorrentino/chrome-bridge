@@ -1163,4 +1163,56 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify({ restored: name, ...restored }, null, 2) }] };
     }
   );
+
+  // --- get_interactives ---
+  server.tool(
+    'get_interactives',
+    'List actionable elements (buttons, links, inputs, [role], [onclick]) with a ready-to-use CSS selector, label, position, enabled/visible/occluded flags. Use this to discover selectors instead of dumping the full HTML.',
+    {
+      scope: z.string().optional().describe('CSS selector to limit the search (default: whole document)'),
+      limit: z.number().optional().default(100).describe('Max elements returned'),
+      visible_only: z.boolean().optional().default(true).describe('Only return visible elements'),
+      frame_id: z.number().optional().describe('Frame ID (from get_frames; default: main frame)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ scope, limit, visible_only, frame_id, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- wait_for_function ---
+  server.tool(
+    'wait_for_function',
+    'Poll a JavaScript expression in the page until it evaluates truthy or times out (generalizes wait_for_element). E.g. "window.app && app.ready" or "document.querySelectorAll(\'.row\').length > 10".',
+    {
+      expression: z.string().describe('JS expression evaluated in page context; resolves when truthy'),
+      timeout: z.number().optional().default(10000).describe('Max wait in ms'),
+      polling_ms: z.number().optional().default(100).describe('Poll interval in ms (min 50)'),
+      frame_id: z.number().optional().describe('Frame ID (from get_frames; default: main frame)'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ expression, timeout, polling_ms, frame_id, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_FUNCTION, { expression, timeout, polling_ms, frame_id, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // --- scroll_until ---
+  server.tool(
+    'scroll_until',
+    'Scroll the page repeatedly until a condition: an element becomes visible, the network goes idle, no new content loads, or the page bottom is reached. For infinite-scroll / lazy-loaded pages.',
+    {
+      until: z.enum(['element', 'network_idle', 'no_new_content']).optional().default('no_new_content').describe('Stop condition'),
+      selector: z.string().optional().describe('Element selector (for until=element)'),
+      max_scrolls: z.number().optional().default(20).describe('Max scroll steps'),
+      step_px: z.number().optional().describe('Pixels per step (default: viewport height)'),
+      settle_ms: z.number().optional().default(400).describe('Pause after each scroll in ms'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ until, selector, max_scrolls, step_px, settle_ms, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until, selector, max_scrolls, step_px, settle_ms, tab_id });
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

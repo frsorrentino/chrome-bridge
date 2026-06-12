@@ -61,6 +61,9 @@ export const MessageType = Object.freeze({
   SET_ZOOM:              'set_zoom',
   HTTP_AUTH:             'http_auth',
   GET_RESPONSE_HEADERS:  'get_response_headers',
+  GET_INTERACTIVES:      'get_interactives',
+  WAIT_FOR_FUNCTION:     'wait_for_function',
+  SCROLL_UNTIL:          'scroll_until',
 
   // Risposte (extension → server)
   RESULT: 'result',
@@ -124,6 +127,8 @@ export function getTimeout(type) {
     || type === MessageType.WAIT_FOR_NETWORK_IDLE
     || type === MessageType.UPLOAD_FILE
     || type === MessageType.MANAGE_DOWNLOADS
-    || type === MessageType.SAVE_PAGE) return 60000;
+    || type === MessageType.SAVE_PAGE
+    || type === MessageType.WAIT_FOR_FUNCTION
+    || type === MessageType.SCROLL_UNTIL) return 60000;
   return COMMAND_TIMEOUT_MS;
 }

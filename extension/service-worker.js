@@ -265,6 +265,12 @@ async function executeCommand(msg) {
       return await cmdHttpAuth(params);
     case 'get_response_headers':
       return await cmdGetResponseHeaders(params);
+    case 'get_interactives':
+      return await cmdGetInteractives(params);
+    case 'wait_for_function':
+      return await cmdWaitForFunction(params);
+    case 'scroll_until':
+      return await cmdScrollUntil(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -3073,6 +3079,158 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   browserNetLog.delete(tabId);
   mainFrameHeaders.delete(tabId);
 });
+
+// --- get_interactives ---
+
+async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (scopeSel, lim, visibleOnly) => {
+      const root = scopeSel ? document.querySelector(scopeSel) : document;
+      if (!root) return { count: 0, elements: [], note: 'Scope element not found' };
+
+      // Selettore stabile e riusabile: id > data-testid > path nth-of-type
+      const stableSelector = (el) => {
+        if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) return `#${el.id}`;
+        const testid = el.getAttribute('data-testid');
+        if (testid) return `[data-testid="${testid}"]`;
+        const parts = [];
+        let node = el;
+        while (node && node.nodeType === 1 && node !== document.documentElement) {
+          let part = node.tagName.toLowerCase();
+          if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) { parts.unshift(`#${node.id}`); break; }
+          const parent = node.parentElement;
+          if (parent) {
+            const sameTag = [...parent.children].filter((c) => c.tagName === node.tagName);
+            if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+          }
+          parts.unshift(part);
+          node = node.parentElement;
+        }
+        return parts.join(' > ');
+      };
+
+      const SEL = 'button, a[href], input:not([type=hidden]), select, textarea, [role=button], [role=link], [role=tab], [role=menuitem], [onclick], [tabindex]:not([tabindex="-1"]), summary';
+      const seen = new Set();
+      const out = [];
+      for (const el of root.querySelectorAll(SEL)) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+        if (visibleOnly && !visible) continue;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let occluded = false;
+        if (visible && cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
+          const top = document.elementFromPoint(cx, cy);
+          occluded = !!top && top !== el && !el.contains(top) && !top.contains(el);
+        }
+        const label = (el.getAttribute('aria-label') || el.value || el.textContent || el.getAttribute('title') || el.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+        out.push({
+          selector: stableSelector(el),
+          tag: el.tagName.toLowerCase(),
+          type: el.getAttribute('type') || el.getAttribute('role') || null,
+          text: label || null,
+          enabled: !el.disabled,
+          visible,
+          occluded,
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+        });
+        if (out.length >= lim) break;
+      }
+      return { count: out.length, elements: out };
+    },
+    args: [scope || null, limit, visible_only],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, elements: [] };
+}
+
+// --- wait_for_function ---
+
+async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 100, tab_id, frame_id }) {
+  if (!expression) throw new Error('Missing required parameter: expression');
+  const tabId = await resolveTabId(tab_id);
+  const clamped = Math.max(polling_ms, 50);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (expr, tout, intv) => new Promise((resolve) => {
+      const start = Date.now();
+      const evaluate = () => {
+        let value, ok = false;
+        try { value = eval(expr); ok = !!value; } catch (e) { value = { __error: e.message }; }
+        if (ok) {
+          let serial = value;
+          try { serial = typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value; } catch { serial = String(value); }
+          resolve({ satisfied: true, elapsed: Date.now() - start, value: serial });
+          return;
+        }
+        if (Date.now() - start >= tout) {
+          resolve({ satisfied: false, elapsed: Date.now() - start, lastValue: value ?? null });
+          return;
+        }
+        setTimeout(evaluate, intv);
+      };
+      evaluate();
+    }),
+    args: [expression, timeout, clamped],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { satisfied: false };
+}
+
+// --- scroll_until ---
+
+async function cmdScrollUntil({ until = 'no_new_content', selector, max_scrolls = 20, step_px, settle_ms = 400, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (until === 'network_idle') await ensureNetworkHook(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (mode, sel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      (async () => {
+        let scrolls = 0;
+        let lastHeight = document.documentElement.scrollHeight;
+        let stableCount = 0;
+        const step = stepPx || window.innerHeight;
+        for (scrolls = 0; scrolls < maxScrolls; scrolls++) {
+          if (mode === 'element' && sel) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const r = el.getBoundingClientRect();
+              const vis = r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+              if (vis) { resolve({ stopped_reason: 'element_found', scrolls, finalScrollY: Math.round(window.scrollY) }); return; }
+            }
+          }
+          window.scrollBy(0, step);
+          await sleep(settleMs);
+
+          if (mode === 'network_idle') {
+            const inflight = window.__chromeBridge_inflight || 0;
+            const last = window.__chromeBridge_lastNetActivity || 0;
+            if (inflight === 0 && Date.now() - last >= settleMs) { resolve({ stopped_reason: 'network_idle', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+          }
+
+          const h = document.documentElement.scrollHeight;
+          if (h === lastHeight) {
+            stableCount++;
+            if (mode === 'no_new_content' && stableCount >= 2) { resolve({ stopped_reason: 'no_new_content', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+          } else { stableCount = 0; lastHeight = h; }
+
+          // bottom reached
+          if (window.innerHeight + window.scrollY >= h - 2) { resolve({ stopped_reason: 'bottom', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+        }
+        resolve({ stopped_reason: 'max_scrolls', scrolls, finalScrollY: Math.round(window.scrollY) });
+      })();
+    }),
+    args: [until, selector || null, max_scrolls, step_px || null, settle_ms],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { stopped_reason: 'error', scrolls: 0 };
+}
 
 // --- Avvia la connessione ---
 loadConfig().then(connect);
