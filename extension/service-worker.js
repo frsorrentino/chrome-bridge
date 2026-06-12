@@ -641,9 +641,11 @@ async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
   } else {
     throw new Error(`Unknown action: ${action}`);
   }
-  await done;
+  // navigated:false = nessun evento 'complete' entro il timeout: history vuota
+  // in quella direzione (no-op) o navigazione same-document/molto lenta.
+  const navigated = await done;
   const t = await chrome.tabs.get(tabId);
-  return { action, url: t.url, title: t.title, tabId };
+  return { action, url: t.url, title: t.title, tabId, navigated };
 }
 
 // --- DevTools: get_page_info ---
