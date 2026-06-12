@@ -1283,17 +1283,47 @@ async function cmdAccessibilityAudit({ scope, checks = ['all'], tab_id }) {
         }
       }
 
-      // Contrast (basic)
+      // Contrast (WCAG 2.1 ratio)
       if (runAll || checkList.includes('contrast')) {
-        const textEls = [...root.querySelectorAll('p, span, a, li, td, th, label, h1, h2, h3, h4, h5, h6')].slice(0, 200);
+        const parseColor = (c) => {
+          const m = c.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
+          if (!m) return null;
+          return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
+        };
+        const luminance = ({ r, g, b }) => {
+          const f = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        const effectiveBg = (el) => {
+          let node = el;
+          while (node && node !== document.documentElement) {
+            const bg = parseColor(getComputedStyle(node).backgroundColor);
+            if (bg && bg.a >= 0.99) return bg;
+            node = node.parentElement;
+          }
+          return { r: 255, g: 255, b: 255, a: 1 };
+        };
+        const textEls = [...root.querySelectorAll('p, span, a, li, td, th, label, h1, h2, h3, h4, h5, h6, button')].slice(0, 200);
         for (const el of textEls) {
           if (!el.textContent.trim()) continue;
           const style = getComputedStyle(el);
-          const color = style.color;
-          const bg = style.backgroundColor;
-          // Simple check: both same → bad. Only flag obvious issues.
-          if (color && bg && color === bg && color !== 'rgba(0, 0, 0, 0)') {
-            violations.push({ type: 'contrast', severity: 'error', selector: selectorFor(el), message: `Text color matches background: ${color}` });
+          const fg = parseColor(style.color);
+          if (!fg) continue;
+          const bg = effectiveBg(el);
+          const L1 = Math.max(luminance(fg), luminance(bg));
+          const L2 = Math.min(luminance(fg), luminance(bg));
+          const ratio = (L1 + 0.05) / (L2 + 0.05);
+          const px = parseFloat(style.fontSize);
+          const bold = parseInt(style.fontWeight) >= 700;
+          const isLarge = px >= 24 || (px >= 18.66 && bold);
+          const required = isLarge ? 3 : 4.5;
+          if (ratio < required) {
+            violations.push({
+              type: 'contrast',
+              severity: ratio < required - 1.5 ? 'error' : 'warning',
+              selector: selectorFor(el),
+              message: `Contrast ${ratio.toFixed(2)}:1 below WCAG ${required}:1 (${isLarge ? 'large' : 'normal'} text)`,
+            });
           }
         }
       }
