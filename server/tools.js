@@ -848,4 +848,30 @@ export function registerTools(server, wsManager) {
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
   );
+
+  // --- screenshot_diff ---
+  server.tool(
+    'screenshot_diff',
+    'Visual regression: capture a named baseline screenshot (viewport or element), then compare later — returns changed-pixel percentage and a diff image (changes in red over faded baseline). Baselines live in extension memory and are lost if the service worker restarts. Brings tab to foreground.',
+    {
+      action: z.enum(['baseline', 'compare', 'list', 'clear']).describe('baseline = capture reference; compare = diff against it'),
+      name: z.string().optional().default('default').describe('Baseline name'),
+      selector: z.string().optional().describe('CSS selector to capture just one element (default: viewport; compare reuses baseline selector)'),
+      threshold: z.number().optional().default(10).describe('Per-channel tolerance 0-255 before a pixel counts as changed'),
+      tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
+    },
+    async ({ action, name, selector, threshold, tab_id }) => {
+      const data = await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, tab_id });
+      if (data && data.diff_image) {
+        const { diff_image, ...rest } = data;
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify(rest, null, 2) },
+            { type: 'image', data: diff_image, mimeType: 'image/png' },
+          ],
+        };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

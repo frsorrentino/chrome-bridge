@@ -235,6 +235,8 @@ async function executeCommand(msg) {
       return await cmdFindText(params);
     case 'network_rules':
       return await cmdNetworkRules(params);
+    case 'screenshot_diff':
+      return await cmdScreenshotDiff(params);
     default:
       throw new Error(`Unknown command type: ${type}`);
   }
@@ -2158,6 +2160,136 @@ async function cmdNetworkRules({ action, url_filter, redirect_url, header, heade
 
   await chrome.declarativeNetRequest.updateDynamicRules({ addRules: [rule] });
   return { added: rule };
+}
+
+// --- screenshot_diff (regressione visiva) ---
+// Baseline in memoria del service worker: persa se il SW viene sospeso.
+// NOTA: la logica capture+crop duplica cmdElementScreenshot — candidata a refactor futuro.
+
+const MAX_DIFF_BASELINES = 10;
+const diffBaselines = new Map(); // name → { bitmapData: ImageData, width, height, capturedAt, selector }
+
+async function captureForDiff(tabId, selector) {
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.tabs.update(tabId, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+
+  let cropRect = null;
+  if (selector) {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error(`Element not found: ${sel}`);
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+      },
+      args: [selector],
+      world: 'MAIN',
+    });
+    cropRect = res?.[0]?.result;
+    if (!cropRect || cropRect.width === 0 || cropRect.height === 0) throw new Error('Element has no visible area');
+  }
+
+  await new Promise((r) => setTimeout(r, 300));
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const bitmap = await dataUrlToBitmap(dataUrl);
+
+  let sx = 0, sy = 0, sw = bitmap.width, sh = bitmap.height;
+  if (cropRect) {
+    const dpr = cropRect.dpr;
+    sx = Math.max(0, Math.round(cropRect.x * dpr));
+    sy = Math.max(0, Math.round(cropRect.y * dpr));
+    sw = Math.min(Math.round(cropRect.width * dpr), bitmap.width - sx);
+    sh = Math.min(Math.round(cropRect.height * dpr), bitmap.height - sy);
+    if (sw <= 0 || sh <= 0) throw new Error('Element is outside the visible viewport');
+  }
+
+  const canvas = new OffscreenCanvas(sw, sh);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  return { canvas, ctx, width: sw, height: sh };
+}
+
+async function cmdScreenshotDiff({ action, name = 'default', selector, threshold = 10, tab_id }) {
+  if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'list') {
+    return {
+      baselines: [...diffBaselines.entries()].map(([n, b]) => ({
+        name: n, width: b.width, height: b.height, capturedAt: b.capturedAt, selector: b.selector,
+      })),
+    };
+  }
+
+  if (action === 'clear') {
+    const n = diffBaselines.size;
+    diffBaselines.clear();
+    return { cleared: n };
+  }
+
+  const tabId = await resolveTabId(tab_id);
+
+  if (action === 'baseline') {
+    if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
+      throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
+    }
+    const { ctx, width, height } = await captureForDiff(tabId, selector);
+    diffBaselines.set(name, {
+      bitmapData: ctx.getImageData(0, 0, width, height),
+      width, height,
+      capturedAt: Date.now(),
+      selector: selector || null,
+    });
+    return { baseline: name, width, height, selector: selector || null };
+  }
+
+  if (action === 'compare') {
+    const base = diffBaselines.get(name);
+    if (!base) throw new Error(`No baseline named "${name}" — capture one first with action: baseline (note: baselines are lost if the extension service worker restarts)`);
+
+    const { ctx, width, height } = await captureForDiff(tabId, selector ?? base.selector ?? undefined);
+    if (width !== base.width || height !== base.height) {
+      return {
+        match: false,
+        reason: 'size_mismatch',
+        baseline: { width: base.width, height: base.height },
+        current: { width, height },
+      };
+    }
+
+    const cur = ctx.getImageData(0, 0, width, height);
+    const a = base.bitmapData.data;
+    const b = cur.data;
+    const diffCanvas = new OffscreenCanvas(width, height);
+    const diffCtx = diffCanvas.getContext('2d');
+    const out = diffCtx.createImageData(width, height);
+    let changed = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      const delta = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      if (delta > threshold * 3) {
+        changed++;
+        out.data[i] = 255; out.data[i + 1] = 0; out.data[i + 2] = 0; out.data[i + 3] = 255;
+      } else {
+        // Base sbiadita per contesto
+        const gray = (a[i] + a[i + 1] + a[i + 2]) / 3;
+        out.data[i] = gray; out.data[i + 1] = gray; out.data[i + 2] = gray; out.data[i + 3] = 80;
+      }
+    }
+    diffCtx.putImageData(out, 0, 0);
+    const totalPixels = width * height;
+    const diffPercent = (changed / totalPixels) * 100;
+    return {
+      match: changed === 0,
+      diff_percent: Math.round(diffPercent * 100) / 100,
+      changed_pixels: changed,
+      total_pixels: totalPixels,
+      diff_image: await canvasToBase64(diffCanvas),
+    };
+  }
+
+  throw new Error(`Unknown action: ${action}`);
 }
 
 // --- Browser-level network log (webRequest) ---
