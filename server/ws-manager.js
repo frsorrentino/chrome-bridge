@@ -160,7 +160,7 @@ export class WSManager {
 
   /**
    * Ogni connessione DEVE identificarsi col primo messaggio:
-   * - { type: 'ext_init', token? }  → estensione Chrome (Origin chrome-extension://)
+   * - { type: 'ext_init', token? }  → estensione Chrome (Origin chrome-extension:// obbligatorio)
    * - { type: 'relay_init' }        → relay client (solo loopback)
    * Connessioni mute o non valide vengono terminate.
    */
@@ -168,13 +168,9 @@ export class WSManager {
     const origin = req.headers.origin || '';
     const remote = req.socket.remoteAddress || '';
     const isLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
-    let identified = false;
-
     const idTimer = setTimeout(() => {
-      if (!identified) {
-        console.error(`[chrome-bridge] Unidentified connection from ${remote} — terminating`);
-        ws.terminate();
-      }
+      console.error(`[chrome-bridge] Unidentified connection from ${remote} — terminating`);
+      ws.terminate();
     }, this.identTimeout);
 
     const onFirstMessage = (raw) => {
@@ -182,12 +178,12 @@ export class WSManager {
       try {
         msg = JSON.parse(raw.toString());
       } catch {
+        console.error('[chrome-bridge] Invalid JSON during handshake — terminating');
         clearTimeout(idTimer);
         ws.terminate();
         return;
       }
 
-      identified = true;
       clearTimeout(idTimer);
       ws.removeListener('message', onFirstMessage);
 
@@ -202,8 +198,8 @@ export class WSManager {
       }
 
       if (msg.type === MessageType.EXT_INIT) {
-        if (origin && !origin.startsWith('chrome-extension://')) {
-          console.error(`[chrome-bridge] ext_init with origin ${origin} — rejected`);
+        if (!origin.startsWith('chrome-extension://')) {
+          console.error(`[chrome-bridge] ext_init with origin "${origin}" — rejected`);
           ws.terminate();
           return;
         }

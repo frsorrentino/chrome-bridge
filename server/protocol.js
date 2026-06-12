@@ -53,8 +53,8 @@ export const MessageType = Object.freeze({
 export const DEFAULT_PORT          = 8765;
 export const COMMAND_TIMEOUT_MS    = 30000;  // 30s per comandi normali
 export const SCREENSHOT_TIMEOUT_MS = 10000;  // 10s per screenshot
-export const PING_INTERVAL_MS     = 15000;  // 15s heartbeat
-export const IDENT_TIMEOUT_MS = 5000;   // tempo max per identificarsi
+export const PING_INTERVAL_MS      = 15000;  // 15s heartbeat
+export const IDENT_TIMEOUT_MS      = 5000;   // tempo max per identificarsi
 
 // Contatore globale per ID univoci
 let messageCounter = 0;

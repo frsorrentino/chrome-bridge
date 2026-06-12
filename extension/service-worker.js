@@ -51,6 +51,7 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[chrome-bridge] Connected to MCP server');
+    // Token configurabile via chrome.storage arriverà col supporto popup (vedi piano); senza token il server accetta solo se CHROME_BRIDGE_TOKEN non è impostato.
     ws.send(JSON.stringify({ type: 'ext_init' }));
     setConnectionState('connected');
     reconnectDelay = RECONNECT_BASE_MS; // Reset backoff

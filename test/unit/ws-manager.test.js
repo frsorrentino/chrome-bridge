@@ -31,6 +31,15 @@ function waitClose(ws, ms = 1000) {
   });
 }
 
+async function waitFor(fn, ms = 1000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (fn()) return true;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return fn();
+}
+
 test('connessione muta viene terminata dopo identTimeout', async () => {
   const ws = await connect();
   const closed = await waitClose(ws);
@@ -53,11 +62,18 @@ test('ext_init con Origin non-extension → terminate', async () => {
   assert.equal(manager.isConnected(), false);
 });
 
+test('ext_init senza Origin → terminate', async () => {
+  const ws = await connect();
+  ws.send(JSON.stringify({ type: 'ext_init' }));
+  const closed = await waitClose(ws);
+  assert.equal(closed, true);
+  assert.equal(manager.isConnected(), false);
+});
+
 test('ext_init con Origin chrome-extension:// → accettato', async () => {
   const ws = await connect({ origin: 'chrome-extension://abcdefghijklmnop' });
   ws.send(JSON.stringify({ type: 'ext_init' }));
-  await new Promise((r) => setTimeout(r, 100));
-  assert.equal(manager.isConnected(), true);
+  assert.equal(await waitFor(() => manager.isConnected()), true);
   ws.close();
   await new Promise((r) => setTimeout(r, 100));
 });
@@ -78,8 +94,7 @@ test('ext_init con token sbagliato quando token impostato → terminate', async 
 test('relay_init da loopback → accettato come relay', async () => {
   const ws = await connect();
   ws.send(JSON.stringify({ type: 'relay_init' }));
-  await new Promise((r) => setTimeout(r, 100));
-  assert.equal(manager.relayClients.size, 1);
+  assert.equal(await waitFor(() => manager.relayClients.size === 1), true);
   ws.close();
   await new Promise((r) => setTimeout(r, 100));
 });
