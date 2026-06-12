@@ -2086,7 +2086,8 @@ async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id }) 
         };
         check();
       }),
-      args: [baseline, timeout],
+      // Clamp sotto l'envelope del comando (60s) per non lasciare il poll orfano
+      args: [baseline, Math.min(timeout, 59000)],
       world: 'MAIN',
     });
     return res?.[0]?.result ?? { navigated: false, mode: 'spa' };
@@ -2109,7 +2110,7 @@ async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id }) 
     });
     if (!started) {
       const t = await chrome.tabs.get(tabId);
-      return { navigated: false, url: t.url, note: 'No navigation started' };
+      return { navigated: false, mode: 'load', url: t.url, note: 'No navigation started' };
     }
   }
 
