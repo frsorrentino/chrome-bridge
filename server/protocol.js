@@ -59,6 +59,7 @@ export const PING_INTERVAL_MS      = 15000;  // 15s heartbeat
 export const IDENT_TIMEOUT_MS      = 5000;   // tempo max per identificarsi
 
 // Entropia per instance + contatore globale per ID univoci
+// 4 byte casuali per processo (2^32 valori): sufficiente per un bridge locale
 const instanceId = randomBytes(4).toString('hex');
 let messageCounter = 0;
 
