@@ -1,6 +1,8 @@
 # Chrome Bridge
 
-MCP server that connects Claude Code to Chrome via a WebSocket bridge and a Chrome extension. Built for ChromeOS (Crostini), works on any platform with Chrome.
+**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Built for ChromeOS (Crostini), works on any platform with Chrome 111+.
+
+Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 60 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
 ## Why Chrome Bridge?
 
@@ -10,121 +12,146 @@ There are several browser automation tools for Claude Code. Here's how they comp
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** | No | No | No |
 | **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Separate browser instance |
-| **Tools** | **56** | ~15 | Full CDP | ~20 |
+| **Tools** | **60** | ~15 | Full CDP | ~20 |
 | **Uses your real browser** | Yes | Yes | Yes (with flags) | No (isolated session) |
 | **Shares your logins** | Yes | Yes | Yes | No |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
-| **DevTools** (perf, network, DOM) | Yes | No | Yes (full) | No |
-| **A11y / SEO / security audits** | Yes | No | No | No |
+| **DevTools** (perf, network, DOM) | **Yes** | No | Yes (full) | No |
+| **A11y / SEO / security audits** | **Yes** | No | No | No |
 | **Media emulation** | Yes | No | Yes | Yes |
+| **Dialog handling** (JS dialogs) | Yes | Yes | Yes | Yes |
 | **Network mocking** | **Yes** (block/redirect/headers) | No | No | No |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
-| **Dialog handling** | Yes (JS dialogs) | Yes | Yes | Yes |
+| **Shadow DOM + iframe** | **Yes** | No | Partial | Yes |
 | **GIF recording** | No | Yes | No | No |
 | **Breakpoints / profiling** | No | No | Yes | No |
 | **Headless / CI** | No | No | No | Yes |
 
-**In short**: Chrome Bridge is the only option that works on ChromeOS, has 56 specialized web development tools, and runs entirely self-hosted with no paid plan required. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
+**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 60 specialized web-development tools, and runs entirely self-hosted with no paid plan. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
 ## Architecture
 
 ```
-Claude Code <--stdio--> MCP Server <--WebSocket:8765--> Chrome Extension
+Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
+                          (server/)                          (extension/, MV3)
 ```
 
-- **MCP Server** (`server/`): Node.js, communicates with Claude Code via stdio and with the extension via WebSocket
-- **Chrome Extension** (`extension/`): Manifest V3, executes commands using Chrome APIs and returns results
-- All page scripts run via `chrome.scripting.executeScript` (MAIN world). No `chrome.debugger` (broken on ChromeOS).
+- **MCP Server** (`server/`): Node.js. Talks to Claude Code over stdio and to the extension over a WebSocket. When the port is already held by a primary instance, additional MCP processes attach as loopback relay clients.
+- **Chrome Extension** (`extension/`): Manifest V3. Executes commands with Chrome APIs and returns results. Ships with a bridge-themed icon (16/48/128px).
+- Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. `chrome.debugger` is **not** used (it is broken on ChromeOS).
 
-## Tools (56)
+## Tools (60)
 
-### Core (11)
+### Core & navigation (8)
 | Tool | Description |
 |------|-------------|
-| `get_status` | Bridge status: extension connection, server mode (primary/relay), port, version |
+| `get_status` | Bridge status: extension connection, server mode (primary/relay), port, version, uptime |
 | `get_tabs` | List all open Chrome tabs |
+| `create_tab` | Create a new tab, optionally navigating to a URL |
 | `navigate` | Navigate a tab to a URL |
-| `screenshot` | Capture visible tab as PNG (brings tab to foreground) |
-| `execute_js` | Execute JavaScript in page context (ISOLATED world, MAIN fallback) |
-| `click` | Click an element by CSS selector (shadow DOM piercing with `>>>`) |
-| `type_text` | Type text into an input element |
-| `read_page` | Read page content (text, HTML, or accessibility tree) |
-| `create_tab` | Create a new tab, optionally with a URL |
-| `tab_action` | Tab lifecycle: close, activate, reload (cache bypass), back, forward |
-| `get_frames` | List all frames (main + iframes) with frameId for frame targeting |
+| `tab_action` | Tab lifecycle: close, activate, reload (optional cache bypass), back, forward |
+| `wait_for_navigation` | Wait for the tab to finish navigating; `mode=spa` tracks SPA route changes (pushState/popstate/hashchange) |
+| `get_frames` | List all frames (main + iframes) with `frameId` for frame targeting |
+| `screenshot` | Capture the visible tab as PNG (brings the tab to foreground) |
 
-### DevTools (14)
+### Interaction (12)
 | Tool | Description |
 |------|-------------|
-| `get_page_info` | Get meta tags, scripts, stylesheets, links, forms |
-| `get_storage` | Read localStorage, sessionStorage, cookies (incl. HttpOnly via `chrome.cookies`) |
-| `set_storage` | Write/delete/clear localStorage, sessionStorage, cookies |
-| `get_performance` | Navigation timing, paint metrics, memory, resources |
-| `web_vitals` | Core Web Vitals since page load: CLS, LCP, FCP, TTFB, long tasks, INP approximation |
-| `query_dom` | Query elements with attributes, rect, computed styles |
-| `modify_dom` | Set/remove attributes, classes, styles, text content |
-| `inject_css` | Inject CSS rules into a tab |
-| `read_console` | Console messages captured from page load, incl. uncaught errors and unhandled rejections |
-| `monitor_network` | Monitor requests: page hook (XHR/fetch) or `webRequest` (all, incl. static assets); HAR 1.2 export |
-| `monitor_websocket` | Monitor WebSocket connections and messages (both directions, 500-char previews) |
-| `list_event_listeners` | List `addEventListener` registrations since page load, with counts by type |
-| `network_rules` | Block requests, redirect URLs (mock API endpoints), set/remove request headers (`declarativeNetRequest`) |
-| `http_auth` | Provide credentials for HTTP Basic/Digest auth dialogs |
-
-### Navigation & Forms (12)
-| Tool | Description |
-|------|-------------|
-| `wait_for_element` | Poll until a selector appears (with optional visibility check) |
-| `wait_for_navigation` | Wait for the tab to finish navigating (status complete) |
-| `wait_for_network_idle` | Wait until no XHR/fetch requests are in flight for a quiet period |
-| `scroll_to` | Scroll to element or coordinates, with offset for fixed headers |
-| `fill_form` | Batch fill form fields with React-compatible events |
+| `click` | Click an element by CSS selector; occlusion-checked, optional `wait_after` |
+| `type_text` | Type into an input: `set` (assign value) or `keys` (per-character key events) |
+| `fill_form` | Batch-fill form fields with React-compatible events; optional submit + `wait_after` |
+| `hover` | Hover over an element (dispatches mouseenter/mouseover) |
+| `press_key` | Press a key with modifiers (Ctrl/Shift/Alt/Meta) |
+| `scroll_to` | Scroll to an element or coordinates, with offset for fixed headers |
+| `scroll_until` | Scroll repeatedly until an element appears, network idles, or content stops loading (infinite scroll) |
+| `drag_and_drop` | Drag one element onto another: HTML5 `DragEvent` mode or pointer-event mode |
 | `upload_file` | Set a file on `input[type=file]` from the server filesystem via DataTransfer (max 10MB) |
-| `drag_and_drop` | Drag element onto another: HTML5 DragEvent mode or pointer-event mode |
-| `press_key` | Press a keyboard key with modifiers (Ctrl/Shift/Alt/Meta) |
-| `hover` | Hover over an element (mouseenter/mouseover) |
+| `dismiss_overlays` | Dismiss cookie-consent banners / modals (OneTrust, Cookiebot, Usercentrics + heuristic) |
 | `handle_dialogs` | Auto-accept/dismiss JS dialogs (alert/confirm/prompt) with a log of intercepted ones |
-| `find_text` | Find text occurrences with parent selector, context, visibility, page position |
 | `clipboard` | Read or write the system clipboard (text) |
 
-### Visual & Responsive (8)
+### DOM & inspection (10)
 | Tool | Description |
 |------|-------------|
-| `viewport_resize` | Resize window to preset (mobile/tablet/desktop) or custom size |
-| `full_page_screenshot` | Scroll-and-capture full page, stitched into a single PNG by default |
+| `read_page` | Read page content as text, full HTML, or accessibility tree |
+| `get_page_info` | Page metadata: meta tags, scripts, stylesheets, links, forms |
+| `query_dom` | Query elements: structure, attributes, bounding rect, computed styles |
+| `modify_dom` | Set/remove attributes, classes, styles, text content |
+| `find_text` | Find text occurrences with parent selector, context, visibility, page position |
+| `get_interactives` | List actionable elements (buttons, links, inputs, `[role]`, `[onclick]`) with ready-to-use selectors |
+| `inject_css` | Inject CSS rules into a tab |
+| `highlight_elements` | Add a colored overlay on matching elements (with optional labels) |
+| `watch_dom` | MutationObserver for attribute / childList / characterData changes |
+| `measure_spacing` | Pixel distance, gap, overlap, margin/padding between two elements |
+
+### Waiting & discovery (3)
+| Tool | Description |
+|------|-------------|
+| `wait_for_element` | Poll until a selector appears (optional visibility check) |
+| `wait_for_function` | Poll a JS expression until it evaluates truthy |
+| `wait_for_network_idle` | Wait until no XHR/fetch is in flight for a quiet period |
+
+### Debugging & network (8)
+| Tool | Description |
+|------|-------------|
+| `execute_js` | Execute JavaScript in page context (per-frame targeting) |
+| `read_console` | Console messages captured from page load, incl. uncaught errors and unhandled rejections |
+| `monitor_network` | Monitor requests: `page` (XHR/fetch hook) or `browser` (all, incl. static assets); HAR 1.2 export |
+| `monitor_websocket` | Monitor WebSocket connections and messages (both directions, 500-char previews) |
+| `network_rules` | Block requests, redirect URLs (mock an API), set/remove request headers (`declarativeNetRequest`) |
+| `get_performance` | Navigation timing, paint metrics, memory, resource loading |
+| `web_vitals` | Core Web Vitals since page load: CLS, LCP, FCP, TTFB, long tasks, INP approximation |
+| `list_event_listeners` | `addEventListener` registrations since page load, with counts by type |
+
+### Visual & responsive (7)
+| Tool | Description |
+|------|-------------|
 | `element_screenshot` | Screenshot of a single element, cropped via OffscreenCanvas |
+| `full_page_screenshot` | Scroll-and-capture full page, stitched into one PNG (or one image per viewport) |
 | `screenshot_diff` | Visual regression: named baselines, changed-pixel percentage, red-overlay diff image |
-| `highlight_elements` | Add colored overlay on matching elements |
+| `viewport_resize` | Resize the window to a preset (mobile/tablet/desktop) or custom size |
 | `set_zoom` | Get/set the tab zoom factor (0.25–5) |
 | `emulate_media` | Override prefers-color-scheme, reduced-motion, print mode |
 | `set_geolocation` | Override `navigator.geolocation` with fixed coordinates |
 
-### Analysis (8)
+### Audits (6)
 | Tool | Description |
 |------|-------------|
-| `accessibility_audit` | Audit for missing alt, empty links, heading hierarchy, ARIA, contrast, form labels |
-| `seo_audit` | Title/description lengths, canonical, robots, h1 count, Open Graph, JSON-LD, hreflang, favicon |
-| `security_headers` | Audit HTTP security headers: CSP, HSTS, X-Content-Type-Options, clickjacking, Referrer-Policy |
+| `accessibility_audit` | Missing alt, empty links, heading hierarchy, ARIA, contrast (approximate), form labels |
+| `seo_audit` | Title/description lengths, canonical, robots, h1 count, Open Graph, Twitter card, JSON-LD, hreflang, favicon |
+| `security_headers` | HTTP security headers: CSP, HSTS, X-Content-Type-Options, clickjacking, Referrer/Permissions-Policy, version leaks |
 | `check_links` | Find broken links — collected in the page, verified server-side (no CORS limits) |
-| `measure_spacing` | Measure pixel distance, gap, overlap, margin/padding between two elements |
-| `unused_css` | Find CSS selectors with no matching element in the current DOM (approximate) |
+| `unused_css` | CSS selectors with no matching element in the current DOM (approximate) |
 | `extract_table` | Extract an HTML table as structured JSON (headers + row objects) |
-| `watch_dom` | MutationObserver for attribute/childList/characterData changes |
 
-### Session & Capture (3)
+### State & storage (4)
 | Tool | Description |
 |------|-------------|
-| `session_fixture` | Save/restore localStorage + sessionStorage + cookies as a named fixture (origin-guarded) |
+| `get_storage` | Read localStorage, sessionStorage, cookies (incl. HttpOnly via `chrome.cookies`) |
+| `set_storage` | Write/delete/clear localStorage, sessionStorage, or cookies |
+| `session_fixture` | Save/restore localStorage + sessionStorage + cookies as a named, origin-guarded fixture |
+| `http_auth` | Provide credentials for HTTP Basic/Digest auth dialogs (browser-wide, in-memory) |
+
+### Capture & files (2)
+| Tool | Description |
+|------|-------------|
 | `save_page` | Save the full page (DOM, styles, images) as an MHTML archive on the server filesystem |
 | `manage_downloads` | List recent downloads or wait for an in-progress/new download to complete |
 
+## Security
+
+Every WebSocket connection must identify itself within **5 seconds** or it is terminated.
+
+- **Extension** sends `ext_init` — accepted only if the request `Origin` is `chrome-extension://…`. Random web pages cannot connect: browsers force the real page origin in the `Origin` header.
+- **Relay clients** (secondary MCP instances) send `relay_init` — accepted only from loopback (`127.0.0.1` / `::1`). When the port is already held by a primary server, additional MCP processes connect as relays and forward commands through it.
+- Unidentified connections are dropped after the 5-second handshake window.
+- **Optional shared token:** set `CHROME_BRIDGE_TOKEN` on the server and the matching value in the extension popup's Token field; mismatched `ext_init` is rejected.
+
+> **Crostini caveat:** the server binds `0.0.0.0` so the ChromeOS-side browser can reach the Linux-container server. On a multi-user or untrusted network, set `CHROME_BRIDGE_TOKEN` — the origin check alone does not gate other machines on the LAN.
+
 ## Install
 
-### From npm
-
-```bash
-npm install -g chrome-bridge-mcp
-```
+Requires **Node.js 18+** and **Chrome 111+**.
 
 ### From source
 
@@ -133,6 +160,8 @@ git clone git@github.com:frsorrentino/chrome-bridge.git
 cd chrome-bridge
 ./install.sh
 ```
+
+`install.sh` installs dependencies and registers the MCP server in Claude Code (`--scope user`), then prints the extension-loading steps.
 
 ### Manual setup
 
@@ -149,77 +178,67 @@ npm install
 claude mcp add --scope user chrome-bridge node /full/path/to/chrome-bridge/server/index.js
 ```
 
-## Usage
+Restart Claude Code after loading the extension. The extension popup shows live connection status; you can also call `get_status`.
 
-Once installed, the tools are available in Claude Code automatically. The extension connects to the MCP server via WebSocket (default port 8765).
+## Configuration
 
-Check connection status via the extension popup icon or by calling the `get_status` tool.
-
-### Configuration
-
-The extension popup has **Port** and **Token** fields (persisted in `chrome.storage.local`) — the port is no longer hardcoded. Set them to match the server's environment variables:
+The extension popup has **Port** and **Token** fields (persisted in `chrome.storage.local`) — set them to match the server. Configure the server via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CHROME_BRIDGE_PORT` | `8765` | WebSocket server port |
-| `CHROME_BRIDGE_TOKEN` | _(none)_ | Optional shared secret; if set, the extension must send the same token in the popup's Token field |
+| `CHROME_BRIDGE_TOKEN` | _(none)_ | Optional shared secret; when set, the extension must send the same token (popup Token field) |
 
-## Security
+## Selected capabilities
 
-Every WebSocket connection must identify itself within 5 seconds or it is terminated:
-
-- The extension sends `ext_init` — accepted only if the request `Origin` is `chrome-extension://...`. Random web pages cannot connect (browsers force the real page origin in the `Origin` header).
-- Secondary server instances send `relay_init` — accepted only from loopback (`127.0.0.1`/`::1`). When the port is already taken by a primary server, additional MCP processes connect as relay clients and forward commands through the primary.
-- If `CHROME_BRIDGE_TOKEN` is set on the server, `ext_init` must carry the matching token (configured in the extension popup) or the connection is rejected.
+- **Shadow DOM piercing:** selector tools accept the `>>>` combinator (e.g. `my-app >>> button.save`).
+- **iframe targeting:** DOM tools take a `frame_id` parameter — discover frames with `get_frames`.
+- **Action waits:** `click`, `type_text`, and `fill_form` accept `wait_after` (`navigation` / `networkidle`) to chain interactions.
+- **Click hardening:** `click` checks for occlusion before acting (override with `force`).
+- **SPA awareness:** `wait_for_navigation` with `mode=spa` resolves on `history.pushState` / `popstate` / `hashchange`.
+- **Early console capture:** a content script at `document_start` records console output, uncaught errors, and unhandled promise rejections before any tool call.
+- **Stitched full-page screenshots:** viewport captures are composited into one PNG (Chrome's ~16384px canvas side limit caps very tall pages).
+- **Server-side link checking:** `check_links` verifies URLs from the server, so external links get real HTTP statuses without CORS limits.
+- **HttpOnly cookies:** read/written via `chrome.cookies`, so HttpOnly cookies are visible.
+- **HAR export:** `monitor_network` can emit HAR 1.2.
+- **Timeouts:** 120s `full_page_screenshot`; 60s for waits, `upload_file`, `manage_downloads`, `save_page`; 10s screenshots; 30s for everything else.
 
 ## Tests
 
 ```bash
-# Unit tests (20 tests, no Chrome needed): protocol, ws-manager, link-checker, HAR, security-headers
+# Unit tests — 20 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers)
 npm run test:unit
 
-# End-to-end suite (23 tests): requires the extension loaded and the bridge port free
+# End-to-end suite — requires the extension loaded and the bridge port free
 node test/test-devtools.js
 ```
 
-The e2e script starts its own WebSocket server, creates a test tab on `example.com`, and exercises the tools against it. Stop any running MCP server on the port first.
+The e2e script starts its own WebSocket server, opens a test tab, and exercises the tools against it. Stop any running MCP server on the port first.
 
-## Project Structure
+## Project structure
 
 ```
 chrome-bridge/
   server/
     index.js                # Entry point: MCP server + WebSocket
-    protocol.js             # Message types, timeouts, command builder
-    tools.js                # MCP tool registrations (Zod schemas)
-    ws-manager.js           # WebSocket server manager, handshake, relay mode
+    protocol.js             # Message types, version, timeouts, command builder
+    tools.js                # 60 MCP tool registrations (Zod schemas)
+    ws-manager.js           # WebSocket server, handshake, relay mode
     link-checker.js         # Server-side link verification (check_links)
     har.js                  # HAR 1.2 export (monitor_network)
-    security-headers.js     # Security header analysis (security_headers)
+    security-headers.js     # Security-header analysis (security_headers)
   extension/
-    manifest.json           # Chrome MV3 manifest
+    manifest.json           # Chrome MV3 manifest (min Chrome 111)
     service-worker.js       # Command handlers, Chrome APIs
     console-capture.js      # Content script: console + error capture at document_start
-    page-instrumentation.js # Content script: web vitals + event listener tracking
-    popup.html/js/css       # Connection status popup (port + token settings)
-    icons/                  # Extension icons
+    page-instrumentation.js # Content script: web vitals + event-listener tracking
+    popup.html / .js / .css # Connection status popup (port + token settings)
+    icons/                  # Extension icons (16/48/128px)
   test/
-    unit/                   # Unit tests (node --test, no Chrome needed)
-    test-devtools.js        # End-to-end test suite (23 tests)
+    unit/                   # Unit tests (node --test, no Chrome)
+    test-devtools.js        # End-to-end suite (needs Chrome + extension)
+  install.sh
 ```
-
-## Technical Notes
-
-- `execute_js` uses ISOLATED world by default (bypasses page CSP), with MAIN world fallback
-- `chrome.debugger` is not used (doesn't work on ChromeOS); minimum Chrome version is 111
-- Selector-based tools support shadow DOM piercing with the `>>>` combinator (e.g. `my-app >>> button.save`)
-- DOM tools accept a `frame_id` parameter to target iframes — list frames with `get_frames`
-- Console capture runs as a content script at `document_start`, so it catches early messages, uncaught errors, and unhandled promise rejections without any prior tool call
-- Stateful hooks (`monitor_network` page source, `monitor_websocket`, `watch_dom`) inject on first call and auto-cleanup on tab navigation/close
-- `full_page_screenshot` stitches viewport captures into one PNG by default (Chrome's ~16384px canvas side limit caps very tall pages); `stitch=false` returns one image per viewport
-- `check_links` verifies URLs server-side, so external links get real HTTP statuses with no CORS limits
-- Cookies are read/written via `chrome.cookies`, so HttpOnly cookies are visible
-- Timeouts: 120s `full_page_screenshot`; 60s waits, `upload_file`, `manage_downloads`, `save_page`; 10s screenshots; 30s everything else
 
 ## License
 
