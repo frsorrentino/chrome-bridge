@@ -222,10 +222,10 @@ async function cmdGetTabs() {
 async function cmdNavigate({ url, tab_id }) {
   if (!url) throw new Error('Missing required parameter: url');
   const tabId = await resolveTabId(tab_id);
-  const tab = await chrome.tabs.update(tabId, { url });
 
-  // Attendi che il caricamento sia completo
-  await new Promise((resolve) => {
+  // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
+  // può emettere 'complete' prima che il listener esista
+  const waitComplete = new Promise((resolve) => {
     const listener = (updatedTabId, changeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(listener);
@@ -239,6 +239,9 @@ async function cmdNavigate({ url, tab_id }) {
       resolve();
     }, 15000);
   });
+
+  await chrome.tabs.update(tabId, { url });
+  await waitComplete;
 
   const updatedTab = await chrome.tabs.get(tabId);
   return { url: updatedTab.url, title: updatedTab.title, tabId };
