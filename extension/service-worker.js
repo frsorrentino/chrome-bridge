@@ -2893,19 +2893,38 @@ async function cmdManageDownloads({ action, timeout = 30000, limit = 10 }) {
 
   if (action === 'wait_for_complete') {
     const started = Date.now();
-    // Trova il download più recente non completato, o attendi che ne parta uno
-    const poll = async () => {
-      const items = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 5 });
-      return items.find((d) => d.state === 'in_progress') || items.find((d) => d.state === 'complete' && new Date(d.startTime).getTime() >= started - 5000) || null;
-    };
+    let trackedId = null;
+
     while (Date.now() - started < timeout) {
-      const d = await poll();
-      if (d && d.state === 'complete') {
-        return { completed: true, id: d.id, filename: d.filename, url: d.url, totalBytes: d.totalBytes };
+      const items = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 5 });
+
+      if (trackedId !== null) {
+        const tracked = items.find((d) => d.id === trackedId);
+        if (tracked) {
+          if (tracked.state === 'complete') {
+            return { completed: true, id: tracked.id, filename: tracked.filename, url: tracked.url, totalBytes: tracked.totalBytes };
+          }
+          if (tracked.state === 'interrupted') {
+            return { completed: false, error: tracked.error, filename: tracked.filename };
+          }
+          await new Promise((r) => setTimeout(r, 250));
+          continue;
+        }
+        trackedId = null; // il download tracciato è sparito dai risultati
       }
-      if (d && d.state === 'interrupted') {
-        return { completed: false, error: d.error, filename: d.filename };
+
+      const inProgress = items.find((d) => d.state === 'in_progress');
+      if (inProgress) {
+        trackedId = inProgress.id;
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
       }
+
+      const recent = items.find((d) => d.state === 'complete' && new Date(d.startTime).getTime() >= started - 5000);
+      if (recent) {
+        return { completed: true, id: recent.id, filename: recent.filename, url: recent.url, totalBytes: recent.totalBytes };
+      }
+
       await new Promise((r) => setTimeout(r, 250));
     }
     return { completed: false, error: 'timeout', note: `No download completed within ${timeout}ms` };

@@ -1065,6 +1065,7 @@ export function registerTools(server, wsManager) {
       password: z.string().optional().describe('Password (for set)'),
     },
     async ({ action, username, password }) => {
+      if (action === 'set' && !username) throw new Error('username is required for action=set');
       const data = await wsManager.sendCommand(MessageType.HTTP_AUTH, { action, username, password });
       return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
     }
