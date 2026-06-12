@@ -1486,22 +1486,27 @@ async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, 
       if (rm) overrides['prefers-reduced-motion'] = rm;
       if (print) overrides['print'] = true;
 
-      // Override matchMedia for JS-based checks
+      // Override matchMedia for JS-based checks.
+      // NB: spreading a MediaQueryList loses prototype methods (addEventListener ecc.),
+      // quindi per le query forzate restituiamo uno stub MQL-compatibile.
       const orig = window.__chromeBridge_origMatchMedia;
+      const mkStub = (matches, query) => ({
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent() { return false; },
+      });
       window.matchMedia = (query) => {
-        const result = orig(query);
         for (const [feature, val] of Object.entries(overrides)) {
-          if (feature === 'print' && query.includes('print')) {
-            return { ...result, matches: true, media: query };
-          }
-          if (query.includes(feature) && query.includes(val)) {
-            return { ...result, matches: true, media: query };
-          }
-          if (query.includes(feature) && !query.includes(val)) {
-            return { ...result, matches: false, media: query };
-          }
+          if (feature === 'print' && query.includes('print')) return mkStub(true, query);
+          if (query.includes(feature) && query.includes(val)) return mkStub(true, query);
+          if (query.includes(feature) && !query.includes(val)) return mkStub(false, query);
         }
-        return result;
+        return orig(query);
       };
 
       // Inject CSS + meta for CSS-based checks
