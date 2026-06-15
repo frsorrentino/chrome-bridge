@@ -196,7 +196,7 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 - **Action waits:** `click`, `type_text`, and `fill_form` accept `wait_after` (`navigation` / `networkidle`) to chain interactions.
 - **Click hardening:** `click` checks for occlusion before acting (override with `force`).
 - **SPA awareness:** `wait_for_navigation` with `mode=spa` resolves on `history.pushState` / `popstate` / `hashchange`.
-- **Early console capture:** a content script at `document_start` records console output, uncaught errors, and unhandled promise rejections before any tool call.
+- **Early console capture:** an opt-in content script at `document_start` records console output, uncaught errors, and unhandled promise rejections before any tool call. It is registered dynamically and toggled by the popup's "Capture page console & metrics" checkbox (default on) — turn it off for zero page footprint on heavy apps.
 - **Stitched full-page screenshots:** viewport captures are composited into one PNG (Chrome's ~16384px canvas side limit caps very tall pages).
 - **Server-side link checking:** `check_links` verifies URLs from the server, so external links get real HTTP statuses without CORS limits.
 - **HttpOnly cookies:** read/written via `chrome.cookies`, so HttpOnly cookies are visible.
@@ -230,7 +230,7 @@ chrome-bridge/
   extension/
     manifest.json           # Chrome MV3 manifest (min Chrome 111)
     service-worker.js       # Command handlers, Chrome APIs
-    console-capture.js      # Content script: console + error capture at document_start
+    console-capture.js      # Content script (dynamic, toggleable): console + error capture at document_start
     page-instrumentation.js # Content script: web vitals + event-listener tracking
     popup.html / .js / .css # Connection status popup (port + token settings)
     icons/                  # Extension icons (16/48/128px)

@@ -15,6 +15,41 @@ async function loadConfig() {
   extToken = cfg.token || '';
 }
 
+// --- Instrumentation MAIN-world (console/errori/web vitals/route SPA) ---
+// Registrata dinamicamente: quando il toggle è off non viene iniettata su
+// nessuna pagina, quindi footprint e stack pollution sono azzerati.
+const INSTRUMENTATION_ID = 'chrome-bridge-instrumentation';
+
+async function _applyInstrumentation() {
+  const { instrument } = await chrome.storage.local.get({ instrument: true });
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [INSTRUMENTATION_ID] });
+    const isReg = existing.some((s) => s.id === INSTRUMENTATION_ID);
+    if (instrument && !isReg) {
+      await chrome.scripting.registerContentScripts([{
+        id: INSTRUMENTATION_ID,
+        js: ['console-capture.js', 'page-instrumentation.js'],
+        matches: ['<all_urls>'],
+        runAt: 'document_start',
+        world: 'MAIN',
+        persistAcrossSessions: true,
+      }]);
+    } else if (!instrument && isReg) {
+      await chrome.scripting.unregisterContentScripts({ ids: [INSTRUMENTATION_ID] });
+    }
+  } catch (err) {
+    console.error('[chrome-bridge] applyInstrumentation error:', err.message);
+  }
+}
+
+// Serializza le chiamate: toggle rapidi non devono lanciare register concorrenti
+// (due chiamate che vedono entrambe isReg=false → duplicate-id error).
+let instrumentationQueue = Promise.resolve();
+function applyInstrumentation() {
+  instrumentationQueue = instrumentationQueue.then(_applyInstrumentation, _applyInstrumentation);
+  return instrumentationQueue;
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.port || changes.token) {
@@ -23,6 +58,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       if (ws) { try { ws.close(); } catch {} } else { connect(); }
     });
   }
+  if (changes.instrument) applyInstrumentation();
 });
 
 const RECONNECT_BASE_MS = 1000;
@@ -3332,5 +3368,6 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, max_scrolls 
   return results?.[0]?.result ?? { stopped_reason: 'error', scrolls: 0 };
 }
 
-// --- Avvia la connessione ---
+// --- Avvia la connessione + registra l'instrumentation ---
 loadConfig().then(connect);
+applyInstrumentation();

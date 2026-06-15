@@ -70,7 +70,9 @@
 
   const origAdd = EventTarget.prototype.addEventListener;
   EventTarget.prototype.addEventListener = function (type, fn, opts) {
-    if (listeners.length < MAX_LISTENERS) {
+    // La cattura non deve mai impedire la registrazione reale del listener.
+    try {
+      if (listeners.length >= MAX_LISTENERS) listeners.shift(); // ring buffer
       listeners.push({
         type,
         target: describeTarget(this),
@@ -79,7 +81,7 @@
         passive: !!(opts && opts.passive),
         timestamp: Date.now(),
       });
-    }
+    } catch {}
     return origAdd.call(this, type, fn, opts);
   };
 
