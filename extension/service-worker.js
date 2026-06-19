@@ -386,6 +386,20 @@ async function cmdGetTabs() {
 
 async function cmdNavigate({ url, tab_id }) {
   if (!url) throw new Error('Missing required parameter: url');
+
+  // Senza tab_id esplicito: apri SEMPRE in una nuova scheda (attiva) per non
+  // sovrascrivere la scheda/sessione corrente dell'utente. Con tab_id: naviga
+  // quella scheda specifica.
+  if (!tab_id) {
+    const newTab = await chrome.tabs.create({ url, active: true });
+    // Se la pagina è già 'complete' (es. cache) non aspettare il listener
+    if (newTab.status !== 'complete') {
+      await waitForComplete(newTab.id);
+    }
+    const createdTab = await chrome.tabs.get(newTab.id);
+    return { url: createdTab.url, title: createdTab.title, tabId: newTab.id };
+  }
+
   const tabId = await resolveTabId(tab_id);
 
   // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
