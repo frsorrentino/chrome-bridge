@@ -199,6 +199,25 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 - **HAR export:** `monitor_network` can emit HAR 1.2.
 - **Timeouts:** 120s `full_page_screenshot`; 60s for waits, `upload_file`, `manage_downloads`, `save_page`; 10s screenshots; 30s for everything else.
 
+## CLI (token-efficient alternative for batch work)
+
+The same commands are available from the shell — no MCP schemas in context, output pipeable through `grep`/`head`/`jq` *before* it reaches the model, and multiple operations chainable in a single Bash call:
+
+```bash
+chrome-bridge status                                   # server + extension check
+chrome-bridge tabs
+chrome-bridge navigate --url https://example.com
+chrome-bridge read_console --level error | head -20    # filter before context
+chrome-bridge js --code 'document.title'
+chrome-bridge screenshot --out /tmp/shot.png           # image lands on disk
+chrome-bridge check_links --scope same-origin
+chrome-bridge <command> --json '{"complex":"params"}'
+```
+
+The CLI connects to the already-running WebSocket server as a relay client (a live MCP session or `npm start` must be active) — same single channel to the extension, nothing extra to install or configure. Flags map to command params (`--tab-id 42` → `tab_id`); `--format lines|json|har`, `--max-chars N` (default 20000, `0` = unlimited). Run `chrome-bridge --help` for the full command list.
+
+Rule of thumb: MCP tools for interactive/visual work (screenshots feed the model's vision directly), CLI for batch and greppable output.
+
 ## Tests
 
 ```bash
@@ -219,6 +238,8 @@ chrome-bridge/
     index.js                # Entry point: MCP server + WebSocket
     protocol.js             # Message types, version, timeouts, command builder
     tools.js                # 56 MCP tool registrations (Zod schemas)
+    cli.js                  # CLI entry point (relay client, pipeable output)
+    formatters.js           # Line-format output shared by MCP tools and CLI
     ws-manager.js           # WebSocket server, handshake, relay mode
     link-checker.js         # Server-side link verification (check_links)
     har.js                  # HAR 1.2 export (monitor_network)

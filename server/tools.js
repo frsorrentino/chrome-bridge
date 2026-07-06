@@ -13,6 +13,7 @@ import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
+import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
 
@@ -380,12 +381,10 @@ export function registerTools(server, wsManager) {
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, messages: tail }) }] };
       }
-      const t0 = tail[0]?.timestamp ?? 0;
-      const lines = tail.map((m) => `${m.level}\t+${(m.timestamp ?? t0) - t0}ms\t${(m.args ?? []).join(' ')}`);
       return {
         content: [{
           type: 'text',
-          text: truncateText(`console total=${total} shown=${tail.length}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
+          text: truncateText(consoleLines(tail, total), DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -415,11 +414,10 @@ export function registerTools(server, wsManager) {
           : { ...rest, total, shown: tail.length, requests: tail };
         return { content: [{ type: 'text', text: jsonText(out) }] };
       }
-      const lines = tail.map((r) => `${r.status ?? `ERR(${r.error})`}\t${r.duration}ms\t${r.method}\t${r.url}`);
       return {
         content: [{
           type: 'text',
-          text: truncateText(`network total=${total} shown=${tail.length}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
+          text: truncateText(networkLines(tail, total), DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -704,11 +702,10 @@ export function registerTools(server, wsManager) {
           }],
         };
       }
-      const lines = results.map((r) => `${r.status}\t${r.url}${r.error ? `\t${r.error}` : ''}`);
       return {
         content: [{
           type: 'text',
-          text: truncateText(`links total=${links.length} checked=${results.length} broken=${broken} anchors=${data.totalAnchors}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
+          text: truncateText(linksLines(results, { total: links.length, broken, anchors: data.totalAnchors }), DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -1264,18 +1261,10 @@ export function registerTools(server, wsManager) {
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText(data) }] };
       }
-      const els = data?.elements ?? [];
-      const lines = els.map((e) => {
-        // Flag solo quando anomali: il caso normale (enabled+visible) non spreca token
-        const flags = [!e.enabled && 'disabled', !e.visible && 'hidden', e.occluded && 'occluded'].filter(Boolean).join(',');
-        const rect = e.rect ? `@${e.rect.x},${e.rect.y} ${e.rect.width}x${e.rect.height}` : '';
-        return [`${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), rect].join('\t');
-      });
-      const note = data?.note ? ` note=${data.note}` : '';
       return {
         content: [{
           type: 'text',
-          text: truncateText(`interactives count=${data?.count ?? els.length}${note}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
+          text: truncateText(interactivesLines(data), DEFAULT_MAX_OUTPUT),
         }],
       };
     }

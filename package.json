@@ -5,7 +5,8 @@
   "description": "MCP server with 56 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
   "main": "server/index.js",
   "bin": {
-    "chrome-bridge-mcp": "server/index.js"
+    "chrome-bridge-mcp": "server/index.js",
+    "chrome-bridge": "server/cli.js"
   },
   "scripts": {
     "start": "node server/index.js",
