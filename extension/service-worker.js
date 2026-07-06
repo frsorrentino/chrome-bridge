@@ -1473,7 +1473,11 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
   const MAX_CANVAS_H = 16384;
   const first = await dataUrlToBitmap(shots[0].dataUrl);
   const dpr = first.width / viewportWidth;
-  const fullH = Math.min(Math.round(scrollHeight * dpr), MAX_CANVAS_H);
+  // Canvas alto quanto l'area davvero catturata: se max_scrolls tronca la
+  // pagina, il resto uscirebbe come segmenti bianchi (immagini sprecate).
+  const lastShot = shots[shots.length - 1];
+  const coveredH = Math.round((lastShot.y + viewportHeight) * dpr);
+  const fullH = Math.min(Math.round(scrollHeight * dpr), coveredH, MAX_CANVAS_H);
   const canvas = new OffscreenCanvas(first.width, fullH);
   const ctx = canvas.getContext('2d');
   ctx.drawImage(first, 0, Math.round(shots[0].y * dpr));
@@ -1492,7 +1496,7 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     images,
     segments: images.length,
     scrollHeight, viewportHeight, totalCaptures: shots.length,
-    truncated: scrollHeight * dpr > MAX_CANVAS_H,
+    truncated: scrollHeight * dpr > fullH,
   };
 }
 
