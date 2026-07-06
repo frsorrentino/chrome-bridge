@@ -2,7 +2,7 @@
 
 **MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Built for ChromeOS (Crostini), works on any platform with Chrome 111+.
 
-Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 60 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
+Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 56 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
 ## Why Chrome Bridge?
 
@@ -12,7 +12,7 @@ There are several browser automation tools for Claude Code. Here's how they comp
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** | No | No | No |
 | **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Separate browser instance |
-| **Tools** | **60** | ~15 | Full CDP | ~20 |
+| **Tools** | **56** | ~15 | Full CDP | ~20 |
 | **Uses your real browser** | Yes | Yes | Yes (with flags) | No (isolated session) |
 | **Shares your logins** | Yes | Yes | Yes | No |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
@@ -27,7 +27,7 @@ There are several browser automation tools for Claude Code. Here's how they comp
 | **Breakpoints / profiling** | No | No | Yes | No |
 | **Headless / CI** | No | No | No | Yes |
 
-**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 60 specialized web-development tools, and runs entirely self-hosted with no paid plan. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
+**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 56 specialized web-development tools, and runs entirely self-hosted with no paid plan. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
 ## Architecture
 
@@ -40,9 +40,9 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 - **Chrome Extension** (`extension/`): Manifest V3. Executes commands with Chrome APIs and returns results. Ships with a bridge-themed icon (16/48/128px).
 - Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. `chrome.debugger` is **not** used (it is broken on ChromeOS).
 
-## Tools (60)
+## Tools (56)
 
-### Core & navigation (8)
+### Core & navigation (7)
 | Tool | Description |
 |------|-------------|
 | `get_status` | Bridge status: extension connection, server mode (primary/relay), port, version, uptime |
@@ -50,7 +50,6 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `create_tab` | Create a new tab, optionally navigating to a URL |
 | `navigate` | Navigate a tab to a URL |
 | `tab_action` | Tab lifecycle: close, activate, reload (optional cache bypass), back, forward |
-| `wait_for_navigation` | Wait for the tab to finish navigating; `mode=spa` tracks SPA route changes (pushState/popstate/hashchange) |
 | `get_frames` | List all frames (main + iframes) with `frameId` for frame targeting |
 | `screenshot` | Capture the visible tab as PNG (brings the tab to foreground) |
 
@@ -62,8 +61,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `fill_form` | Batch-fill form fields with React-compatible events; optional submit + `wait_after` |
 | `hover` | Hover over an element (dispatches mouseenter/mouseover) |
 | `press_key` | Press a key with modifiers (Ctrl/Shift/Alt/Meta) |
-| `scroll_to` | Scroll to an element or coordinates, with offset for fixed headers |
-| `scroll_until` | Scroll repeatedly until an element appears, network idles, or content stops loading (infinite scroll) |
+| `scroll` | `action=to`: scroll to element/coordinates with header offset; `action=until`: scroll repeatedly until element appears, network idles, or content stops loading |
 | `drag_and_drop` | Drag one element onto another: HTML5 `DragEvent` mode or pointer-event mode |
 | `upload_file` | Set a file on `input[type=file]` from the server filesystem via DataTransfer (max 10MB) |
 | `dismiss_overlays` | Dismiss cookie-consent banners / modals (OneTrust, Cookiebot, Usercentrics + heuristic) |
@@ -84,12 +82,10 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `watch_dom` | MutationObserver for attribute / childList / characterData changes |
 | `measure_spacing` | Pixel distance, gap, overlap, margin/padding between two elements |
 
-### Waiting & discovery (3)
+### Waiting (1)
 | Tool | Description |
 |------|-------------|
-| `wait_for_element` | Poll until a selector appears (optional visibility check) |
-| `wait_for_function` | Poll a JS expression until it evaluates truthy |
-| `wait_for_network_idle` | Wait until no XHR/fetch is in flight for a quiet period |
+| `wait_for` | One tool, four conditions: `element` (selector appears), `function` (JS expression truthy), `navigation` (page load or `mode=spa` route change), `network_idle` (no XHR/fetch in flight) |
 
 ### Debugging & network (8)
 | Tool | Description |
@@ -195,9 +191,9 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 - **iframe targeting:** DOM tools take a `frame_id` parameter — discover frames with `get_frames`.
 - **Action waits:** `click`, `type_text`, and `fill_form` accept `wait_after` (`navigation` / `networkidle`) to chain interactions.
 - **Click hardening:** `click` checks for occlusion before acting (override with `force`).
-- **SPA awareness:** `wait_for_navigation` with `mode=spa` resolves on `history.pushState` / `popstate` / `hashchange`.
+- **SPA awareness:** `wait_for` (`condition=navigation`, `mode=spa`) resolves on `history.pushState` / `popstate` / `hashchange`.
 - **Early console capture:** an opt-in content script at `document_start` records console output, uncaught errors, and unhandled promise rejections before any tool call. It is registered dynamically and toggled by the popup's "Capture page console & metrics" checkbox (default on) — turn it off for zero page footprint on heavy apps.
-- **Stitched full-page screenshots:** viewport captures are composited into one PNG (Chrome's ~16384px canvas side limit caps very tall pages).
+- **Full-page screenshots in readable segments:** viewport captures are stitched then sliced into ~2-viewport segments, each downscaled to ≤1568px on the long side (what LLM clients render anyway).
 - **Server-side link checking:** `check_links` verifies URLs from the server, so external links get real HTTP statuses without CORS limits.
 - **HttpOnly cookies:** read/written via `chrome.cookies`, so HttpOnly cookies are visible.
 - **HAR export:** `monitor_network` can emit HAR 1.2.
@@ -222,7 +218,7 @@ chrome-bridge/
   server/
     index.js                # Entry point: MCP server + WebSocket
     protocol.js             # Message types, version, timeouts, command builder
-    tools.js                # 60 MCP tool registrations (Zod schemas)
+    tools.js                # 56 MCP tool registrations (Zod schemas)
     ws-manager.js           # WebSocket server, handshake, relay mode
     link-checker.js         # Server-side link verification (check_links)
     har.js                  # HAR 1.2 export (monitor_network)

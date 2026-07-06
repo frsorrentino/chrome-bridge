@@ -18,9 +18,17 @@ const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
 
 async function main() {
   // 1. Crea il server MCP
+  // instructions: dette una volta qui invece che ripetute in ogni descrizione
+  // tool — pesano ~1 volta nel contesto del client anziché ~50.
   const mcpServer = new McpServer({
     name: 'chrome-bridge',
     version: VERSION,
+  }, {
+    instructions: [
+      'Selector parameters on DOM tools support shadow-DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
+      'tab_id omitted = active tab. frame_id omitted = main frame (list frames with get_frames).',
+      'Prefer get_interactives over read_page(html) to discover selectors.',
+    ].join(' '),
   });
 
   // 2. Avvia il WebSocket server
