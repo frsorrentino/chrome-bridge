@@ -615,7 +615,7 @@ export function registerTools(server, wsManager) {
     async ({ max_scrolls, delay, stitch, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
       if (data && data.images) {
-        const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}${data.truncated ? ' (truncated at 16384px canvas limit)' : ''}`;
+        const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}${data.truncated ? ' (page continues beyond captured area — raise max_scrolls to capture more)' : ''}`;
         return {
           content: [
             { type: 'text', text: note },
