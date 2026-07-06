@@ -21,6 +21,15 @@ function truncateText(text, max) {
   return text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — use max_length to raise the limit]`;
 }
 
+// Limite di default sull'output testuale di ogni tool: protegge il contesto
+// del client MCP da payload fuori scala (es. buffer console/network pieni).
+const DEFAULT_MAX_OUTPUT = 20000;
+
+/** Serializza compatto (niente pretty-print: solo token sprecati per il modello) e tronca. */
+function jsonText(data, max = DEFAULT_MAX_OUTPUT) {
+  return truncateText(JSON.stringify(data), max);
+}
+
 const MIME_BY_EXT = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
@@ -64,13 +73,13 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
+          text: jsonText({
             connected: wsManager.isConnected(),
             mode: wsManager.mode,
             port: wsManager.port,
             version: VERSION,
             uptime_sec: Math.round((Date.now() - startedAt) / 1000),
-          }, null, 2),
+          }),
         }],
       };
     }
@@ -86,7 +95,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -105,7 +114,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -133,7 +142,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -154,7 +163,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: truncateText(JSON.stringify(data, null, 2), max_length),
+          text: truncateText(JSON.stringify(data), max_length),
         }],
       };
     }
@@ -179,7 +188,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(out, null, 2),
+          text: jsonText(out),
         }],
       };
     }
@@ -204,7 +213,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(out, null, 2),
+          text: jsonText(out),
         }],
       };
     }
@@ -225,7 +234,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data, null, 2), max_length),
+          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length),
         }],
       };
     }
@@ -244,7 +253,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -263,7 +272,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -281,7 +290,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -303,7 +312,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -327,7 +336,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -346,7 +355,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -359,14 +368,17 @@ export function registerTools(server, wsManager) {
     {
       clear: z.boolean().optional().default(false).describe('Clear captured messages after reading'),
       level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('Filter by log level'),
+      limit: z.number().optional().default(50).describe('Max messages returned (most recent; buffer holds up to 1000)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ clear, level, tab_id }) => {
+    async ({ clear, level, limit, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.READ_CONSOLE, { clear, level, tab_id });
+      const all = data?.messages ?? [];
+      const tail = all.slice(-(limit ?? 50));
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText({ total: data?.count ?? all.length, shown: tail.length, messages: tail }),
         }],
       };
     }
@@ -380,15 +392,21 @@ export function registerTools(server, wsManager) {
       clear: z.boolean().optional().default(false).describe('Clear captured requests after reading'),
       source: z.enum(['page', 'browser']).optional().default('page').describe('page = fetch/XHR hook; browser = all requests incl. static assets via webRequest'),
       format: z.enum(['json', 'har']).optional().default('json').describe('Output format'),
+      limit: z.number().optional().default(100).describe('Max requests returned (most recent; buffer holds up to 1000)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ clear, source, format, tab_id }) => {
+    async ({ clear, source, format, limit, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
-      const out = format === 'har' ? toHar(data.requests ?? []) : data;
+      const { requests, count, ...rest } = data ?? {};
+      const all = requests ?? [];
+      const tail = all.slice(-(limit ?? 100));
+      const out = format === 'har'
+        ? toHar(tail)
+        : { ...rest, total: count ?? all.length, shown: tail.length, requests: tail };
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(out, null, 2),
+          text: jsonText(out),
         }],
       };
     }
@@ -407,7 +425,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -430,7 +448,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -454,7 +472,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -482,7 +500,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -509,7 +527,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(out, null, 2),
+          text: jsonText(out),
         }],
       };
     }
@@ -530,7 +548,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -549,7 +567,7 @@ export function registerTools(server, wsManager) {
       if (data && data.image) {
         return { content: [{ type: 'image', data: data.image, mimeType: 'image/png' }] };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -594,7 +612,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -614,7 +632,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -639,7 +657,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }, null, 2),
+          text: jsonText({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }),
         }],
       };
     }
@@ -659,7 +677,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -684,7 +702,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -706,7 +724,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -726,7 +744,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -751,7 +769,7 @@ export function registerTools(server, wsManager) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
+          text: jsonText(data),
         }],
       };
     }
@@ -766,7 +784,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_FRAMES, { tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -781,7 +799,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, bypass_cache, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -802,7 +820,7 @@ export function registerTools(server, wsManager) {
       const data = await wsManager.sendCommand(MessageType.UPLOAD_FILE, {
         selector, name: basename(path), mime_type: mime, content_b64: buf.toString('base64'), tab_id,
       });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -817,7 +835,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ timeout, mode, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout, mode, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -830,7 +848,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.DISMISS_OVERLAYS, { tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -845,7 +863,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ idle_ms, timeout, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms, timeout, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -860,7 +878,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, prompt_text, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.HANDLE_DIALOGS, { action, prompt_text, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -876,7 +894,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ text, case_sensitive, max_results, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -894,7 +912,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, url_filter, redirect_url, header, header_value, resource_types }) => {
       const data = await wsManager.sendCommand(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -915,12 +933,12 @@ export function registerTools(server, wsManager) {
         const { diff_image, ...rest } = data;
         return {
           content: [
-            { type: 'text', text: JSON.stringify(rest, null, 2) },
+            { type: 'text', text: jsonText(rest) },
             { type: 'image', data: diff_image, mimeType: 'image/png' },
           ],
         };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -933,7 +951,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WEB_VITALS, { tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -948,7 +966,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ type, limit, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -962,7 +980,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ clear, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -975,7 +993,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SEO_AUDIT, { tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -991,7 +1009,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ selector, index, max_rows, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1005,7 +1023,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ max_selectors, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.UNUSED_CSS, { max_selectors, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1022,7 +1040,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ source_selector, target_selector, mode, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector, target_selector, mode, frame_id, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1037,7 +1055,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, text, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.CLIPBOARD, { action, text, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1054,7 +1072,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ latitude, longitude, accuracy, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1069,7 +1087,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ action, timeout, limit }) => {
       const data = await wsManager.sendCommand(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1084,7 +1102,7 @@ export function registerTools(server, wsManager) {
     async ({ output_path, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SAVE_PAGE, { tab_id });
       await writeFile(output_path, Buffer.from(data.mhtml_b64, 'base64'));
-      return { content: [{ type: 'text', text: JSON.stringify({ saved: output_path, size: data.size }, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText({ saved: output_path, size: data.size }) }] };
     }
   );
 
@@ -1099,7 +1117,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ factor, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_ZOOM, { factor, reset, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1115,7 +1133,7 @@ export function registerTools(server, wsManager) {
     async ({ action, username, password }) => {
       if (action === 'set' && !username) throw new Error('username is required for action=set');
       const data = await wsManager.sendCommand(MessageType.HTTP_AUTH, { action, username, password });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1129,11 +1147,11 @@ export function registerTools(server, wsManager) {
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_RESPONSE_HEADERS, { tab_id });
       if (!data.available) {
-        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: 'text', text: jsonText(data) }] };
       }
       const result = evaluateSecurityHeaders(data.headers, data.url);
       result.status = data.status;
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(result) }] };
     }
   );
 
@@ -1151,7 +1169,7 @@ export function registerTools(server, wsManager) {
         const { readdir } = await import('node:fs/promises');
         let files = [];
         try { files = (await readdir(SESSIONS_DIR)).filter((f) => f.endsWith('.json')); } catch {}
-        return { content: [{ type: 'text', text: JSON.stringify({ fixtures: files.map((f) => f.replace(/\.json$/, '')) }, null, 2) }] };
+        return { content: [{ type: 'text', text: jsonText({ fixtures: files.map((f) => f.replace(/\.json$/, '')) }) }] };
       }
       if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
       const file = join(SESSIONS_DIR, `${name}.json`);
@@ -1168,8 +1186,9 @@ export function registerTools(server, wsManager) {
         const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type: 'all', tab_id });
         const origin = await getTabOrigin();
         await mkdir(SESSIONS_DIR, { recursive: true });
+        // File su disco per umani: pretty-print qui non costa token
         await writeFile(file, JSON.stringify({ savedAt: new Date().toISOString(), origin, ...data }, null, 2));
-        return { content: [{ type: 'text', text: JSON.stringify({ saved: name, origin, localStorage: Object.keys(data.localStorage || {}).length, sessionStorage: Object.keys(data.sessionStorage || {}).length, cookies: (data.cookies || []).length }, null, 2) }] };
+        return { content: [{ type: 'text', text: jsonText({ saved: name, origin, localStorage: Object.keys(data.localStorage || {}).length, sessionStorage: Object.keys(data.sessionStorage || {}).length, cookies: (data.cookies || []).length }) }] };
       }
 
       // restore
@@ -1203,7 +1222,7 @@ export function registerTools(server, wsManager) {
         }
       }
       if (restored.cookie_errors.length === 0) delete restored.cookie_errors;
-      return { content: [{ type: 'text', text: JSON.stringify({ restored: name, ...restored }, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText({ restored: name, ...restored }) }] };
     }
   );
 
@@ -1220,7 +1239,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ scope, limit, visible_only, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1237,7 +1256,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ expression, timeout, polling_ms, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WAIT_FOR_FUNCTION, { expression, timeout, polling_ms, frame_id, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -1255,7 +1274,7 @@ export function registerTools(server, wsManager) {
     },
     async ({ until, selector, max_scrolls, step_px, settle_ms, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until, selector, max_scrolls, step_px, settle_ms, tab_id });
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 }
