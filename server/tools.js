@@ -587,7 +587,7 @@ export function registerTools(server, wsManager) {
   // --- full_page_screenshot ---
   server.tool(
     'full_page_screenshot',
-    'Capture full page by scrolling and taking viewport screenshots, stitched into a single PNG via OffscreenCanvas (or one image per viewport with stitch=false). Note: brings the tab to foreground and focuses its window.',
+    'Capture full page by scrolling and taking viewport screenshots. Returns stitched segments of ~2 viewports each (downscaled to ≤1568px, ordered top→bottom), or one image per viewport with stitch=false. Note: brings the tab to foreground and focuses its window.',
     {
       max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
       delay: z.number().optional().default(500).describe('Delay between captures in ms (min 500, Chrome quota is 2 captures/sec)'),
@@ -596,6 +596,16 @@ export function registerTools(server, wsManager) {
     },
     async ({ max_scrolls, delay, stitch, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
+      if (data && data.images) {
+        const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}${data.truncated ? ' (truncated at 16384px canvas limit)' : ''}`;
+        return {
+          content: [
+            { type: 'text', text: note },
+            ...data.images.map((img) => ({ type: 'image', data: img, mimeType: 'image/png' })),
+          ],
+        };
+      }
+      // Retrocompatibilità: extension non ancora ricaricata → singola immagine stitched
       if (data && data.image) {
         const note = `Full page: ${data.totalCaptures} captures stitched, scrollHeight=${data.scrollHeight}${data.truncated ? ' (truncated at 16384px canvas limit)' : ''}`;
         return { content: [{ type: 'text', text: note }, { type: 'image', data: data.image, mimeType: 'image/png' }] };

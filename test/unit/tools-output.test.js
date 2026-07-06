@@ -100,3 +100,17 @@ test('execute_js: max_length esplicito rispettato', async () => {
   assert.ok(text.length < 300, `output ${text.length} char, atteso troncato a ~100`);
   assert.ok(text.includes('[truncated'));
 });
+
+test('full_page_screenshot: emette un blocco immagine per segmento', async () => {
+  const handlers = setup({ full_page_screenshot: {
+    images: ['b64seg1', 'b64seg2', 'b64seg3'], segments: 3,
+    totalCaptures: 6, scrollHeight: 8000, viewportHeight: 900, truncated: false,
+  } });
+  const result = await handlers.get('full_page_screenshot')({});
+  const images = result.content.filter((c) => c.type === 'image');
+  assert.equal(images.length, 3);
+  assert.equal(images[0].data, 'b64seg1');
+  const note = result.content.find((c) => c.type === 'text').text;
+  assert.match(note, /3 segments/);
+  assert.match(note, /top→bottom/);
+});

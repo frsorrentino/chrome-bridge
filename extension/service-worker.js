@@ -371,6 +371,20 @@ async function canvasToBase64(canvas) {
   return blobToBase64(await canvas.convertToBlob({ type: 'image/png' }));
 }
 
+// I client LLM ridimensionano comunque le immagini a ~1568px sul lato lungo:
+// pixel oltre quella soglia non arrivano mai al modello, gonfiano solo il
+// payload base64. Downscale qui = stesso dettaglio percepito, meno byte.
+const MAX_IMAGE_SIDE = 1568;
+
+async function bitmapToBase64Capped(bitmap, maxSide = MAX_IMAGE_SIDE) {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = new OffscreenCanvas(w, h);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+  return await canvasToBase64(canvas);
+}
+
 // --- Implementazione comandi ---
 
 async function cmdGetTabs() {
@@ -427,9 +441,8 @@ async function cmdScreenshot({ tab_id }) {
     format: 'png',
   });
 
-  // Rimuovi il prefisso data:image/png;base64,
-  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
-  return { image: base64 };
+  const bitmap = await dataUrlToBitmap(dataUrl);
+  return { image: await bitmapToBase64Capped(bitmap) };
 }
 
 async function cmdExecuteJs({ code, tab_id, frame_id }) {
@@ -1443,13 +1456,20 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
   if (!shots.length) throw new Error('No captures (page dimensions unavailable)');
 
   if (!stitch) {
+    const captures = [];
+    for (const s of shots) {
+      captures.push(await bitmapToBase64Capped(await dataUrlToBitmap(s.dataUrl)));
+    }
     return {
-      captures: shots.map((s) => s.dataUrl.replace(/^data:image\/png;base64,/, '')),
+      captures,
       scrollHeight, viewportHeight, totalCaptures: shots.length,
     };
   }
 
-  // Stitching su OffscreenCanvas (limite hard Chrome ~16384px per lato)
+  // Stitching su OffscreenCanvas (limite hard Chrome ~16384px per lato),
+  // poi slice in segmenti da ~2 viewport: un'unica immagine più alta,
+  // ridotta dal client a ~1568px sul lato lungo, diventa illeggibile e
+  // costringe il modello a ri-catturare (token doppi).
   const MAX_CANVAS_H = 16384;
   const first = await dataUrlToBitmap(shots[0].dataUrl);
   const dpr = first.width / viewportWidth;
@@ -1461,9 +1481,16 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     const bmp = await dataUrlToBitmap(shots[i].dataUrl);
     ctx.drawImage(bmp, 0, Math.round(shots[i].y * dpr));
   }
+  const segH = Math.max(1, Math.round(viewportHeight * dpr * 2));
+  const images = [];
+  for (let y = 0; y < fullH; y += segH) {
+    const h = Math.min(segH, fullH - y);
+    const segment = await createImageBitmap(canvas, 0, y, first.width, h);
+    images.push(await bitmapToBase64Capped(segment));
+  }
   return {
-    image: await canvasToBase64(canvas),
-    stitched: true,
+    images,
+    segments: images.length,
     scrollHeight, viewportHeight, totalCaptures: shots.length,
     truncated: scrollHeight * dpr > MAX_CANVAS_H,
   };
@@ -1503,8 +1530,11 @@ async function cmdElementScreenshot({ selector, tab_id }) {
   const sw = Math.min(Math.round(rect.width * dpr), bitmap.width - sx);
   const sh = Math.min(Math.round(rect.height * dpr), bitmap.height - sy);
   if (sw <= 0 || sh <= 0) throw new Error('Element is outside the visible viewport');
-  const canvas = new OffscreenCanvas(sw, sh);
-  canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  const outScale = Math.min(1, MAX_IMAGE_SIDE / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * outScale));
+  const dh = Math.max(1, Math.round(sh * outScale));
+  const canvas = new OffscreenCanvas(dw, dh);
+  canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
   return { image: await canvasToBase64(canvas), width: sw, height: sh };
 }
 
