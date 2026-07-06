@@ -369,16 +369,23 @@ export function registerTools(server, wsManager) {
       clear: z.boolean().optional().default(false).describe('Clear captured messages after reading'),
       level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('Filter by log level'),
       limit: z.number().optional().default(50).describe('Max messages returned (most recent; buffer holds up to 1000)'),
+      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one message per line (level, +ms, text); json = structured'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ clear, level, limit, tab_id }) => {
+    async ({ clear, level, limit, format, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.READ_CONSOLE, { clear, level, tab_id });
       const all = data?.messages ?? [];
       const tail = all.slice(-(limit ?? 50));
+      const total = data?.count ?? all.length;
+      if ((format ?? 'lines') === 'json') {
+        return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, messages: tail }) }] };
+      }
+      const t0 = tail[0]?.timestamp ?? 0;
+      const lines = tail.map((m) => `${m.level}\t+${(m.timestamp ?? t0) - t0}ms\t${(m.args ?? []).join(' ')}`);
       return {
         content: [{
           type: 'text',
-          text: jsonText({ total: data?.count ?? all.length, shown: tail.length, messages: tail }),
+          text: truncateText(`console total=${total} shown=${tail.length}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -391,7 +398,7 @@ export function registerTools(server, wsManager) {
     {
       clear: z.boolean().optional().default(false).describe('Clear captured requests after reading'),
       source: z.enum(['page', 'browser']).optional().default('page').describe('page = fetch/XHR hook; browser = all requests incl. static assets via webRequest'),
-      format: z.enum(['json', 'har']).optional().default('json').describe('Output format'),
+      format: z.enum(['lines', 'json', 'har']).optional().default('lines').describe('lines = one request per line (status, ms, method, url); json = structured; har = HAR 1.2'),
       limit: z.number().optional().default(100).describe('Max requests returned (most recent; buffer holds up to 1000)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
@@ -400,13 +407,19 @@ export function registerTools(server, wsManager) {
       const { requests, count, ...rest } = data ?? {};
       const all = requests ?? [];
       const tail = all.slice(-(limit ?? 100));
-      const out = format === 'har'
-        ? toHar(tail)
-        : { ...rest, total: count ?? all.length, shown: tail.length, requests: tail };
+      const total = count ?? all.length;
+      const fmt = format ?? 'lines';
+      if (fmt !== 'lines') {
+        const out = fmt === 'har'
+          ? toHar(tail)
+          : { ...rest, total, shown: tail.length, requests: tail };
+        return { content: [{ type: 'text', text: jsonText(out) }] };
+      }
+      const lines = tail.map((r) => `${r.status ?? `ERR(${r.error})`}\t${r.duration}ms\t${r.method}\t${r.url}`);
       return {
         content: [{
           type: 'text',
-          text: jsonText(out),
+          text: truncateText(`network total=${total} shown=${tail.length}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -647,17 +660,27 @@ export function registerTools(server, wsManager) {
       selector: z.string().optional().default('a[href]').describe('CSS selector to find links'),
       timeout: z.number().optional().default(5000).describe('Per-link fetch timeout in ms'),
       max_links: z.number().optional().default(50).describe('Max links to check'),
+      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one link per line (status, url, error); json = structured'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ scope, selector, timeout, max_links, tab_id }) => {
+    async ({ scope, selector, timeout, max_links, format, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
       const links = data.links ?? [];
       const results = await checkLinksBatch(links, timeout);
       const broken = results.filter((r) => r.broken).length;
+      if ((format ?? 'lines') === 'json') {
+        return {
+          content: [{
+            type: 'text',
+            text: jsonText({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }),
+          }],
+        };
+      }
+      const lines = results.map((r) => `${r.status}\t${r.url}${r.error ? `\t${r.error}` : ''}`);
       return {
         content: [{
           type: 'text',
-          text: jsonText({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }),
+          text: truncateText(`links total=${links.length} checked=${results.length} broken=${broken} anchors=${data.totalAnchors}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -1234,12 +1257,29 @@ export function registerTools(server, wsManager) {
       scope: z.string().optional().describe('CSS selector to limit the search (default: whole document)'),
       limit: z.number().optional().default(100).describe('Max elements returned'),
       visible_only: z.boolean().optional().default(true).describe('Only return visible elements'),
+      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one element per line (selector, tag:type, label, flags, @x,y WxH); json = structured'),
       frame_id: z.number().optional().describe('Frame ID (from get_frames; default: main frame)'),
       tab_id: z.number().optional().describe('Tab ID (default: active tab)'),
     },
-    async ({ scope, limit, visible_only, frame_id, tab_id }) => {
+    async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
+      if ((format ?? 'lines') === 'json') {
+        return { content: [{ type: 'text', text: jsonText(data) }] };
+      }
+      const els = data?.elements ?? [];
+      const lines = els.map((e) => {
+        // Flag solo quando anomali: il caso normale (enabled+visible) non spreca token
+        const flags = [!e.enabled && 'disabled', !e.visible && 'hidden', e.occluded && 'occluded'].filter(Boolean).join(',');
+        const rect = e.rect ? `@${e.rect.x},${e.rect.y} ${e.rect.width}x${e.rect.height}` : '';
+        return [`${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), rect].join('\t');
+      });
+      const note = data?.note ? ` note=${data.note}` : '';
+      return {
+        content: [{
+          type: 'text',
+          text: truncateText(`interactives count=${data?.count ?? els.length}${note}\n${lines.join('\n')}`, DEFAULT_MAX_OUTPUT),
+        }],
+      };
     }
   );
 

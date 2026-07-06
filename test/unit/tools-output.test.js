@@ -44,7 +44,7 @@ test('read_console: default limit 50, tail, riporta total', async () => {
     level: 'log', args: [`msg ${i}`], timestamp: 1700000000000 + i,
   }));
   const handlers = setup({ read_console: { count: 200, messages } });
-  const out = JSON.parse(textOf(await handlers.get('read_console')({})));
+  const out = JSON.parse(textOf(await handlers.get('read_console')({ format: 'json' })));
   assert.equal(out.total, 200);
   assert.equal(out.messages.length, 50);
   // tail: gli ultimi 50, non i primi
@@ -57,7 +57,7 @@ test('read_console: limit esplicito', async () => {
     level: 'log', args: [`msg ${i}`], timestamp: 1700000000000 + i,
   }));
   const handlers = setup({ read_console: { count: 200, messages } });
-  const out = JSON.parse(textOf(await handlers.get('read_console')({ limit: 10 })));
+  const out = JSON.parse(textOf(await handlers.get('read_console')({ limit: 10, format: 'json' })));
   assert.equal(out.messages.length, 10);
   assert.equal(out.messages[9].args[0], 'msg 199');
 });
@@ -68,7 +68,7 @@ test('monitor_network: default limit 100, tail, riporta total', async () => {
     startTime: 1700000000000 + i, status: 200, duration: 10, error: null,
   }));
   const handlers = setup({ monitor_network: { count: 300, requests } });
-  const out = JSON.parse(textOf(await handlers.get('monitor_network')({})));
+  const out = JSON.parse(textOf(await handlers.get('monitor_network')({ format: 'json' })));
   assert.equal(out.total, 300);
   assert.equal(out.requests.length, 100);
   assert.equal(out.requests[0].url, 'https://x.test/200');
