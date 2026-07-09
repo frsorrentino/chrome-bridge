@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Built for ChromeOS (Crostini), works on any platform with Chrome 111+.
+**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Built for ChromeOS (Crostini), works on any platform with Chrome 135+.
 
 Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 56 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
@@ -147,7 +147,7 @@ Every WebSocket connection must identify itself within **5 seconds** or it is te
 
 ## Install
 
-Requires **Node.js 18+** and **Chrome 111+**.
+Requires **Node.js 18+** and **Chrome 135+**.
 
 ### From source
 
@@ -245,7 +245,7 @@ chrome-bridge/
     har.js                  # HAR 1.2 export (monitor_network)
     security-headers.js     # Security-header analysis (security_headers)
   extension/
-    manifest.json           # Chrome MV3 manifest (min Chrome 111)
+    manifest.json           # Chrome MV3 manifest (min Chrome 135)
     service-worker.js       # Command handlers, Chrome APIs
     console-capture.js      # Content script (dynamic, toggleable): console + error capture at document_start
     page-instrumentation.js # Content script: web vitals + event-listener tracking

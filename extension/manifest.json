@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Chrome Bridge for Claude Code",
-  "version": "1.4.0",
-  "description": "Connects Chrome to Claude Code via WebSocket bridge",
-  "minimum_chrome_version": "111",
+  "version": "1.5.0",
+  "description": "Bridge your browser to Claude Code: 56 web-dev automation tools over a local WebSocket. Self-hosted, works on ChromeOS.",
+  "homepage_url": "https://github.com/frsorrentino/chrome-bridge",
+  "minimum_chrome_version": "135",
   "permissions": [
     "tabs",
     "scripting",
+    "userScripts",
     "alarms",
     "storage",
     "cookies",

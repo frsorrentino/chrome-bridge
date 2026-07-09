@@ -1,6 +1,6 @@
 {
   "name": "chrome-bridge-mcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "MCP server with 56 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
   "main": "server/index.js",
