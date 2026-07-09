@@ -350,6 +350,35 @@ function scriptTarget(tabId, frame_id) {
   return target;
 }
 
+// --- Utility: chrome.userScripts (esecuzione codice utente, CWS-compliant) ---
+
+const USER_SCRIPTS_HELP = "User scripts are disabled. Open chrome://extensions, click Details on Chrome Bridge, and enable 'Allow user scripts' (on Chrome 135-137 enable Developer Mode instead). Then retry.";
+
+function userScriptsAvailable() {
+  // L'accesso alla proprietà lancia se l'utente non ha attivato il toggle
+  try {
+    chrome.userScripts.getScripts;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertUserScripts() {
+  if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
+}
+
+async function runUserScript(target, code, world) {
+  const results = await chrome.userScripts.execute({
+    target,
+    js: [{ code }],
+    world,
+  });
+  const r = results?.[0];
+  if (r && r.error !== undefined && r.error !== null) throw new Error(String(r.error));
+  return r?.result;
+}
+
 // --- Helper immagini (OffscreenCanvas nel service worker) ---
 
 async function dataUrlToBitmap(dataUrl) {
@@ -447,52 +476,21 @@ async function cmdScreenshot({ tab_id }) {
 
 async function cmdExecuteJs({ code, tab_id, frame_id }) {
   if (!code) throw new Error('Missing required parameter: code');
+  assertUserScripts();
   const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
 
-  // Strategia: ISOLATED world (no CSP restrizioni dalla pagina)
-  // per accesso DOM + eval del codice utente.
-  // Fallback: MAIN world per accesso a variabili della pagina.
+  // Strategia: USER_SCRIPT world (isolato, non soggetto alla CSP della pagina).
+  // Fallback: MAIN world per codice che legge variabili della pagina.
   try {
-    const results = await chrome.scripting.executeScript({
-      target: scriptTarget(tabId, frame_id),
-      func: (codeStr) => {
-        // In ISOLATED world, eval non è soggetto alla CSP della pagina
-        try {
-          return eval(codeStr);
-        } catch (e) {
-          return { __error: e.message };
-        }
-      },
-      args: [code],
-      world: 'ISOLATED',
-    });
-    const val = results?.[0]?.result;
-    if (val && typeof val === 'object' && val.__error) {
-      throw new Error(val.__error);
-    }
+    const val = await runUserScript(target, code, 'USER_SCRIPT');
     return { result: val ?? null };
-  } catch (isolatedErr) {
-    // Fallback: prova MAIN world (funziona se la pagina non ha CSP restrittiva)
+  } catch (userWorldErr) {
     try {
-      const results = await chrome.scripting.executeScript({
-        target: scriptTarget(tabId, frame_id),
-        func: (codeStr) => {
-          try {
-            return eval(codeStr);
-          } catch (e) {
-            return { __error: e.message };
-          }
-        },
-        args: [code],
-        world: 'MAIN',
-      });
-      const val = results?.[0]?.result;
-      if (val && typeof val === 'object' && val.__error) {
-        throw new Error(val.__error);
-      }
+      const val = await runUserScript(target, code, 'MAIN');
       return { result: val ?? null };
     } catch (mainErr) {
-      throw new Error(`JS execution failed: ${isolatedErr.message}`);
+      throw new Error(`${mainErr.message} (USER_SCRIPT world: ${userWorldErr.message})`);
     }
   }
 }
