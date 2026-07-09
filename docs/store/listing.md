@@ -6,7 +6,7 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
-Bridge your browser to Claude Code: 56 web-dev automation tools over a local WebSocket. Self-hosted, works on ChromeOS.
+Bridge your browser to Claude Code: 56 web-dev automation tools over a local WebSocket. Cross-platform, ChromeOS included.
 
 ## Category
 
@@ -35,7 +35,7 @@ Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your 
 • Debugging — console logs, JS execution, event listeners, performance metrics
 • Emulation — media, geolocation, viewport, zoom
 
-Built for ChromeOS (Crostini), where no other Claude Code browser automation works. Runs on any platform with Chrome 135+.
+Cross-platform: Windows, macOS, Linux — any desktop Chrome 135+. Also the only Claude Code browser automation that works on ChromeOS (Crostini).
 
 REQUIREMENTS
 
