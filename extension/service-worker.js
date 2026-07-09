@@ -379,6 +379,32 @@ async function runUserScript(target, code, world) {
   return r?.result;
 }
 
+// --- Utility: rendi visibile un tab per la cattura SENZA rubare il focus OS ---
+// captureVisibleTab richiede solo che il tab sia attivo nella sua finestra,
+// non che la finestra sia in primo piano. Al termine ripristina il tab che
+// era attivo prima e l'eventuale stato minimized della finestra.
+
+async function withTabVisible(tabId, fn) {
+  const tab = await chrome.tabs.get(tabId);
+  const win = await chrome.windows.get(tab.windowId);
+  const [prevActive] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  const restoreTabId = prevActive && prevActive.id !== tabId ? prevActive.id : null;
+  const wasMinimized = win.state === 'minimized';
+
+  if (wasMinimized) await chrome.windows.update(tab.windowId, { state: 'normal', focused: false });
+  if (!tab.active) await chrome.tabs.update(tabId, { active: true });
+  try {
+    return await fn(tab);
+  } finally {
+    if (restoreTabId) {
+      try { await chrome.tabs.update(restoreTabId, { active: true }); } catch { /* tab chiuso nel frattempo */ }
+    }
+    if (wasMinimized) {
+      try { await chrome.windows.update(tab.windowId, { state: 'minimized' }); } catch { /* finestra chiusa */ }
+    }
+  }
+}
+
 // --- Helper immagini (OffscreenCanvas nel service worker) ---
 
 async function dataUrlToBitmap(dataUrl) {
@@ -458,16 +484,10 @@ async function cmdNavigate({ url, tab_id }) {
 async function cmdScreenshot({ tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
-  // Assicurati che il tab sia attivo per fare lo screenshot
-  const tab = await chrome.tabs.get(tabId);
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.windows.update(tab.windowId, { focused: true });
-
-  // Piccolo delay per dare tempo al rendering
-  await new Promise((r) => setTimeout(r, 200));
-
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-    format: 'png',
+  const dataUrl = await withTabVisible(tabId, async (tab) => {
+    // Piccolo delay per dare tempo al rendering
+    await new Promise((r) => setTimeout(r, 200));
+    return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
   });
 
   const bitmap = await dataUrlToBitmap(dataUrl);
@@ -1407,48 +1427,49 @@ async function cmdViewportResize({ preset, width, height, tab_id }) {
 
 async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = true, tab_id }) {
   const tabId = await resolveTabId(tab_id);
-  const tab = await chrome.tabs.get(tabId);
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.windows.update(tab.windowId, { focused: true });
   // Chrome quota: max 2 captureVisibleTab al secondo — clamp a 500ms
   const safeDelay = Math.max(delay, 500);
 
-  // Get page dimensions
-  const dimResults = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => ({
-      scrollHeight: document.documentElement.scrollHeight,
-      viewportHeight: window.innerHeight,
-      viewportWidth: window.innerWidth,
-      originalScrollY: window.scrollY,
-    }),
-    world: 'MAIN',
-  });
-  const { scrollHeight, viewportHeight, viewportWidth, originalScrollY } = dimResults?.[0]?.result ?? {};
-  const steps = Math.min(Math.ceil(scrollHeight / viewportHeight), max_scrolls);
-  const shots = [];
-
-  for (let i = 0; i < steps; i++) {
-    const target = Math.min(i * viewportHeight, Math.max(0, scrollHeight - viewportHeight));
-    const sRes = await chrome.scripting.executeScript({
+  const { shots, scrollHeight, viewportHeight, viewportWidth } = await withTabVisible(tabId, async (tab) => {
+    // Get page dimensions
+    const dimResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (sy) => { window.scrollTo(0, sy); return window.scrollY; },
-      args: [target],
+      func: () => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+        originalScrollY: window.scrollY,
+      }),
       world: 'MAIN',
     });
-    const actualY = sRes?.[0]?.result ?? target;
-    await new Promise((r) => setTimeout(r, safeDelay));
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    shots.push({ dataUrl, y: actualY });
-    if (actualY + viewportHeight >= scrollHeight) break;
-  }
+    const { scrollHeight, viewportHeight, viewportWidth, originalScrollY } = dimResults?.[0]?.result ?? {};
+    const steps = Math.min(Math.ceil(scrollHeight / viewportHeight), max_scrolls);
+    const shots = [];
 
-  // Restore scroll position
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (sy) => window.scrollTo(0, sy),
-    args: [originalScrollY],
-    world: 'MAIN',
+    for (let i = 0; i < steps; i++) {
+      const target = Math.min(i * viewportHeight, Math.max(0, scrollHeight - viewportHeight));
+      const sRes = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sy) => { window.scrollTo(0, sy); return window.scrollY; },
+        args: [target],
+        world: 'MAIN',
+      });
+      const actualY = sRes?.[0]?.result ?? target;
+      await new Promise((r) => setTimeout(r, safeDelay));
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      shots.push({ dataUrl, y: actualY });
+      if (actualY + viewportHeight >= scrollHeight) break;
+    }
+
+    // Restore scroll position
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sy) => window.scrollTo(0, sy),
+      args: [originalScrollY],
+      world: 'MAIN',
+    });
+
+    return { shots, scrollHeight, viewportHeight, viewportWidth };
   });
 
   if (!shots.length) throw new Error('No captures (page dimensions unavailable)');
@@ -1503,28 +1524,28 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
 async function cmdElementScreenshot({ selector, tab_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
-  const tab = await chrome.tabs.get(tabId);
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.windows.update(tab.windowId, { focused: true });
 
-  const res = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (sel) => {
-      const el = document.querySelector(sel);
-      if (!el) throw new Error(`Element not found: ${sel}`);
-      el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
-      const r = el.getBoundingClientRect();
-      return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
-    },
-    args: [selector],
-    world: 'MAIN',
+  const { rect, dataUrl } = await withTabVisible(tabId, async (tab) => {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) throw new Error(`Element not found: ${sel}`);
+        el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+      },
+      args: [selector],
+      world: 'MAIN',
+    });
+    const rect = res?.[0]?.result;
+    if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
+
+    // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
+    await new Promise((r) => setTimeout(r, 300));
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return { rect, dataUrl };
   });
-  const rect = res?.[0]?.result;
-  if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
-
-  // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
-  await new Promise((r) => setTimeout(r, 300));
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
   const bitmap = await dataUrlToBitmap(dataUrl);
   const { dpr } = rect;
   const sx = Math.max(0, Math.round(rect.x * dpr));
@@ -2435,30 +2456,29 @@ const MAX_DIFF_BASELINES = 10;
 const diffBaselines = new Map(); // name → { bitmapData: ImageData, width, height, capturedAt, selector }
 
 async function captureForDiff(tabId, selector) {
-  const tab = await chrome.tabs.get(tabId);
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.windows.update(tab.windowId, { focused: true });
+  const { cropRect, dataUrl } = await withTabVisible(tabId, async (tab) => {
+    let cropRect = null;
+    if (selector) {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) throw new Error(`Element not found: ${sel}`);
+          el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+        },
+        args: [selector],
+        world: 'MAIN',
+      });
+      cropRect = res?.[0]?.result;
+      if (!cropRect || cropRect.width === 0 || cropRect.height === 0) throw new Error('Element has no visible area');
+    }
 
-  let cropRect = null;
-  if (selector) {
-    const res = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (sel) => {
-        const el = document.querySelector(sel);
-        if (!el) throw new Error(`Element not found: ${sel}`);
-        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-        const r = el.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
-      },
-      args: [selector],
-      world: 'MAIN',
-    });
-    cropRect = res?.[0]?.result;
-    if (!cropRect || cropRect.width === 0 || cropRect.height === 0) throw new Error('Element has no visible area');
-  }
-
-  await new Promise((r) => setTimeout(r, 300));
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    await new Promise((r) => setTimeout(r, 300));
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return { cropRect, dataUrl };
+  });
   const bitmap = await dataUrlToBitmap(dataUrl);
 
   let sx = 0, sy = 0, sw = bitmap.width, sh = bitmap.height;
@@ -3335,33 +3355,41 @@ async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab
 
 async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 100, tab_id, frame_id }) {
   if (!expression) throw new Error('Missing required parameter: expression');
+  assertUserScripts();
   const tabId = await resolveTabId(tab_id);
-  const clamped = Math.max(polling_ms, 50);
-  const results = await chrome.scripting.executeScript({
-    target: scriptTarget(tabId, frame_id),
-    func: (expr, tout, intv) => new Promise((resolve) => {
-      const start = Date.now();
-      const evaluate = () => {
-        let value, ok = false;
-        try { value = eval(expr); ok = !!value; } catch (e) { value = { __error: e.message }; }
-        if (ok) {
-          let serial = value;
-          try { serial = typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value; } catch { serial = String(value); }
-          resolve({ satisfied: true, elapsed: Date.now() - start, value: serial });
-          return;
-        }
-        if (Date.now() - start >= tout) {
-          resolve({ satisfied: false, elapsed: Date.now() - start, lastValue: value ?? null });
-          return;
-        }
-        setTimeout(evaluate, intv);
-      };
-      evaluate();
-    }),
-    args: [expression, timeout, clamped],
-    world: 'MAIN',
-  });
-  return results?.[0]?.result ?? { satisfied: false };
+  const target = scriptTarget(tabId, frame_id);
+  const intv = Math.max(polling_ms, 50);
+  // Polling lato service worker: una micro-iniezione per tentativo,
+  // robusto anche attraverso navigazioni della pagina.
+  // L'espressione utente è interpolata nel codice user-script (niente eval).
+  const probe = `(() => {
+    try {
+      const __v = (${expression});
+      let s = __v;
+      try { s = (typeof __v === 'object' && __v !== null) ? JSON.parse(JSON.stringify(__v)) : __v; } catch { s = String(__v); }
+      return { truthy: !!__v, value: s ?? null };
+    } catch (e) {
+      return { truthy: false, value: { __error: e.message } };
+    }
+  })()`;
+  const start = Date.now();
+  let last = null;
+  for (;;) {
+    let r = null;
+    try {
+      r = await runUserScript(target, probe, 'MAIN');
+    } catch (e) {
+      r = { truthy: false, value: { __error: e.message } };
+    }
+    if (r && r.truthy) {
+      return { satisfied: true, elapsed: Date.now() - start, value: r.value };
+    }
+    last = r ? r.value : null;
+    if (Date.now() - start >= timeout) {
+      return { satisfied: false, elapsed: Date.now() - start, lastValue: last };
+    }
+    await new Promise((res) => setTimeout(res, intv));
+  }
 }
 
 // --- scroll_until ---

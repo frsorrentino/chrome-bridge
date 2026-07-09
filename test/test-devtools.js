@@ -239,6 +239,40 @@ async function testWaitForElementTimeout(tabId) {
   }
 }
 
+async function testWaitForFunction(tabId) {
+  {
+    const name = 'wait_for_function (satisfied)';
+    try {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_FUNCTION, {
+        expression: 'document.readyState === "complete" || document.readyState === "interactive"',
+        timeout: 5000,
+        tab_id: tabId,
+      });
+      if (data.satisfied !== true) throw new Error(`satisfied=${data.satisfied}`);
+      if (typeof data.elapsed !== 'number') throw new Error('Missing elapsed');
+      ok(name);
+    } catch (e) {
+      fail(name, e.message);
+    }
+  }
+  {
+    const name = 'wait_for_function (timeout)';
+    try {
+      const data = await wsManager.sendCommand(MessageType.WAIT_FOR_FUNCTION, {
+        expression: 'window.__never_exists_xyz === 42',
+        timeout: 1200,
+        polling_ms: 100,
+        tab_id: tabId,
+      });
+      if (data.satisfied !== false) throw new Error(`satisfied=${data.satisfied}`);
+      if (data.elapsed < 1200) throw new Error(`elapsed=${data.elapsed} < 1200`);
+      ok(name);
+    } catch (e) {
+      fail(name, e.message);
+    }
+  }
+}
+
 async function testScrollTo(tabId) {
   const name = 'scroll_to';
   try {
@@ -495,6 +529,7 @@ async function main() {
     // New 12 tests
     await testWaitForElement(testTabId);
     await testWaitForElementTimeout(testTabId);
+    await testWaitForFunction(testTabId);
     await testScrollTo(testTabId);
     await testSetStorage(testTabId);
     await testFillForm(testTabId);
