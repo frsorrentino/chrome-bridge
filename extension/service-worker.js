@@ -379,6 +379,23 @@ async function runUserScript(target, code, world) {
   return r?.result;
 }
 
+// --- Utility: captureVisibleTab con timeout ---
+// Su ChromeOS una finestra totalmente occlusa/congelata può non produrre mai
+// un frame: la promise di captureVisibleTab resterebbe pendente per sempre.
+// Meglio un errore parlante dopo 10s che un comando appeso.
+
+function captureVisible(windowId, options = { format: 'png' }) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('Capture timed out after 10s: the window is not rendering frames (fully occluded, minimized, or frozen). Bring the Chrome window at least partially on screen and retry.'));
+    }, 10000);
+    chrome.tabs.captureVisibleTab(windowId, options).then(
+      (dataUrl) => { clearTimeout(timer); resolve(dataUrl); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 // --- Utility: rendi visibile un tab per la cattura SENZA rubare il focus OS ---
 // captureVisibleTab richiede solo che il tab sia attivo nella sua finestra,
 // non che la finestra sia in primo piano. Al termine ripristina il tab che
@@ -487,7 +504,7 @@ async function cmdScreenshot({ tab_id }) {
   const dataUrl = await withTabVisible(tabId, async (tab) => {
     // Piccolo delay per dare tempo al rendering
     await new Promise((r) => setTimeout(r, 200));
-    return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return captureVisible(tab.windowId);
   });
 
   const bitmap = await dataUrlToBitmap(dataUrl);
@@ -500,16 +517,18 @@ async function cmdExecuteJs({ code, tab_id, frame_id }) {
   const tabId = await resolveTabId(tab_id);
   const target = scriptTarget(tabId, frame_id);
 
-  // Strategia: USER_SCRIPT world (isolato, non soggetto alla CSP della pagina).
-  // Fallback: MAIN world per codice che legge variabili della pagina.
+  // Strategia: MAIN world primario — pieno accesso a variabili di pagina e
+  // semantica "page context" (es. <script> tag iniettati eseguono). A differenza
+  // del vecchio eval, il codice iniettato via userScripts non è soggetto alla
+  // CSP della pagina. Fallback USER_SCRIPT per i rari casi in cui MAIN fallisce.
   try {
-    const val = await runUserScript(target, code, 'USER_SCRIPT');
+    const val = await runUserScript(target, code, 'MAIN');
     return { result: val ?? null };
-  } catch (userWorldErr) {
+  } catch (mainErr) {
     try {
-      const val = await runUserScript(target, code, 'MAIN');
+      const val = await runUserScript(target, code, 'USER_SCRIPT');
       return { result: val ?? null };
-    } catch (mainErr) {
+    } catch (userWorldErr) {
       throw new Error(`${mainErr.message} (USER_SCRIPT world: ${userWorldErr.message})`);
     }
   }
@@ -1456,7 +1475,7 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
       });
       const actualY = sRes?.[0]?.result ?? target;
       await new Promise((r) => setTimeout(r, safeDelay));
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      const dataUrl = await captureVisible(tab.windowId);
       shots.push({ dataUrl, y: actualY });
       if (actualY + viewportHeight >= scrollHeight) break;
     }
@@ -1543,7 +1562,7 @@ async function cmdElementScreenshot({ selector, tab_id }) {
 
     // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
     await new Promise((r) => setTimeout(r, 300));
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const dataUrl = await captureVisible(tab.windowId);
     return { rect, dataUrl };
   });
   const bitmap = await dataUrlToBitmap(dataUrl);
@@ -2476,7 +2495,7 @@ async function captureForDiff(tabId, selector) {
     }
 
     await new Promise((r) => setTimeout(r, 300));
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const dataUrl = await captureVisible(tab.windowId);
     return { cropRect, dataUrl };
   });
   const bitmap = await dataUrlToBitmap(dataUrl);

@@ -351,10 +351,10 @@ async function testFullPageScreenshot(tabId) {
   const name = 'full_page_screenshot';
   try {
     const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls: 3, delay: 100, tab_id: tabId });
-    // stitch=true (default) restituisce { image }, stitch=false { captures }
-    const hasImage = typeof data.image === 'string' && data.image.length > 0;
+    // stitch=true (default) restituisce { images } (segmenti), stitch=false { captures }
+    const hasImages = Array.isArray(data.images) && data.images.length >= 1;
     const hasCaptures = Array.isArray(data.captures) && data.captures.length >= 1;
-    if (!hasImage && !hasCaptures) throw new Error('Missing image or captures array');
+    if (!hasImages && !hasCaptures) throw new Error('Missing images or captures array');
     if (typeof data.scrollHeight !== 'number') throw new Error('Missing scrollHeight');
     ok(name);
   } catch (e) {
