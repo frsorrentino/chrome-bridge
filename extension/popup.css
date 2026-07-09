@@ -50,3 +50,13 @@ h1 {
 .config input { width: 100%; box-sizing: border-box; }
 .config label.check { display: flex; align-items: center; gap: 6px; }
 .config label.check input { width: auto; }
+
+.warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #fff3cd;
+  color: #664d03;
+  font-size: 11px;
+  line-height: 1.4;
+}

@@ -43,3 +43,11 @@ document.getElementById('save').addEventListener('click', () => {
   chrome.storage.local.set({ port, token, instrument: instrumentInput.checked });
   if (wsUrlLabel) wsUrlLabel.textContent = `ws://localhost:${port}`;
 });
+
+// Warning se il toggle "Allow user scripts" è spento
+const usWarning = document.getElementById('us-warning');
+try {
+  chrome.userScripts.getScripts;
+} catch {
+  if (usWarning) usWarning.hidden = false;
+}

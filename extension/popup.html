@@ -11,6 +11,10 @@
       <div id="indicator" class="indicator disconnected"></div>
       <span id="status-text">Disconnected</span>
     </div>
+    <div id="us-warning" class="warning" hidden>
+      ⚠ execute_js and wait_for(function) need "Allow user scripts":<br>
+      chrome://extensions → Chrome Bridge → Details → Allow user scripts
+    </div>
     <p class="info">WebSocket: <span id="ws-url">ws://localhost:8765</span></p>
     <div class="config">
       <label>Port <input type="number" id="port" min="1" max="65535"></label>
