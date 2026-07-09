@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Built for ChromeOS (Crostini), works on any platform with Chrome 135+.
+**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that works on ChromeOS (Crostini).
 
 Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 56 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
@@ -29,6 +29,14 @@ There are several browser automation tools for Claude Code. Here's how they comp
 
 **In short:** Chrome Bridge is the only option that works on ChromeOS, ships 56 specialized web-development tools, and runs entirely self-hosted with no paid plan. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
+## What's new in 1.5.0
+
+- **Chrome Web Store ready** — zero `eval`: `execute_js` and `wait_for` (`condition=function`) now run user code through the official `chrome.userScripts.execute()` API. One-time setup: enable **"Allow user scripts"** in `chrome://extensions` → Chrome Bridge → Details (Chrome 138+; on 135-137 enable Developer Mode). The popup warns when the toggle is off; every other tool works regardless.
+- **Background captures — no more focus stealing**: `screenshot`, `full_page_screenshot`, `element_screenshot` and `screenshot_diff` activate the target tab *without* bringing the Chrome window to the foreground, then restore the previously active tab (and minimized state). Automation no longer interrupts whatever you're doing.
+- **No more hanging captures**: on ChromeOS a fully occluded window can stop producing frames; captures now fail after 10s with a clear message instead of hanging forever.
+- **`execute_js` runs in the MAIN world** by default (page variables and injected `<script>` tags behave as expected), with `USER_SCRIPT` world fallback. Page CSP no longer blocks it — code is injected, not `eval`'d.
+- Requires **Chrome 135+** (was 111+).
+
 ## Architecture
 
 ```
@@ -38,7 +46,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 
 - **MCP Server** (`server/`): Node.js. Talks to Claude Code over stdio and to the extension over a WebSocket. When the port is already held by a primary instance, additional MCP processes attach as loopback relay clients.
 - **Chrome Extension** (`extension/`): Manifest V3. Executes commands with Chrome APIs and returns results. Ships with a bridge-themed icon (16/48/128px).
-- Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. `chrome.debugger` is **not** used (it is broken on ChromeOS).
+- Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. User-authored code (`execute_js`, `wait_for` expressions) runs via **`chrome.userScripts.execute()`** — the CWS-sanctioned API for user scripts, gated behind the "Allow user scripts" toggle. `chrome.debugger` is **not** used (it is broken on ChromeOS).
 
 ## Tools (56)
 
@@ -51,7 +59,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `navigate` | Navigate a tab to a URL |
 | `tab_action` | Tab lifecycle: close, activate, reload (optional cache bypass), back, forward |
 | `get_frames` | List all frames (main + iframes) with `frameId` for frame targeting |
-| `screenshot` | Capture the visible tab as PNG (brings the tab to foreground) |
+| `screenshot` | Capture a tab as PNG — activates it in its window without focusing the window, then restores the previous tab |
 
 ### Interaction (12)
 | Tool | Description |
@@ -90,7 +98,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 ### Debugging & network (8)
 | Tool | Description |
 |------|-------------|
-| `execute_js` | Execute JavaScript in page context (per-frame targeting) |
+| `execute_js` | Execute JavaScript in page context (MAIN world, per-frame targeting) — needs the "Allow user scripts" toggle |
 | `read_console` | Console messages captured from page load, incl. uncaught errors and unhandled rejections |
 | `monitor_network` | Monitor requests: `page` (XHR/fetch hook) or `browser` (all, incl. static assets); HAR 1.2 export |
 | `monitor_websocket` | Monitor WebSocket connections and messages (both directions, 500-char previews) |
@@ -149,6 +157,10 @@ Every WebSocket connection must identify itself within **5 seconds** or it is te
 
 Requires **Node.js 18+** and **Chrome 135+**.
 
+### Extension from the Chrome Web Store
+
+*In review — link coming soon.* Until then, load it unpacked (below). Either way, the MCP server must be installed from source: the extension is only the browser half of the bridge.
+
 ### From source
 
 ```bash
@@ -176,6 +188,8 @@ claude mcp add --scope user chrome-bridge node /full/path/to/chrome-bridge/serve
 
 Restart Claude Code after loading the extension. The extension popup shows live connection status; you can also call `get_status`.
 
+**For `execute_js` and `wait_for` (`condition=function`):** enable **"Allow user scripts"** in `chrome://extensions` → Chrome Bridge → Details (Chrome 138+; on 135-137 enable Developer Mode instead). One-time setup; the popup shows a warning while it's off.
+
 ## Configuration
 
 The extension popup has **Port** and **Token** fields (persisted in `chrome.storage.local`) — set them to match the server. Configure the server via environment variables:
@@ -192,6 +206,7 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 - **Action waits:** `click`, `type_text`, and `fill_form` accept `wait_after` (`navigation` / `networkidle`) to chain interactions.
 - **Click hardening:** `click` checks for occlusion before acting (override with `force`).
 - **SPA awareness:** `wait_for` (`condition=navigation`, `mode=spa`) resolves on `history.pushState` / `popstate` / `hashchange`.
+- **Background captures:** screenshot tools activate the target tab in its window *without* focusing the window (no interruption of your work), then restore the previously active tab and any minimized state. If a fully occluded window produces no frames, captures fail after 10s with an actionable message instead of hanging. Exceptions that still take focus: `clipboard` (the Clipboard API requires document focus) and `tab_action activate` (that's its job).
 - **Early console capture:** an opt-in content script at `document_start` records console output, uncaught errors, and unhandled promise rejections before any tool call. It is registered dynamically and toggled by the popup's "Capture page console & metrics" checkbox (default on) — turn it off for zero page footprint on heavy apps.
 - **Full-page screenshots in readable segments:** viewport captures are stitched then sliced into ~2-viewport segments, each downscaled to ≤1568px on the long side (what LLM clients render anyway).
 - **Server-side link checking:** `check_links` verifies URLs from the server, so external links get real HTTP statuses without CORS limits.
@@ -221,10 +236,10 @@ Rule of thumb: MCP tools for interactive/visual work (screenshots feed the model
 ## Tests
 
 ```bash
-# Unit tests — 20 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers)
+# Unit tests — 49 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers, tools)
 npm run test:unit
 
-# End-to-end suite — requires the extension loaded and the bridge port free
+# End-to-end suite — 25 tests; requires the extension loaded (with "Allow user scripts" on) and the bridge port free
 node test/test-devtools.js
 ```
 
@@ -249,7 +264,7 @@ chrome-bridge/
     service-worker.js       # Command handlers, Chrome APIs
     console-capture.js      # Content script (dynamic, toggleable): console + error capture at document_start
     page-instrumentation.js # Content script: web vitals + event-listener tracking
-    popup.html / .js / .css # Connection status popup (port + token settings)
+    popup.html / .js / .css # Connection status popup (port + token settings, user-scripts warning)
     icons/                  # Extension icons (16/48/128px)
   test/
     unit/                   # Unit tests (node --test, no Chrome)
