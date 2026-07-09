@@ -58,16 +58,16 @@ Everything stays on your machine. The extension talks only to localhost — no r
 
 **Small promo tile** (440×280): `docs/store/promo-tile-440x280.png`
 
-**Homepage URL:**
+**Homepage URL** (su GitHub Pages: il validatore CWS va in timeout su github.com):
 
 ```
-https://github.com/frsorrentino/chrome-bridge
+https://frsorrentino.github.io/chrome-bridge/
 ```
 
 **Support URL:**
 
 ```
-https://github.com/frsorrentino/chrome-bridge/issues
+https://frsorrentino.github.io/chrome-bridge/support
 ```
 
 ---

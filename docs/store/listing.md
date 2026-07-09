@@ -50,8 +50,8 @@ Everything stays on your machine. The extension talks only to localhost — no r
 
 ## URLs for the form
 
-- Homepage: https://github.com/frsorrentino/chrome-bridge
-- Support: https://github.com/frsorrentino/chrome-bridge/issues
+- Homepage: https://frsorrentino.github.io/chrome-bridge/ (github.com va in timeout dal validatore CWS)
+- Support: https://frsorrentino.github.io/chrome-bridge/support
 - Privacy policy: https://frsorrentino.github.io/chrome-bridge/privacy
 
 ## Data usage disclosures (Privacy tab of the CWS form)
