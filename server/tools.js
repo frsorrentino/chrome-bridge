@@ -152,7 +152,7 @@ export function registerTools(server, wsManager) {
   // --- execute_js ---
   server.tool(
     'execute_js',
-    'Execute JavaScript code in a Chrome tab page context',
+    'Execute JavaScript code in a Chrome tab page context. Requires the "Allow user scripts" toggle on the extension (chrome://extensions > Chrome Bridge > Details); the error message explains how if disabled.',
     {
       code:       z.string().describe('JavaScript code to execute'),
       tab_id:     z.number().optional().describe('Tab ID'),
@@ -449,7 +449,7 @@ export function registerTools(server, wsManager) {
     {
       condition: z.enum(['element', 'function', 'navigation', 'network_idle']).describe('What to wait for'),
       selector: z.string().optional().describe('CSS selector (condition=element)'),
-      expression: z.string().optional().describe('JS expression evaluated in page context, e.g. "window.app && app.ready" (condition=function)'),
+      expression: z.string().optional().describe('JS expression evaluated in page context, e.g. "window.app && app.ready" (condition=function; requires "Allow user scripts" toggle on the extension)'),
       visible: z.boolean().optional().default(false).describe('Also require the element to be visible (condition=element)'),
       mode: z.enum(['load', 'spa']).optional().default('load').describe('navigation: load = full page load; spa = pushState/popstate/hashchange'),
       idle_ms: z.number().optional().default(500).describe('Quiet period in ms (condition=network_idle)'),
