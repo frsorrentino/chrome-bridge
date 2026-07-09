@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 800px; overflow: hidden;
+    background: linear-gradient(135deg, #1a2332, #10161f);
+    display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, sans-serif;
+  }
+  .win {
+    width: 1080px; height: 660px; border-radius: 12px; overflow: hidden;
+    background: #0d1117; box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    border: 1px solid #2a3542;
+  }
+  .bar { height: 40px; background: #161d27; display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .bar .title { margin-left: 12px; color: #7d8ea3; font-size: 13px; }
+  pre {
+    padding: 22px 26px; font-family: 'Noto Sans Mono', ui-monospace, monospace;
+    font-size: 15px; line-height: 1.65; color: #c9d6e5; white-space: pre-wrap;
+  }
+  .u { color: #7fd8a8; font-weight: 600; }
+  .c { color: #e8b45f; }
+  .dim { color: #5d6f84; }
+  .ok { color: #7fd8a8; }
+</style></head><body>
+  <div class="win">
+    <div class="bar">
+      <span class="dot" style="background:#ff5f57"></span>
+      <span class="dot" style="background:#febc2e"></span>
+      <span class="dot" style="background:#28c840"></span>
+      <span class="title">claude — Claude Code</span>
+    </div>
+    <pre><span class="u">&gt; check the pricing page: any accessibility issues and layout shifts?</span>
+
+<span class="dim">⏺</span> I'll audit the page in your browser.
+
+<span class="c">⏺ navigate</span>(url: "https://myapp.dev/pricing")
+  <span class="dim">⎿ opened in new tab (id 42)</span>
+
+<span class="c">⏺ accessibility_audit</span>(tab_id: 42)
+  <span class="dim">⎿ 3 issues: 2 missing alt attributes, 1 low-contrast button (2.8:1)</span>
+
+<span class="c">⏺ web_vitals</span>(tab_id: 42)
+  <span class="dim">⎿ LCP 1.9s · CLS 0.14 · INP 80ms</span>
+
+<span class="c">⏺ element_screenshot</span>(selector: ".pricing-cards", tab_id: 42)
+  <span class="dim">⎿ captured 1180×640 — runs in background, no window focus steal</span>
+
+<span class="ok">✓</span> Found it: the CLS (0.14) comes from the promo banner loading without a
+  reserved height. The two product images are missing alt text, and the
+  "Start free" button fails WCAG AA contrast. Want me to fix all three?</pre>
+  </div>
+</body></html>

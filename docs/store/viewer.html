@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  body { width: 1400px; height: 900px; overflow: hidden; font-family: system-ui, sans-serif; }
+  .frame {
+    width: 1280px; height: 800px; overflow: hidden; position: relative;
+    background: linear-gradient(135deg, #0f1722, #23395d);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .caption { color: #e8f0fa; font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+  .caption-sub { color: #9db4d0; font-size: 16px; margin-bottom: 22px; font-family: ui-monospace, monospace; }
+  .caption-sub b { color: #7fd8a8; font-weight: 600; }
+  .browser {
+    width: 1120px; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 22px 55px rgba(0,0,0,0.5); border: 1px solid #2a3542;
+  }
+  .bar { height: 36px; background: #161d27; display: flex; align-items: center; padding: 0 14px; gap: 7px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .url {
+    margin-left: 10px; background: #0d1117; color: #7d8ea3; font-size: 12px;
+    padding: 4px 14px; border-radius: 999px; font-family: ui-monospace, monospace;
+  }
+  .browser img { display: block; width: 100%; }
+</style></head><body>
+  <div class="frame">
+    <div class="caption">Point the tools at any page you're working on</div>
+    <div class="caption-sub"><b>highlight_elements</b>(selector: "article h1, article h2, article > p", label: true) → 22 highlighted</div>
+    <div class="browser">
+      <div class="bar">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="url">github.com/frsorrentino/chrome-bridge</span>
+      </div>
+      <img src="/real-capture.png" alt="">
+    </div>
+  </div>
+</body></html>

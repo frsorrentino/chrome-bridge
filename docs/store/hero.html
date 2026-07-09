@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 800px; overflow: hidden;
+    background: linear-gradient(135deg, #0f1722 0%, #1a2940 55%, #23395d 100%);
+    font-family: system-ui, -apple-system, sans-serif; color: #fff;
+    display: flex; flex-direction: column; justify-content: center; padding: 0 90px;
+  }
+  .top { display: flex; align-items: center; gap: 28px; margin-bottom: 18px; }
+  .top img { width: 110px; height: 110px; }
+  h1 { font-size: 54px; font-weight: 800; letter-spacing: -1px; }
+  .sub { font-size: 24px; color: #9db4d0; margin-bottom: 46px; max-width: 900px; line-height: 1.45; }
+  .sub b { color: #d7e4f5; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+  .card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(157,180,208,0.25);
+    border-radius: 12px; padding: 18px 20px;
+  }
+  .card .t { font-size: 19px; font-weight: 700; margin-bottom: 6px; color: #e8f0fa; }
+  .card .d { font-size: 15px; color: #9db4d0; line-height: 1.4; }
+  .badges { display: flex; gap: 12px; margin-top: 44px; }
+  .badge {
+    font-size: 15px; font-weight: 600; padding: 8px 16px; border-radius: 999px;
+    background: rgba(94,197,145,0.15); color: #7fd8a8; border: 1px solid rgba(94,197,145,0.4);
+  }
+</style></head><body>
+  <div class="top">
+    <img src="/icon-128.png" alt="">
+    <h1>Chrome Bridge for Claude Code</h1>
+  </div>
+  <div class="sub">56 web-development automation tools connecting <b>Claude Code</b> to <b>your real browser</b> over a local WebSocket. No cloud, no headless, no debugging port.</div>
+  <div class="grid">
+    <div class="card"><div class="t">DOM &amp; Input</div><div class="d">Query selectors with shadow-DOM piercing, click, type, fill forms, drag &amp; drop</div></div>
+    <div class="card"><div class="t">Screenshots</div><div class="d">Viewport, element, full page, visual regression diff — without stealing window focus</div></div>
+    <div class="card"><div class="t">Audits</div><div class="d">Accessibility (WCAG), SEO, security headers, web vitals, unused CSS</div></div>
+    <div class="card"><div class="t">Network</div><div class="d">Monitor, mock, block, redirect requests. WebSocket monitoring, HAR export</div></div>
+    <div class="card"><div class="t">Debugging</div><div class="d">Console logs, JS execution, event listeners, performance metrics</div></div>
+    <div class="card"><div class="t">Emulation</div><div class="d">Media, geolocation, viewport, zoom — test responsive and dark mode</div></div>
+  </div>
+  <div class="badges">
+    <span class="badge">Works on ChromeOS / Crostini</span>
+    <span class="badge">100% local — zero data collection</span>
+    <span class="badge">Open source</span>
+  </div>
+</body></html>
