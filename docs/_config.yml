@@ -1,0 +1,6 @@
+title: Chrome Bridge for Claude Code
+description: 56 browser automation tools for Claude Code over a local WebSocket
+theme: jekyll-theme-primer
+exclude:
+  - superpowers/
+  - store/
