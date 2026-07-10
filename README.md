@@ -1,8 +1,10 @@
 # Chrome Bridge
 
-**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that drives the real, logged-in Chrome on ChromeOS (Crostini). Playwright MCP and Chrome DevTools MCP can run an isolated Linux browser inside the container; only Chrome Bridge reaches the actual ChromeOS browser with your sessions.
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-79%20unit%20%2B%2025%20e2e-brightgreen) ![Chrome Web Store](https://img.shields.io/badge/web%20store-in%20review-orange)
 
-Chrome Bridge drives your real, logged-in browser — no CDP debugging port, no paid plan — and can also launch a dedicated headless instance for CI ([launch mode](#launch-mode-headless--ci)). It exposes 59 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
+**MCP server that connects Claude Code to your real, logged-in Chrome** — no CDP debugging port, no paid plan — through a WebSocket bridge and a Chrome extension. 59 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking), plus a dedicated headless instance for CI ([launch mode](#launch-mode-headless--ci)).
+
+Cross-platform — Windows, macOS, Linux — and the only Claude Code browser automation that reaches the actual ChromeOS browser (Crostini) with your sessions: Playwright MCP and Chrome DevTools MCP can only run an isolated Linux browser inside the container.
 
 ## Why Chrome Bridge?
 
@@ -12,44 +14,51 @@ There are several browser automation tools for Claude Code. Here's how they comp
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host Chrome) | No | Container browser only | Container browser only (headless) |
 | **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Own instance, or extension mode |
-| **Tools** | **30 core (59 with opt-ins)** | ~20 | ~50 | 23 core (71 with opt-ins) |
+| **Tools** | 30 core (59 with opt-ins) | ~20 | ~50 | 23 core (71 with opt-ins) |
 | **Uses your real browser** | Yes | Yes | Yes (with flags) | Optional (extension mode) |
 | **Shares your logins** | Yes | Yes | Yes | Persistent profile / extension mode |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
-| **DevTools** (perf, network, DOM) | **Yes** | No | Yes (full) | Partial (opt-in) |
+| **DevTools** (perf, network, DOM) | Yes | No | Yes (full) | Partial (opt-in) |
 | **A11y / SEO / security audits** | **Yes** (incl. security headers) | No | Partial (Lighthouse) | No |
 | **Media emulation** | Yes | No | Yes | Yes |
-| **Dialog handling** (JS dialogs) | Yes | Yes | Yes | Yes |
-| **Network mocking** | **Yes** (block/redirect/headers/**stub**) | No | No | Yes (`browser_route`) |
+| **Network mocking** | Yes (block/redirect/headers/stub) | No | No | Yes (`browser_route`) |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
-| **Shadow DOM + iframe** | **Yes** | No | Partial | Yes |
+| **Shadow DOM + iframe** | Yes | No | Partial | Yes |
 | **GIF / video recording** | No | Yes (GIF) | Screencast (experimental) | No |
 | **Breakpoints / profiling** | No | No | Yes (+ heap snapshots) | No |
-| **Headless / CI** | **Yes** (launch mode) | No | Yes | Yes |
+| **Headless / CI** | Yes (launch mode) | No | Yes | Yes |
 
 **In short:** Chrome Bridge is the only option that automates your real, logged-in Chrome on ChromeOS, ships 59 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording and no CDP-level debugging (breakpoints/profiling).
 
-**Token-conscious by design.** The default toolset is 30 core tools (~3.9k tokens of schemas — less than Playwright MCP's ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`. `navigate` and `find_text` attach a compact, capped preview of nearby interactive elements with short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept directly — the agent acts immediately instead of spending turns on discovery. Actions report a `page_changed` delta only when url/title actually change. Listings come as tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px. In our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release, finishing ahead of Playwright MCP on the form task and within ~11% on the catalog. For bulk work, the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP entirely: zero schema overhead, output filterable through `grep`/`head`/`jq` before it ever reaches the model.
+## Quickstart
 
-## What's new in 1.6.0
+```bash
+git clone git@github.com:frsorrentino/chrome-bridge.git && cd chrome-bridge && ./install.sh
+```
 
-- **Launch mode — headless & CI**: `node server/index.js --launch [--headless]` starts a dedicated Chromium with an ephemeral profile and the extension loaded unpacked, on an ephemeral WS port (no conflict with your everyday bridge). Isolated, reproducible sessions; combine with `replay` + `assert` for zero-token CI smoke tests. In launch mode `execute_js`/`wait_for(function)` run through a `new Function` fallback (no userScripts toggle in a fresh profile) — pages with a strict CSP need a `network_rules` header strip first. The Web Store package is unaffected: the fallback only activates in launch-mode copies.
-- **Capability groups**: the MCP server now registers the 30 core tools by default. Enable more with `--caps audits,visual,network,storage,dom,files` (or `CHROME_BRIDGE_CAPS`); `--caps all` restores the full 59.
-- **Refs**: `get_interactives`, `navigate` and `find_text` return short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept in place of a CSS selector.
-- **Act-from-result**: `navigate` attaches a capped preview of the page's interactive elements; `find_text` attaches the ones nearest the first match. `click`/`fill_form` report a `page_changed` {url, title} delta when something changed.
-- **Session tab default**: commands without `tab_id` now target the tab last navigated/created by the session instead of the user-visible active tab — automation no longer collides with what you're doing in Chrome meanwhile.
-- **`extract`**: pull repeated structured data (rows, cards, lists) in one call — item selector plus per-field relative selectors, parsed server-side. Deterministic, no LLM round-trips per item.
-- **Record & replay**: `session_record` captures the session's commands as jsonl; `chrome-bridge replay --file flow.jsonl --vars '{"user":"jane"}'` re-runs the flow in a single process with `{{var}}` substitution — repeat runs cost zero model tokens.
-- **`assert`**: polling assertions (element/text/count/url/title, substring or `/regex/`). Recorded flows replay as smoke tests: a failed assert marks the step ERR and sets exit code 1.
-- **Response stubbing**: `network_rules action=stub` serves synthetic bodies (status, content-type) for matching requests via a local helper server — API mocking beyond block/redirect/headers. MCP-session only.
+Then load the extension (`chrome://extensions` → Developer mode → *Load unpacked* → `extension/`) and restart Claude Code. Details in [Install](#install).
 
-## What's new in 1.5.0
+### Example session
 
-- **Chrome Web Store ready** — zero `eval`: `execute_js` and `wait_for` (`condition=function`) now run user code through the official `chrome.userScripts.execute()` API. One-time setup: enable **"Allow user scripts"** in `chrome://extensions` → Chrome Bridge → Details (Chrome 138+; on 135-137 enable Developer Mode). The popup warns when the toggle is off; every other tool works regardless.
-- **Background captures — no more focus stealing**: `screenshot`, `full_page_screenshot`, `element_screenshot` and `screenshot_diff` activate the target tab *without* bringing the Chrome window to the foreground, then restore the previously active tab (and minimized state). Automation no longer interrupts whatever you're doing.
-- **No more hanging captures**: on ChromeOS a fully occluded window can stop producing frames; captures now fail after 10s with a clear message instead of hanging forever.
-- **`execute_js` runs in the MAIN world** by default (page variables and injected `<script>` tags behave as expected), with `USER_SCRIPT` world fallback. Page CSP no longer blocks it — code is injected, not `eval`'d.
-- Requires **Chrome 135+** (was 111+).
+> *"Open localhost:3000, take a screenshot and check the console for errors"*
+
+Claude Code calls `navigate` (which returns the page's clickable elements), `screenshot`, and `read_console` — no selectors, no setup, against the browser you already have open. Follow-ups like *"fill the signup form and submit it"* or *"run an accessibility audit"* are one tool call each.
+
+## Token-efficient by design
+
+- **Small default surface**: 30 core tools ≈ 3.9k tokens of schemas (Playwright MCP: ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`.
+- **Act from the result**: `navigate` and `find_text` attach a capped preview of nearby interactive elements with refs — short element handles like `n1` that `click`/`type_text`/`hover` accept directly, so the agent acts without discovery turns. Actions report a `page_changed` delta only when url/title actually change.
+- **Capped, compact outputs**: listings are tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px.
+- **Measured**: in our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release — ahead of Playwright MCP on the form task, within ~11% on the catalog.
+- **Zero-token escape hatches**: the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP schemas entirely and pipes output through `grep`/`jq` before it reaches the model; recorded flows [replay](#launch-mode-headless--ci) without any model in the loop.
+
+## Highlights in 1.6.0
+
+- **[Launch mode](#launch-mode-headless--ci)**: a dedicated (optionally headless) Chromium with an ephemeral profile — isolated sessions and CI without touching your everyday browser.
+- **Test primitives**: `assert` with polling, `session_record` + `chrome-bridge replay` for zero-token smoke tests, response stubbing (synthetic API bodies) in `network_rules`, one-call structured `extract`.
+- **Agent ergonomics**: refs on interactive elements, act-from-result previews, session tab targeting, 30-tool default surface.
+
+Full details and older releases in the [CHANGELOG](CHANGELOG.md).
 
 ## Architecture
 
