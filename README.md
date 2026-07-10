@@ -2,7 +2,7 @@
 
 **MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that drives the real, logged-in Chrome on ChromeOS (Crostini). Playwright MCP and Chrome DevTools MCP can run an isolated Linux browser inside the container; only Chrome Bridge reaches the actual ChromeOS browser with your sessions.
 
-Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 59 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
+Chrome Bridge drives your real, logged-in browser — no CDP debugging port, no paid plan — and can also launch a dedicated headless instance for CI ([launch mode](#launch-mode-headless--ci)). It exposes 59 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
 ## Why Chrome Bridge?
 
@@ -60,7 +60,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 
 - **MCP Server** (`server/`): Node.js. Talks to Claude Code over stdio and to the extension over a WebSocket. When the port is already held by a primary instance, additional MCP processes attach as loopback relay clients.
 - **Chrome Extension** (`extension/`): Manifest V3. Executes commands with Chrome APIs and returns results. Ships with a bridge-themed icon (16/48/128px).
-- Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. User-authored code (`execute_js`, `wait_for` expressions) runs via **`chrome.userScripts.execute()`** — the CWS-sanctioned API for user scripts, gated behind the "Allow user scripts" toggle. `chrome.debugger` is **not** used (it is broken on ChromeOS).
+- Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. User-authored code (`execute_js`, `wait_for` expressions) runs via **`chrome.userScripts.execute()`** — the CWS-sanctioned API for user scripts, gated behind the "Allow user scripts" toggle (launch-mode copies fall back to `new Function` in the MAIN world, since a fresh profile has no toggle). `chrome.debugger` is **not** used (it is broken on ChromeOS).
 
 ## Tools (59 — 30 core by default, rest via `--caps`)
 
@@ -70,7 +70,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `get_status` | Bridge status: extension connection, server mode (primary/relay), port, version, uptime |
 | `get_tabs` | List all open Chrome tabs |
 | `create_tab` | Create a new tab, optionally navigating to a URL |
-| `navigate` | Navigate a tab to a URL |
+| `navigate` | Navigate a tab to a URL; returns a capped preview of interactive elements with refs |
 | `tab_action` | Tab lifecycle: close, activate, reload (optional cache bypass), back, forward |
 | `get_frames` | List all frames (main + iframes) with `frameId` for frame targeting |
 | `screenshot` | Capture a tab as PNG — activates it in its window without focusing the window, then restores the previous tab |
@@ -78,8 +78,8 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 ### Interaction (12)
 | Tool | Description |
 |------|-------------|
-| `click` | Click an element by CSS selector; occlusion-checked, optional `wait_after` |
-| `type_text` | Type into an input: `set` (assign value) or `keys` (per-character key events) |
+| `click` | Click an element by CSS selector or ref; occlusion-checked, optional `wait_after`, reports `page_changed` |
+| `type_text` | Type into an input (selector or ref): `set` (assign value) or `keys` (per-character key events) |
 | `fill_form` | Batch-fill form fields with React-compatible events; optional submit + `wait_after` |
 | `hover` | Hover over an element (dispatches mouseenter/mouseover) |
 | `press_key` | Press a key with modifiers (Ctrl/Shift/Alt/Meta) |
@@ -98,8 +98,8 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `get_page_info` | Page metadata: meta tags, scripts, stylesheets, links, forms |
 | `query_dom` | Query elements: structure, attributes, bounding rect, computed styles |
 | `modify_dom` | Set/remove attributes, classes, styles, text content |
-| `find_text` | Find text occurrences with parent selector, context, visibility, page position |
-| `get_interactives` | List actionable elements (buttons, links, inputs, `[role]`, `[onclick]`) with ready-to-use selectors |
+| `find_text` | Find text occurrences with parent selector, context, visibility, position — plus the interactive elements nearest the first match, with refs |
+| `get_interactives` | List actionable elements (buttons, links, inputs, `[role]`, `[onclick]`) with ready-to-use selectors and refs (`n1`, `n2`…) |
 | `inject_css` | Inject CSS rules into a tab |
 | `highlight_elements` | Add a colored overlay on matching elements (with optional labels) |
 | `watch_dom` | MutationObserver for attribute / childList / characterData changes |
@@ -114,11 +114,11 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 ### Debugging & network (8)
 | Tool | Description |
 |------|-------------|
-| `execute_js` | Execute JavaScript in page context (MAIN world, per-frame targeting) — needs the "Allow user scripts" toggle |
+| `execute_js` | Execute JavaScript in page context (MAIN world, per-frame targeting) — needs the "Allow user scripts" toggle (launch mode: `new Function` fallback) |
 | `read_console` | Console messages captured from page load, incl. uncaught errors and unhandled rejections |
 | `monitor_network` | Monitor requests: `page` (XHR/fetch hook) or `browser` (all, incl. static assets); HAR 1.2 export |
 | `monitor_websocket` | Monitor WebSocket connections and messages (both directions, 500-char previews) |
-| `network_rules` | Block requests, redirect URLs (mock an API), set/remove request headers (`declarativeNetRequest`) |
+| `network_rules` | Block requests, redirect URLs, stub responses with synthetic bodies, set/remove request headers (`declarativeNetRequest` + local stub helper) |
 | `get_performance` | Navigation timing, paint metrics, memory, resource loading |
 | `web_vitals` | Core Web Vitals since page load: CLS, LCP, FCP, TTFB, long tasks, INP approximation |
 | `list_event_listeners` | `addEventListener` registrations since page load, with counts by type |
@@ -168,7 +168,7 @@ Every WebSocket connection must identify itself within **5 seconds** or it is te
 - Unidentified connections are dropped after the 5-second handshake window.
 - **Optional shared token:** set `CHROME_BRIDGE_TOKEN` on the server and the matching value in the extension popup's Token field; mismatched `ext_init` is rejected.
 
-> **Crostini caveat:** the server binds `0.0.0.0` so the ChromeOS-side browser can reach the Linux-container server. On a multi-user or untrusted network, set `CHROME_BRIDGE_TOKEN` — the origin check alone does not gate other machines on the LAN.
+> **Crostini caveat:** the server binds `0.0.0.0` so the ChromeOS-side browser can reach the Linux-container server. On a multi-user or untrusted network, set `CHROME_BRIDGE_TOKEN` — the origin check alone does not gate other machines on the LAN. The stub helper (`network_rules action=stub`) also binds `0.0.0.0`, but only serves the fixture bodies you registered.
 
 ## Install
 
@@ -213,8 +213,11 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CHROME_BRIDGE_PORT` | `8765` | WebSocket server port |
+| `CHROME_BRIDGE_PORT` | `8765` | WebSocket server port (launch mode defaults to an ephemeral free port instead) |
 | `CHROME_BRIDGE_TOKEN` | _(none)_ | Optional shared secret; when set, the extension must send the same token (popup Token field) |
+| `CHROME_BRIDGE_CAPS` | `core` | Tool groups to register: `core`, comma list (`audits,visual,network,storage,dom,files`), or `all` (same as the `--caps` arg) |
+| `CHROME_BRIDGE_BROWSER` | _(auto)_ | Chromium/Chrome binary for launch mode |
+| `CHROME_BRIDGE_STUB_HOST` | _(auto)_ | Host the browser uses to reach the stub helper (`penguin.linux.test` on Crostini, else `127.0.0.1`) |
 
 ## Selected capabilities
 
@@ -243,6 +246,7 @@ chrome-bridge read_console --level error | head -20    # filter before context
 chrome-bridge js --code 'document.title'
 chrome-bridge screenshot --out /tmp/shot.png           # image lands on disk
 chrome-bridge check_links --scope same-origin
+chrome-bridge assert --selector "#success" --text "Done" # exit code 1 on failure
 chrome-bridge replay --file ~/.config/chrome-bridge/recordings/login.jsonl --vars '{"user":"jane"}'
 chrome-bridge <command> --json '{"complex":"params"}'
 ```
@@ -284,8 +288,11 @@ chrome-bridge/
     index.js                # Entry point: MCP server + WebSocket
     protocol.js             # Message types, version, timeouts, command builder
     tools.js                # 59 MCP tool registrations (Zod schemas)
-    cli.js                  # CLI entry point (relay client, pipeable output)
+    cli.js                  # CLI entry point (relay client, pipeable output, replay runner)
     formatters.js           # Line-format output shared by MCP tools and CLI
+    assertions.js           # assert logic shared by MCP tool, CLI and replay
+    stub-server.js          # Local HTTP helper serving network_rules stub bodies
+    launcher.js             # Launch mode: dedicated Chromium with unpacked extension
     ws-manager.js           # WebSocket server, handshake, relay mode
     link-checker.js         # Server-side link verification (check_links)
     har.js                  # HAR 1.2 export (monitor_network)
