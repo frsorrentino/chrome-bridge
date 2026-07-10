@@ -6,28 +6,28 @@ Chrome Bridge drives your real, logged-in browser — no headless instance, no C
 
 ## Why Chrome Bridge?
 
-There are several browser automation tools for Claude Code. Here's how they compare:
+There are several browser automation tools for Claude Code. Here's how they compare (as of July 2026):
 
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** | No | No | No |
-| **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Separate browser instance |
-| **Tools** | **56** | ~15 | Full CDP | ~20 |
-| **Uses your real browser** | Yes | Yes | Yes (with flags) | No (isolated session) |
-| **Shares your logins** | Yes | Yes | Yes | No |
+| **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Own instance, or extension mode |
+| **Tools** | **56** | ~20 | ~50 | 23 core (71 with opt-ins) |
+| **Uses your real browser** | Yes | Yes | Yes (with flags) | Optional (extension mode) |
+| **Shares your logins** | Yes | Yes | Yes | Persistent profile / extension mode |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
-| **DevTools** (perf, network, DOM) | **Yes** | No | Yes (full) | No |
-| **A11y / SEO / security audits** | **Yes** | No | No | No |
+| **DevTools** (perf, network, DOM) | **Yes** | No | Yes (full) | Partial (opt-in) |
+| **A11y / SEO / security audits** | **Yes** (incl. security headers) | No | Partial (Lighthouse) | No |
 | **Media emulation** | Yes | No | Yes | Yes |
 | **Dialog handling** (JS dialogs) | Yes | Yes | Yes | Yes |
-| **Network mocking** | **Yes** (block/redirect/headers) | No | No | No |
+| **Network mocking** | **Yes** (block/redirect/headers) | No | No | Yes (`browser_route`) |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
 | **Shadow DOM + iframe** | **Yes** | No | Partial | Yes |
-| **GIF recording** | No | Yes | No | No |
-| **Breakpoints / profiling** | No | No | Yes | No |
-| **Headless / CI** | No | No | No | Yes |
+| **GIF / video recording** | No | Yes (GIF) | Screencast (experimental) | No |
+| **Breakpoints / profiling** | No | No | Yes (+ heap snapshots) | No |
+| **Headless / CI** | No | No | Yes | Yes |
 
-**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 56 specialized web-development tools, and runs entirely self-hosted with no paid plan. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
+**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 56 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
 ## What's new in 1.5.0
 
