@@ -267,7 +267,7 @@ CHROME_BRIDGE_BROWSER=/usr/bin/chromium ...     # pick a specific binary
 ## Tests
 
 ```bash
-# Unit tests — 77 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers, tools, caps/refs)
+# Unit tests — 79 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers, tools, caps/refs)
 npm run test:unit
 
 # End-to-end suite — 25 tests; requires the extension loaded (with "Allow user scripts" on) and the bridge port free
