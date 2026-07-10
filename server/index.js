@@ -16,6 +16,14 @@ import { DEFAULT_PORT, VERSION } from './protocol.js';
 
 const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
 
+// Capability: default = solo set core (28 tool). --caps audits,visual o
+// CHROME_BRIDGE_CAPS attivano i gruppi opt-in; "all" registra tutto.
+function parseCaps() {
+  const i = process.argv.indexOf('--caps');
+  if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
+  return process.env.CHROME_BRIDGE_CAPS || 'core';
+}
+
 async function main() {
   // 1. Crea il server MCP
   // instructions: dette una volta qui invece che ripetute in ogni descrizione
@@ -27,7 +35,7 @@ async function main() {
     instructions: [
       'Selector parameters on DOM tools support shadow-DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
       'tab_id omitted = active tab. frame_id omitted = main frame (list frames with get_frames).',
-      'Prefer get_interactives over read_page(html) to discover selectors.',
+      'Prefer get_interactives over read_page(html) to discover targets; its refs (n1, n2…) work as the ref param of click/type_text/hover.',
     ].join(' '),
   });
 
@@ -35,8 +43,8 @@ async function main() {
   const wsManager = new WSManager(PORT);
   await wsManager.start();
 
-  // 3. Registra i tool MCP
-  registerTools(mcpServer, wsManager);
+  // 3. Registra i tool MCP (filtrati per capability)
+  registerTools(mcpServer, wsManager, parseCaps());
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();

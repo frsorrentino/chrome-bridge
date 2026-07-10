@@ -81,8 +81,8 @@ test('get_interactives: default formato lines, flag solo se anomali', async () =
   const text = textOf(await handlers.get('get_interactives')({}));
   const lines = text.split('\n');
   assert.match(lines[0], /count=2/);
-  assert.equal(lines[1], '#save\tbutton:submit\tSalva\t@10,20 100x40');
-  assert.equal(lines[2], 'nav > a:nth-of-type(2)\ta\tHome\toccluded\t@0,0 80x20');
+  assert.equal(lines[1], 'n1\t#save\tbutton:submit\tSalva\t@10,20 100x40');
+  assert.equal(lines[2], 'n2\tnav > a:nth-of-type(2)\ta\tHome\toccluded\t@0,0 80x20');
 });
 
 test('get_interactives: format=json resta disponibile', async () => {

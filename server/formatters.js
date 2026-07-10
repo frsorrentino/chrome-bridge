@@ -16,13 +16,13 @@ export function networkLines(tail, total) {
   return `network total=${total} shown=${tail.length}\n${lines.join('\n')}`;
 }
 
-/** Elementi interattivi: flag (disabled/hidden/occluded) solo quando anomali. */
+/** Elementi interattivi: flag (disabled/hidden/occluded) solo quando anomali. Ref n1..nN in testa se presente. */
 export function interactivesLines(data) {
   const els = data?.elements ?? [];
   const lines = els.map((e) => {
     const flags = [!e.enabled && 'disabled', !e.visible && 'hidden', e.occluded && 'occluded'].filter(Boolean).join(',');
     const rect = e.rect ? `@${e.rect.x},${e.rect.y} ${e.rect.width}x${e.rect.height}` : '';
-    return [`${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), rect].join('\t');
+    return [...(e.ref ? [e.ref] : []), `${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), rect].join('\t');
   });
   const note = data?.note ? ` note=${data.note}` : '';
   return `interactives count=${data?.count ?? els.length}${note}\n${lines.join('\n')}`;

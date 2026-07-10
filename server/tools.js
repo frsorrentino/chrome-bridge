@@ -57,13 +57,83 @@ async function applyWaitAfter(wsManager, wait_after, tab_id) {
 }
 
 /**
+ * Gruppi capability opt-in. I tool non elencati qui sono il set core,
+ * sempre registrato. Gli altri si attivano con --caps group1,group2 o
+ * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
+ */
+export const TOOL_CAPS = {
+  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'get_performance'],
+  visual: ['screenshot_diff', 'highlight_elements', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize', 'set_zoom'],
+  network: ['network_rules', 'monitor_websocket', 'http_auth', 'set_geolocation'],
+  storage: ['get_storage', 'set_storage', 'session_fixture'],
+  dom: ['modify_dom', 'watch_dom', 'list_event_listeners', 'drag_and_drop'],
+  files: ['save_page', 'manage_downloads', 'extract_table'],
+};
+
+const TOOL_TO_CAP = new Map();
+for (const [group, names] of Object.entries(TOOL_CAPS)) {
+  for (const n of names) TOOL_TO_CAP.set(n, group);
+}
+
+/**
  * Registra tutti i tool MCP.
  *
  * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
+ * @param {string} [caps='all'] - 'all', 'core', o lista di gruppi "audits,visual"
  */
-export function registerTools(server, wsManager) {
+export function registerTools(server, wsManager, caps = 'all') {
   const startedAt = Date.now();
+
+  // Filtro capability: i tool opt-in fuori dai gruppi attivi non vengono registrati
+  if (caps !== 'all') {
+    const enabled = new Set(String(caps).split(',').map((s) => s.trim()).filter(Boolean));
+    const target = server;
+    server = {
+      tool(name, desc, schema, handler) {
+        const group = TOOL_TO_CAP.get(name);
+        if (group && !enabled.has(group) && !enabled.has('all')) return;
+        target.tool(name, desc, schema, handler);
+      },
+    };
+  }
+
+  // Mappa ref → selector per tab, popolata da get_interactives.
+  // Permette click/type_text/hover per ref (n1, n2…) senza ripetere selettori lunghi.
+  const interactivesRefs = new Map();
+
+  const refsKey = (tab_id) => tab_id ?? 'active';
+
+  function resolveTarget(selector, ref, tab_id) {
+    if (selector) return selector;
+    if (ref) {
+      const sel = interactivesRefs.get(refsKey(tab_id))?.get(ref);
+      if (!sel) throw new Error(`Unknown ref ${ref} — run get_interactives first`);
+      return sel;
+    }
+    throw new Error('Either selector or ref is required');
+  }
+
+  // Snapshot url/title del tab target, per il delta post-azione.
+  async function tabSnapshot(tab_id) {
+    try {
+      const tabs = await wsManager.sendCommand(MessageType.GET_TABS);
+      const list = Array.isArray(tabs) ? tabs : [];
+      const tab = tab_id != null ? list.find((t) => t.id === tab_id) : list.find((t) => t.active);
+      return tab ? { url: tab.url, title: tab.title } : null;
+    } catch { return null; }
+  }
+
+  // Delta compatto dopo un'azione: presente solo se url/title sono cambiati.
+  // Costa pochi token quando scatta, zero quando la pagina è stabile, e
+  // risparmia al client un giro di ispezione per capire "cosa è successo".
+  function pageDelta(before, after) {
+    if (!before || !after) return null;
+    const delta = {};
+    if (after.url !== before.url) delta.url = after.url;
+    if (after.title !== before.title) delta.title = after.title;
+    return Object.keys(delta).length ? delta : null;
+  }
 
   // --- get_status ---
   server.tool(
@@ -173,19 +243,23 @@ export function registerTools(server, wsManager) {
   // --- click ---
   server.tool(
     'click',
-    'Click on an element identified by CSS selector.',
+    'Click an element by CSS selector or by ref from get_interactives.',
     {
-      selector: z.string(),
+      selector: z.string().optional(),
+      ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
       force:    z.boolean().optional().default(false).describe('Click even if occluded'),
       wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none'),
       tab_id:   z.number().optional(),
       frame_id: z.number().optional(),
     },
-    async ({ selector, force, wait_after, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.CLICK, { selector, force, frame_id, tab_id });
+    async ({ selector, ref, force, wait_after, tab_id, frame_id }) => {
+      const target = resolveTarget(selector, ref, tab_id);
+      const before = await tabSnapshot(tab_id);
+      const data = await wsManager.sendCommand(MessageType.CLICK, { selector: target, force, frame_id, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(wsManager, wait_after, tab_id);
-      const out = waited ? { ...data, wait_after: waited } : data;
+      const changed = data?.occluded ? null : pageDelta(before, await tabSnapshot(tab_id));
+      const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
         content: [{
           type: 'text',
@@ -198,17 +272,19 @@ export function registerTools(server, wsManager) {
   // --- type_text ---
   server.tool(
     'type_text',
-    'Type text into an input element identified by CSS selector.',
+    'Type text into an input, by CSS selector or by ref from get_interactives.',
     {
-      selector: z.string(),
+      selector: z.string().optional(),
+      ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
       text:     z.string(),
       mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value; keys = per-char events (autocomplete/masked)'),
       wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none'),
       tab_id:   z.number().optional(),
       frame_id: z.number().optional(),
     },
-    async ({ selector, text, mode, wait_after, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, mode, tab_id, frame_id });
+    async ({ selector, ref, text, mode, wait_after, tab_id, frame_id }) => {
+      const target = resolveTarget(selector, ref, tab_id);
+      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id });
       const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
       return {
@@ -550,9 +626,11 @@ export function registerTools(server, wsManager) {
       frame_id: z.number().optional(),
     },
     async ({ fields, submit_selector, wait_after, tab_id, frame_id }) => {
+      const before = await tabSnapshot(tab_id);
       const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
       const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
-      const out = waited ? { ...data, wait_after: waited } : data;
+      const changed = pageDelta(before, await tabSnapshot(tab_id));
+      const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
         content: [{
           type: 'text',
@@ -781,14 +859,15 @@ export function registerTools(server, wsManager) {
   // --- hover ---
   server.tool(
     'hover',
-    'Hover over an element (dispatches mouseenter/mouseover).',
+    'Hover over an element (mouseenter/mouseover), by CSS selector or ref.',
     {
-      selector: z.string(),
+      selector: z.string().optional(),
+      ref: z.string().optional().describe('From get_interactives'),
       tab_id: z.number().optional(),
       frame_id: z.number().optional(),
     },
-    async ({ selector, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.HOVER, { selector, tab_id, frame_id });
+    async ({ selector, ref, tab_id, frame_id }) => {
+      const data = await wsManager.sendCommand(MessageType.HOVER, { selector: resolveTarget(selector, ref, tab_id), tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -1258,6 +1337,13 @@ export function registerTools(server, wsManager) {
     },
     async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
+      // Assegna ref n1..nN e memorizza la mappa ref → selector per click/type_text/hover
+      const refMap = new Map();
+      (data?.elements ?? []).forEach((e, i) => {
+        e.ref = `n${i + 1}`;
+        if (e.selector) refMap.set(e.ref, e.selector);
+      });
+      interactivesRefs.set(refsKey(tab_id), refMap);
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText(data) }] };
       }
