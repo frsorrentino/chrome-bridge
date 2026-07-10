@@ -107,8 +107,8 @@ export function registerTools(server, wsManager) {
     'navigate',
     'Navigate a Chrome tab to a URL',
     {
-      url:    z.string().describe('The URL to navigate to'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      url:    z.string(),
+      tab_id: z.number().optional(),
     },
     async ({ url, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.NAVIGATE, { url, tab_id });
@@ -124,9 +124,9 @@ export function registerTools(server, wsManager) {
   // --- screenshot ---
   server.tool(
     'screenshot',
-    'Take a screenshot of a Chrome tab (returns base64 PNG image). Note: brings the tab to foreground and focuses its window.',
+    'Screenshot a tab (PNG). Activates the tab in the background without stealing window focus, then restores the previous tab.',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SCREENSHOT, { tab_id });
@@ -152,12 +152,12 @@ export function registerTools(server, wsManager) {
   // --- execute_js ---
   server.tool(
     'execute_js',
-    'Execute JavaScript code in a Chrome tab page context. Requires the "Allow user scripts" toggle on the extension (chrome://extensions > Chrome Bridge > Details); the error message explains how if disabled.',
+    'Run JavaScript in the page (MAIN world). Requires the extension\'s "Allow user scripts" toggle; errors explain setup if disabled.',
     {
-      code:       z.string().describe('JavaScript code to execute'),
-      tab_id:     z.number().optional().describe('Tab ID'),
-      frame_id:   z.number().optional().describe('Frame ID (see get_frames)'),
-      max_length: z.number().optional().default(20000).describe('Max output chars (default 20000)'),
+      code:       z.string(),
+      tab_id:     z.number().optional(),
+      frame_id:   z.number().optional(),
+      max_length: z.number().optional().default(20000).describe('Max output chars'),
     },
     async ({ code, tab_id, frame_id, max_length }) => {
       const data = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code, tab_id, frame_id });
@@ -175,11 +175,11 @@ export function registerTools(server, wsManager) {
     'click',
     'Click on an element identified by CSS selector.',
     {
-      selector: z.string().describe('CSS selector of the element to click'),
-      force:    z.boolean().optional().default(false).describe('Skip the occlusion check and click even if covered by another element'),
-      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After clicking, wait for navigation to complete or the network to go idle'),
-      tab_id:   z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      selector: z.string(),
+      force:    z.boolean().optional().default(false).describe('Click even if occluded'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none'),
+      tab_id:   z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ selector, force, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.CLICK, { selector, force, frame_id, tab_id });
@@ -200,12 +200,12 @@ export function registerTools(server, wsManager) {
     'type_text',
     'Type text into an input element identified by CSS selector.',
     {
-      selector: z.string().describe('CSS selector of the input element'),
-      text:     z.string().describe('Text to type'),
-      mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value directly (fast); keys = per-character key events (for autocomplete/masked inputs)'),
-      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After typing, wait for navigation to complete or the network to go idle'),
-      tab_id:   z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      selector: z.string(),
+      text:     z.string(),
+      mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value; keys = per-char events (autocomplete/masked)'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none'),
+      tab_id:   z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ selector, text, mode, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector, text, mode, tab_id, frame_id });
@@ -225,10 +225,10 @@ export function registerTools(server, wsManager) {
     'read_page',
     'Read the content of a Chrome tab page',
     {
-      mode:       z.enum(['text', 'html', 'accessibility']).default('text').describe('Content mode: text (visible text), html (full HTML), accessibility (a11y tree)'),
-      tab_id:     z.number().optional().describe('Tab ID'),
-      frame_id:   z.number().optional().describe('Frame ID (see get_frames)'),
-      max_length: z.number().optional().default(50000).describe('Max output chars (default 50000)'),
+      mode:       z.enum(['text', 'html', 'accessibility']).default('text'),
+      tab_id:     z.number().optional(),
+      frame_id:   z.number().optional(),
+      max_length: z.number().optional().default(50000).describe('Max output chars'),
     },
     async ({ mode, tab_id, frame_id, max_length }) => {
       const data = await wsManager.sendCommand(MessageType.READ_PAGE, { mode, tab_id, frame_id });
@@ -246,8 +246,8 @@ export function registerTools(server, wsManager) {
     'get_page_info',
     'Get page metadata: meta tags, scripts, stylesheets, links, and forms',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_PAGE_INFO, { tab_id, frame_id });
@@ -265,8 +265,8 @@ export function registerTools(server, wsManager) {
     'get_storage',
     'Get page storage: localStorage, sessionStorage, and cookies',
     {
-      type:   z.enum(['all', 'localStorage', 'sessionStorage', 'cookies']).default('all').describe('Which storage to read'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      type:   z.enum(['all', 'localStorage', 'sessionStorage', 'cookies']).default('all'),
+      tab_id: z.number().optional(),
     },
     async ({ type, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type, tab_id });
@@ -284,7 +284,7 @@ export function registerTools(server, wsManager) {
     'get_performance',
     'Get page performance metrics: navigation timing, paint metrics, memory, and resource loading',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_PERFORMANCE, { tab_id });
@@ -302,11 +302,11 @@ export function registerTools(server, wsManager) {
     'query_dom',
     'Query DOM elements by CSS selector, returning structure, attributes, bounding rect, and computed styles.',
     {
-      selector: z.string().describe('CSS selector to query'),
-      properties: z.array(z.string()).optional().describe('Computed style properties to include (e.g. ["color", "font-size"])'),
-      limit: z.number().optional().default(50).describe('Max elements to return (default 50)'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      selector: z.string(),
+      properties: z.array(z.string()).optional().describe('Computed styles to include, e.g. ["color"]'),
+      limit: z.number().optional().default(50),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ selector, properties, limit, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.QUERY_DOM, { selector, properties, limit, tab_id, frame_id });
@@ -324,13 +324,13 @@ export function registerTools(server, wsManager) {
     'modify_dom',
     'Modify DOM elements: setAttribute, removeAttribute, addClass, removeClass, setStyle, setTextContent',
     {
-      selector: z.string().describe('CSS selector of the target element'),
-      action: z.enum(['setAttribute', 'removeAttribute', 'addClass', 'removeClass', 'setStyle', 'setTextContent']).describe('Action to perform'),
-      name: z.string().optional().describe('Attribute name (for setAttribute/removeAttribute)'),
-      value: z.string().optional().describe('Value to set (for setAttribute, setStyle, setTextContent)'),
-      className: z.string().optional().describe('Class name (for addClass/removeClass)'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      selector: z.string(),
+      action: z.enum(['setAttribute', 'removeAttribute', 'addClass', 'removeClass', 'setStyle', 'setTextContent']),
+      name: z.string().optional().describe('Attribute name'),
+      value: z.string().optional(),
+      className: z.string().optional(),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ selector, action, name, value, className, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector, action, name, value, className, tab_id, frame_id });
@@ -348,8 +348,8 @@ export function registerTools(server, wsManager) {
     'inject_css',
     'Inject CSS rules into a Chrome tab page',
     {
-      css: z.string().describe('CSS rules to inject'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      css: z.string(),
+      tab_id: z.number().optional(),
     },
     async ({ css, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.INJECT_CSS, { css, tab_id });
@@ -365,13 +365,13 @@ export function registerTools(server, wsManager) {
   // --- read_console ---
   server.tool(
     'read_console',
-    'Read console messages captured from page load (hook installed at document_start), including uncaught errors and unhandled rejections.',
+    'Read console messages captured since page load, incl. uncaught errors and unhandled rejections.',
     {
-      clear: z.boolean().optional().default(false).describe('Clear captured messages after reading'),
-      level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('Filter by log level'),
-      limit: z.number().optional().default(50).describe('Max messages returned (most recent; buffer holds up to 1000)'),
-      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one message per line (level, +ms, text); json = structured'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
+      level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all'),
+      limit: z.number().optional().default(50).describe('Most recent; buffer 1000'),
+      format: z.enum(['lines', 'json']).optional().default('lines'),
+      tab_id: z.number().optional(),
     },
     async ({ clear, level, limit, format, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.READ_CONSOLE, { clear, level, tab_id });
@@ -393,13 +393,13 @@ export function registerTools(server, wsManager) {
   // --- monitor_network ---
   server.tool(
     'monitor_network',
-    'Monitor network requests. source=page captures XHR/fetch via in-page hook (first call installs it); source=browser captures all requests incl. static assets via webRequest. format=har exports HAR 1.2.',
+    'Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets. format=har exports HAR 1.2.',
     {
-      clear: z.boolean().optional().default(false).describe('Clear captured requests after reading'),
-      source: z.enum(['page', 'browser']).optional().default('page').describe('page = fetch/XHR hook; browser = all requests incl. static assets via webRequest'),
-      format: z.enum(['lines', 'json', 'har']).optional().default('lines').describe('lines = one request per line (status, ms, method, url); json = structured; har = HAR 1.2'),
-      limit: z.number().optional().default(100).describe('Max requests returned (most recent; buffer holds up to 1000)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
+      source: z.enum(['page', 'browser']).optional().default('page'),
+      format: z.enum(['lines', 'json', 'har']).optional().default('lines'),
+      limit: z.number().optional().default(100).describe('Most recent; buffer 1000'),
+      tab_id: z.number().optional(),
     },
     async ({ clear, source, format, limit, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
@@ -429,7 +429,7 @@ export function registerTools(server, wsManager) {
     'Create a new Chrome tab, optionally navigating to a URL',
     {
       url: z.string().optional().describe('URL to open (default: new tab page)'),
-      active: z.boolean().optional().default(true).describe('Whether the tab should be active'),
+      active: z.boolean().optional().default(true),
     },
     async ({ url, active }) => {
       const data = await wsManager.sendCommand(MessageType.CREATE_TAB, { url, active });
@@ -445,18 +445,18 @@ export function registerTools(server, wsManager) {
   // --- wait_for ---
   server.tool(
     'wait_for',
-    'Wait for a condition: element = CSS selector appears in DOM (optional visibility); function = JS expression evaluates truthy; navigation = page load completes (mode=spa for route changes); network_idle = no XHR/fetch in flight for idle_ms.',
+    'Wait for: element (selector in DOM), function (JS expression truthy; needs "Allow user scripts"), navigation (mode=spa for route changes), network_idle.',
     {
-      condition: z.enum(['element', 'function', 'navigation', 'network_idle']).describe('What to wait for'),
-      selector: z.string().optional().describe('CSS selector (condition=element)'),
-      expression: z.string().optional().describe('JS expression evaluated in page context, e.g. "window.app && app.ready" (condition=function; requires "Allow user scripts" toggle on the extension)'),
-      visible: z.boolean().optional().default(false).describe('Also require the element to be visible (condition=element)'),
-      mode: z.enum(['load', 'spa']).optional().default('load').describe('navigation: load = full page load; spa = pushState/popstate/hashchange'),
-      idle_ms: z.number().optional().default(500).describe('Quiet period in ms (condition=network_idle)'),
-      timeout: z.number().optional().describe('Max wait in ms (default: 10000 element/function, 15000 navigation/network_idle)'),
-      interval: z.number().optional().describe('Poll interval in ms, min 50 (default: 200 element, 100 function)'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      condition: z.enum(['element', 'function', 'navigation', 'network_idle']),
+      selector: z.string().optional().describe('condition=element'),
+      expression: z.string().optional().describe('JS expression (condition=function)'),
+      visible: z.boolean().optional().default(false).describe('Element must also be visible'),
+      mode: z.enum(['load', 'spa']).optional().default('load').describe('spa = pushState/popstate/hashchange'),
+      idle_ms: z.number().optional().default(500).describe('Quiet period ms (network_idle)'),
+      timeout: z.number().optional().describe('Max ms (default 10000; 15000 navigation/network_idle)'),
+      interval: z.number().optional().describe('Poll ms, min 50'),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ condition, selector, expression, visible, mode, idle_ms, timeout, interval, tab_id, frame_id }) => {
       let data;
@@ -484,20 +484,20 @@ export function registerTools(server, wsManager) {
   // --- scroll ---
   server.tool(
     'scroll',
-    'Scroll the page. action=to scrolls once to an element or coordinates (offset for fixed headers); action=until scrolls repeatedly until a condition — element visible, network idle, no new content, or page bottom (infinite-scroll/lazy pages).',
+    'Scroll. action=to: once to element/coordinates; action=until: repeatedly until element visible, network idle, or no new content (infinite scroll).',
     {
-      action: z.enum(['to', 'until']).optional().default('to').describe('Scroll mode'),
-      selector: z.string().optional().describe('Target element (action=to) or stop element (until=element)'),
-      x: z.number().optional().describe('X coordinate (action=to)'),
-      y: z.number().optional().describe('Y coordinate (action=to)'),
-      behavior: z.enum(['smooth', 'instant', 'auto']).optional().default('auto').describe('Scroll behavior (action=to)'),
-      offset_y: z.number().optional().default(0).describe('Vertical offset in px, e.g. for fixed headers (action=to)'),
-      until: z.enum(['element', 'network_idle', 'no_new_content']).optional().default('no_new_content').describe('Stop condition (action=until)'),
-      max_scrolls: z.number().optional().default(20).describe('Max scroll steps (action=until)'),
-      step_px: z.number().optional().describe('Pixels per step, default viewport height (action=until)'),
-      settle_ms: z.number().optional().default(400).describe('Pause after each scroll in ms (action=until)'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames; action=to only)'),
+      action: z.enum(['to', 'until']).optional().default('to'),
+      selector: z.string().optional().describe('Target (to) or stop element (until=element)'),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      behavior: z.enum(['smooth', 'instant', 'auto']).optional().default('auto'),
+      offset_y: z.number().optional().default(0).describe('px offset for fixed headers (to)'),
+      until: z.enum(['element', 'network_idle', 'no_new_content']).optional().default('no_new_content'),
+      max_scrolls: z.number().optional().default(20),
+      step_px: z.number().optional().describe('px per step, default viewport height'),
+      settle_ms: z.number().optional().default(400).describe('Pause ms after each step'),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional().describe('action=to only'),
     },
     async ({ action, selector, x, y, behavior, offset_y, until, max_scrolls, step_px, settle_ms, tab_id, frame_id }) => {
       const data = (action ?? 'to') === 'until'
@@ -512,17 +512,17 @@ export function registerTools(server, wsManager) {
     'set_storage',
     'Write, delete, or clear localStorage, sessionStorage, or cookies',
     {
-      type: z.enum(['localStorage', 'sessionStorage', 'cookie']).describe('Storage type to modify'),
-      action: z.enum(['set', 'delete', 'clear']).describe('Action to perform'),
-      key: z.string().optional().describe('Storage key (required for set/delete, ignored for clear)'),
-      value: z.string().optional().describe('Value to set (for set action)'),
+      type: z.enum(['localStorage', 'sessionStorage', 'cookie']),
+      action: z.enum(['set', 'delete', 'clear']),
+      key: z.string().optional().describe('Required for set/delete'),
+      value: z.string().optional(),
       path: z.string().optional().describe('Cookie path (default /)'),
       domain: z.string().optional().describe('Cookie domain'),
-      expires: z.string().optional().describe('Cookie expires (UTC date string)'),
-      secure: z.boolean().optional().describe('Cookie Secure flag'),
-      sameSite: z.enum(['Strict', 'Lax', 'None']).optional().describe('Cookie SameSite attribute'),
-      http_only: z.boolean().optional().describe('Cookie HttpOnly flag'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      expires: z.string().optional().describe('UTC date string (cookie)'),
+      secure: z.boolean().optional(),
+      sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+      http_only: z.boolean().optional(),
+      tab_id: z.number().optional(),
     },
     async ({ type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id });
@@ -541,13 +541,13 @@ export function registerTools(server, wsManager) {
     'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea.',
     {
       fields: z.array(z.object({
-        selector: z.string().describe('CSS selector of the form field'),
-        value: z.string().describe('Value to set'),
-      })).describe('Array of {selector, value} pairs to fill'),
-      submit_selector: z.string().optional().describe('CSS selector of submit button to click after filling'),
-      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none').describe('After filling/submitting, wait for navigation to complete or the network to go idle'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+        selector: z.string(),
+        value: z.string(),
+      })).describe('{selector, value} pairs'),
+      submit_selector: z.string().optional().describe('Submit button to click after filling'),
+      wait_after: z.enum(['none', 'navigation', 'networkidle']).optional().default('none'),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ fields, submit_selector, wait_after, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
@@ -567,10 +567,10 @@ export function registerTools(server, wsManager) {
     'viewport_resize',
     'Resize Chrome window to preset (mobile/tablet/desktop) or custom dimensions',
     {
-      preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('Device preset: mobile=375x812, tablet=768x1024, desktop=1440x900'),
-      width: z.number().optional().describe('Custom width (overrides preset)'),
-      height: z.number().optional().describe('Custom height (overrides preset)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('375x812, 768x1024, 1440x900'),
+      width: z.number().optional().describe('Overrides preset'),
+      height: z.number().optional().describe('Overrides preset'),
+      tab_id: z.number().optional(),
     },
     async ({ preset, width, height, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { preset, width, height, tab_id });
@@ -586,10 +586,10 @@ export function registerTools(server, wsManager) {
   // --- element_screenshot ---
   server.tool(
     'element_screenshot',
-    'Screenshot of a single element (scrolled into view, cropped via OffscreenCanvas). Returns base64 PNG. Brings tab to foreground.',
+    'Screenshot a single element (scrolled into view, cropped). PNG.',
     {
-      selector: z.string().describe('CSS selector of the element'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector: z.string(),
+      tab_id: z.number().optional(),
     },
     async ({ selector, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.ELEMENT_SCREENSHOT, { selector, tab_id });
@@ -603,12 +603,12 @@ export function registerTools(server, wsManager) {
   // --- full_page_screenshot ---
   server.tool(
     'full_page_screenshot',
-    'Capture full page by scrolling and taking viewport screenshots. Returns stitched segments of ~2 viewports each (downscaled to ≤1568px, ordered top→bottom), or one image per viewport with stitch=false. Note: brings the tab to foreground and focuses its window.',
+    'Full-page capture by scrolling: stitched segments of ~2 viewports (≤1568px, top→bottom), or one image per viewport with stitch=false.',
     {
-      max_scrolls: z.number().optional().default(20).describe('Max scroll steps (default 20)'),
-      delay: z.number().optional().default(500).describe('Delay between captures in ms (min 500, Chrome quota is 2 captures/sec)'),
-      stitch: z.boolean().optional().default(true).describe('Stitch captures into one PNG (default true). false returns one image per viewport.'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      max_scrolls: z.number().optional().default(20),
+      delay: z.number().optional().default(500).describe('ms between captures (min 500, Chrome quota)'),
+      stitch: z.boolean().optional().default(true).describe('false = one image per viewport'),
+      tab_id: z.number().optional(),
     },
     async ({ max_scrolls, delay, stitch, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
@@ -637,14 +637,14 @@ export function registerTools(server, wsManager) {
   // --- highlight_elements ---
   server.tool(
     'highlight_elements',
-    'Add colored overlay on elements matching a CSS selector. Use remove=true to clear all highlights.',
+    'Add colored overlay on elements matching a CSS selector. remove=true clears all highlights.',
     {
-      selector: z.string().optional().describe('CSS selector of elements to highlight'),
-      color: z.string().optional().default('rgba(255,0,0,0.3)').describe('Overlay background color'),
-      border: z.string().optional().default('2px solid red').describe('Overlay border style'),
-      label: z.boolean().optional().default(false).describe('Show tag.class (WxH) label on each element'),
-      remove: z.boolean().optional().default(false).describe('Remove all existing highlights instead'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector: z.string().optional(),
+      color: z.string().optional().default('rgba(255,0,0,0.3)'),
+      border: z.string().optional().default('2px solid red'),
+      label: z.boolean().optional().default(false).describe('Show tag.class (WxH) label'),
+      remove: z.boolean().optional().default(false),
+      tab_id: z.number().optional(),
     },
     async ({ selector, color, border, label, remove, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.HIGHLIGHT_ELEMENTS, { selector, color, border, label, remove, tab_id });
@@ -660,11 +660,11 @@ export function registerTools(server, wsManager) {
   // --- accessibility_audit ---
   server.tool(
     'accessibility_audit',
-    'Run accessibility audit: missing alt, empty links, heading hierarchy, ARIA issues, contrast, form labels. Contrast check is approximate (ignores background images/gradients and alpha compositing).',
+    'A11y audit: missing alt, empty links, heading hierarchy, ARIA, contrast (approximate), form labels.',
     {
-      scope: z.string().optional().describe('CSS selector to limit audit scope (default: whole page)'),
-      checks: z.array(z.enum(['images', 'links', 'headings', 'aria', 'contrast', 'forms', 'all'])).optional().default(['all']).describe('Which checks to run'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      scope: z.string().optional().describe('Limit scope (CSS selector)'),
+      checks: z.array(z.enum(['images', 'links', 'headings', 'aria', 'contrast', 'forms', 'all'])).optional().default(['all']),
+      tab_id: z.number().optional(),
     },
     async ({ scope, checks, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.ACCESSIBILITY_AUDIT, { scope, checks, tab_id });
@@ -680,14 +680,14 @@ export function registerTools(server, wsManager) {
   // --- check_links ---
   server.tool(
     'check_links',
-    'Check links on the page for broken URLs. Links are collected in the page, then verified server-side (no CORS limits, real HTTP status for external links too).',
+    'Check page links for broken URLs, verified server-side (no CORS limits, real HTTP status).',
     {
-      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all').describe('Link scope'),
-      selector: z.string().optional().default('a[href]').describe('CSS selector to find links'),
-      timeout: z.number().optional().default(5000).describe('Per-link fetch timeout in ms'),
-      max_links: z.number().optional().default(50).describe('Max links to check'),
-      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one link per line (status, url, error); json = structured'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all'),
+      selector: z.string().optional().default('a[href]'),
+      timeout: z.number().optional().default(5000).describe('Per-link ms'),
+      max_links: z.number().optional().default(50),
+      format: z.enum(['lines', 'json']).optional().default('lines'),
+      tab_id: z.number().optional(),
     },
     async ({ scope, selector, timeout, max_links, format, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
@@ -716,9 +716,9 @@ export function registerTools(server, wsManager) {
     'measure_spacing',
     'Measure pixel distance, gap, overlap, and margin/padding between two elements',
     {
-      selector1: z.string().describe('CSS selector of first element'),
-      selector2: z.string().describe('CSS selector of second element'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector1: z.string(),
+      selector2: z.string(),
+      tab_id: z.number().optional(),
     },
     async ({ selector1, selector2, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.MEASURE_SPACING, { selector1, selector2, tab_id });
@@ -734,16 +734,16 @@ export function registerTools(server, wsManager) {
   // --- watch_dom ---
   server.tool(
     'watch_dom',
-    'Watch DOM mutations via MutationObserver. First call installs the watcher; subsequent calls read accumulated mutations.',
+    'Watch DOM mutations (MutationObserver). First call installs the watcher; later calls read accumulated mutations.',
     {
-      selector: z.string().optional().default('body').describe('CSS selector of element to observe (default: body)'),
-      attributes: z.boolean().optional().default(true).describe('Watch attribute changes'),
-      childList: z.boolean().optional().default(true).describe('Watch child additions/removals'),
-      characterData: z.boolean().optional().default(false).describe('Watch text content changes'),
-      subtree: z.boolean().optional().default(true).describe('Watch all descendants'),
-      clear: z.boolean().optional().default(false).describe('Clear accumulated mutations after reading'),
-      stop: z.boolean().optional().default(false).describe('Disconnect observer and cleanup'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector: z.string().optional().default('body'),
+      attributes: z.boolean().optional().default(true),
+      childList: z.boolean().optional().default(true),
+      characterData: z.boolean().optional().default(false),
+      subtree: z.boolean().optional().default(true),
+      clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
+      stop: z.boolean().optional().default(false).describe('Disconnect observer'),
+      tab_id: z.number().optional(),
     },
     async ({ selector, attributes, childList, characterData, subtree, clear, stop, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, tab_id });
@@ -759,13 +759,13 @@ export function registerTools(server, wsManager) {
   // --- emulate_media ---
   server.tool(
     'emulate_media',
-    'Emulate media features: dark/light mode, reduced-motion, print mode. Overrides matchMedia and injects CSS.',
+    'Emulate prefers-color-scheme, prefers-reduced-motion, print mode (matchMedia override + CSS).',
     {
-      colorScheme: z.enum(['dark', 'light', 'no-preference']).optional().describe('Emulate prefers-color-scheme'),
-      reducedMotion: z.enum(['reduce', 'no-preference']).optional().describe('Emulate prefers-reduced-motion'),
-      printMode: z.boolean().optional().default(false).describe('Emulate print media type'),
-      reset: z.boolean().optional().default(false).describe('Remove all media emulations'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      colorScheme: z.enum(['dark', 'light', 'no-preference']).optional(),
+      reducedMotion: z.enum(['reduce', 'no-preference']).optional(),
+      printMode: z.boolean().optional().default(false),
+      reset: z.boolean().optional().default(false).describe('Remove all emulations'),
+      tab_id: z.number().optional(),
     },
     async ({ colorScheme, reducedMotion, printMode, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, reset, tab_id });
@@ -781,11 +781,11 @@ export function registerTools(server, wsManager) {
   // --- hover ---
   server.tool(
     'hover',
-    'Hover over an element identified by CSS selector. Dispatches mouseenter and mouseover events.',
+    'Hover over an element (dispatches mouseenter/mouseover).',
     {
-      selector: z.string().describe('CSS selector of the element to hover'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      selector: z.string(),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ selector, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.HOVER, { selector, tab_id, frame_id });
@@ -801,16 +801,16 @@ export function registerTools(server, wsManager) {
   // --- press_key ---
   server.tool(
     'press_key',
-    'Press a keyboard key with optional modifiers. Dispatches keydown, keypress (for printable), and keyup events.',
+    'Press a keyboard key with optional modifiers (keydown/keypress/keyup).',
     {
-      key: z.string().describe('Key to press (e.g. "Enter", "Escape", "Tab", "a", "ArrowDown")'),
-      selector: z.string().optional().describe('CSS selector of element to target (default: document.activeElement)'),
-      ctrl: z.boolean().optional().default(false).describe('Hold Ctrl'),
-      shift: z.boolean().optional().default(false).describe('Hold Shift'),
-      alt: z.boolean().optional().default(false).describe('Hold Alt'),
-      meta: z.boolean().optional().default(false).describe('Hold Meta/Cmd'),
-      tab_id: z.number().optional().describe('Tab ID'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
+      key: z.string().describe('e.g. "Enter", "Escape", "Tab", "ArrowDown"'),
+      selector: z.string().optional().describe('Target (default: activeElement)'),
+      ctrl: z.boolean().optional().default(false),
+      shift: z.boolean().optional().default(false),
+      alt: z.boolean().optional().default(false),
+      meta: z.boolean().optional().default(false),
+      tab_id: z.number().optional(),
+      frame_id: z.number().optional(),
     },
     async ({ key, selector, ctrl, shift, alt, meta, tab_id, frame_id }) => {
       const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
@@ -826,9 +826,9 @@ export function registerTools(server, wsManager) {
   // --- get_frames ---
   server.tool(
     'get_frames',
-    'List all frames (main + iframes) in a tab with their frameId, parent and URL. Use frameId with the frame_id parameter of DOM tools.',
+    'List frames (main + iframes) with frameId, parent, URL — for the frame_id parameter of DOM tools.',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_FRAMES, { tab_id });
@@ -841,9 +841,9 @@ export function registerTools(server, wsManager) {
     'tab_action',
     'Tab lifecycle actions: close, activate (focus), reload (optional cache bypass), back, forward',
     {
-      action: z.enum(['close', 'activate', 'reload', 'back', 'forward']).describe('Action to perform'),
-      bypass_cache: z.boolean().optional().default(false).describe('For reload: bypass HTTP cache'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      action: z.enum(['close', 'activate', 'reload', 'back', 'forward']),
+      bypass_cache: z.boolean().optional().default(false).describe('reload only'),
+      tab_id: z.number().optional(),
     },
     async ({ action, bypass_cache, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
@@ -854,12 +854,12 @@ export function registerTools(server, wsManager) {
   // --- upload_file ---
   server.tool(
     'upload_file',
-    'Set a file on an input[type=file] element. Reads the file from the server filesystem and injects it via DataTransfer (max 10MB).',
+    'Set a file on input[type=file] from the server filesystem via DataTransfer (max 10MB).',
     {
-      selector: z.string().describe('CSS selector of the file input'),
-      path: z.string().describe('Absolute path of the file on the server machine'),
-      mime_type: z.string().optional().describe('MIME type (default: inferred from extension)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector: z.string(),
+      path: z.string().describe('Absolute path on the server machine'),
+      mime_type: z.string().optional().describe('Default: inferred from extension'),
+      tab_id: z.number().optional(),
     },
     async ({ selector, path, mime_type, tab_id }) => {
       const buf = await readFile(path);
@@ -875,9 +875,9 @@ export function registerTools(server, wsManager) {
   // --- dismiss_overlays ---
   server.tool(
     'dismiss_overlays',
-    'Dismiss cookie-consent banners and modal overlays by clicking the accept/agree button. Tries known consent frameworks (OneTrust, Cookiebot, Usercentrics) then a generic heuristic (accept-text button inside a fixed/high-z-index overlay). Idempotent.',
+    'Dismiss cookie banners/modal overlays: OneTrust, Cookiebot, Usercentrics, then generic heuristic. Idempotent.',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.DISMISS_OVERLAYS, { tab_id });
@@ -888,11 +888,11 @@ export function registerTools(server, wsManager) {
   // --- handle_dialogs ---
   server.tool(
     'handle_dialogs',
-    'Auto-handle JS dialogs (alert/confirm/prompt): accept or dismiss future dialogs, log intercepted ones. action=reset restores native dialogs and returns the log. Does not cover beforeunload or browser-native dialogs.',
+    'Auto-accept/dismiss future JS dialogs (alert/confirm/prompt), logging them. reset restores native dialogs and returns the log.',
     {
-      action: z.enum(['accept', 'dismiss', 'reset']).optional().default('accept').describe('Policy for future dialogs, or reset'),
-      prompt_text: z.string().optional().describe('Text returned by window.prompt when accepting'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      action: z.enum(['accept', 'dismiss', 'reset']).optional().default('accept'),
+      prompt_text: z.string().optional().describe('Returned by window.prompt on accept'),
+      tab_id: z.number().optional(),
     },
     async ({ action, prompt_text, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.HANDLE_DIALOGS, { action, prompt_text, tab_id });
@@ -903,12 +903,12 @@ export function registerTools(server, wsManager) {
   // --- find_text ---
   server.tool(
     'find_text',
-    'Find text occurrences on the page. Returns parent element selector, surrounding context, visibility and page position for each match.',
+    'Find text on the page: parent selector, context, visibility, position per match.',
     {
-      text: z.string().describe('Text to search for'),
-      case_sensitive: z.boolean().optional().default(false).describe('Case-sensitive match'),
-      max_results: z.number().optional().default(20).describe('Max matches to return'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      text: z.string(),
+      case_sensitive: z.boolean().optional().default(false),
+      max_results: z.number().optional().default(20),
+      tab_id: z.number().optional(),
     },
     async ({ text, case_sensitive, max_results, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
@@ -919,14 +919,14 @@ export function registerTools(server, wsManager) {
   // --- network_rules ---
   server.tool(
     'network_rules',
-    'Manage network interception rules (browser-wide, not per-tab): block requests, redirect URLs (e.g. mock an API endpoint), set/remove request headers. Uses declarativeNetRequest — survives page reloads until cleared.',
+    'Network interception, browser-wide, survives reloads until cleared: block requests, redirect URLs (mock endpoints), set/remove request headers.',
     {
-      action: z.enum(['block', 'redirect', 'modify_header', 'list', 'clear']).describe('Rule action'),
-      url_filter: z.string().optional().describe('URL filter pattern (declarativeNetRequest urlFilter syntax, e.g. "||example.com/api/*")'),
-      redirect_url: z.string().optional().describe('Target URL for redirect action'),
-      header: z.string().optional().describe('Header name for modify_header'),
-      header_value: z.string().optional().describe('Header value (omit to remove the header)'),
-      resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional().describe('Limit rule to these resource types'),
+      action: z.enum(['block', 'redirect', 'modify_header', 'list', 'clear']),
+      url_filter: z.string().optional().describe('declarativeNetRequest urlFilter, e.g. "||example.com/api/*"'),
+      redirect_url: z.string().optional(),
+      header: z.string().optional(),
+      header_value: z.string().optional().describe('Omit to remove header'),
+      resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional(),
     },
     async ({ action, url_filter, redirect_url, header, header_value, resource_types }) => {
       const data = await wsManager.sendCommand(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
@@ -937,13 +937,13 @@ export function registerTools(server, wsManager) {
   // --- screenshot_diff ---
   server.tool(
     'screenshot_diff',
-    'Visual regression: capture a named baseline screenshot (viewport or element), then compare later — returns changed-pixel percentage and a diff image (changes in red over faded baseline). Baselines live in extension memory and are lost if the service worker restarts. Brings tab to foreground.',
+    'Visual regression: save a named baseline (viewport or element), compare later — returns changed-pixel % and red-highlighted diff image. Baselines are in-memory (lost on service worker restart).',
     {
-      action: z.enum(['baseline', 'compare', 'list', 'clear']).describe('baseline = capture reference; compare = diff against it'),
-      name: z.string().optional().default('default').describe('Baseline name'),
-      selector: z.string().optional().describe('CSS selector to capture just one element (default: viewport; compare reuses baseline selector)'),
-      threshold: z.number().optional().default(10).describe('Per-channel tolerance 0-255 before a pixel counts as changed'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      action: z.enum(['baseline', 'compare', 'list', 'clear']),
+      name: z.string().optional().default('default'),
+      selector: z.string().optional().describe('Capture one element (default viewport)'),
+      threshold: z.number().optional().default(10).describe('Per-channel tolerance 0-255'),
+      tab_id: z.number().optional(),
     },
     async ({ action, name, selector, threshold, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, tab_id });
@@ -963,9 +963,9 @@ export function registerTools(server, wsManager) {
   // --- web_vitals ---
   server.tool(
     'web_vitals',
-    'Read Core Web Vitals collected since page load: CLS, LCP, FCP, TTFB, long tasks, max event duration (INP approximation). Requires the instrumentation content script (loaded at document_start).',
+    'Core Web Vitals since page load: CLS, LCP, FCP, TTFB, long tasks, INP approximation.',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.WEB_VITALS, { tab_id });
@@ -976,11 +976,11 @@ export function registerTools(server, wsManager) {
   // --- list_event_listeners ---
   server.tool(
     'list_event_listeners',
-    'List event listeners registered via addEventListener since page load (type, target, capture/once/passive). Counts by type plus the most recent entries.',
+    'List addEventListener registrations since page load: counts by type + recent entries.',
     {
-      type: z.string().optional().describe('Filter by event type (e.g. "click")'),
-      limit: z.number().optional().default(100).describe('Max listener entries returned'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      type: z.string().optional().describe('e.g. "click"'),
+      limit: z.number().optional().default(100),
+      tab_id: z.number().optional(),
     },
     async ({ type, limit, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
@@ -991,10 +991,10 @@ export function registerTools(server, wsManager) {
   // --- monitor_websocket ---
   server.tool(
     'monitor_websocket',
-    'Monitor WebSocket connections and messages (both directions, 500-char previews). First call installs the hook; connections opened before that are not captured.',
+    'Monitor WebSocket connections/messages (500-char previews). Hook installs on first call; earlier connections are missed.',
     {
-      clear: z.boolean().optional().default(false).describe('Clear captured events after reading'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
+      tab_id: z.number().optional(),
     },
     async ({ clear, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
@@ -1007,7 +1007,7 @@ export function registerTools(server, wsManager) {
     'seo_audit',
     'SEO audit: title/description lengths, canonical, robots, h1 count, Open Graph, Twitter card, JSON-LD validity, hreflang, lang, viewport, favicon',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SEO_AUDIT, { tab_id });
@@ -1018,12 +1018,12 @@ export function registerTools(server, wsManager) {
   // --- extract_table ---
   server.tool(
     'extract_table',
-    'Extract an HTML table as structured JSON (headers from thead, rows as objects). Use index to pick among multiple tables.',
+    'Extract an HTML table as JSON (thead headers, rows as objects). index picks among multiple matches.',
     {
-      selector: z.string().optional().default('table').describe('CSS selector for tables'),
-      index: z.number().optional().default(0).describe('Which matching table to extract (0-based)'),
-      max_rows: z.number().optional().default(100).describe('Max rows returned'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      selector: z.string().optional().default('table'),
+      index: z.number().optional().default(0),
+      max_rows: z.number().optional().default(100),
+      tab_id: z.number().optional(),
     },
     async ({ selector, index, max_rows, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
@@ -1034,10 +1034,10 @@ export function registerTools(server, wsManager) {
   // --- unused_css ---
   server.tool(
     'unused_css',
-    'Find CSS selectors with no matching element in the current DOM (approximate — dynamic states and JS-toggled classes can cause false positives). Cross-origin stylesheets are not readable.',
+    'List CSS selectors matching nothing in the current DOM (approximate; cross-origin sheets unreadable).',
     {
-      max_selectors: z.number().optional().default(200).describe('Max unused selectors listed'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      max_selectors: z.number().optional().default(200),
+      tab_id: z.number().optional(),
     },
     async ({ max_selectors, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.UNUSED_CSS, { max_selectors, tab_id });
@@ -1048,13 +1048,13 @@ export function registerTools(server, wsManager) {
   // --- drag_and_drop ---
   server.tool(
     'drag_and_drop',
-    'Drag an element onto another. mode html5 = DragEvent sequence with DataTransfer (native DnD APIs); mode pointer = pointer/mouse event sequence (sortable libraries).',
+    'Drag an element onto another. html5 = DragEvent+DataTransfer; pointer = pointer/mouse events (sortable libraries).',
     {
-      source_selector: z.string().describe('CSS selector of the element to drag'),
-      target_selector: z.string().describe('CSS selector of the drop target'),
-      mode: z.enum(['html5', 'pointer']).optional().default('html5').describe('Event strategy'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      source_selector: z.string(),
+      target_selector: z.string(),
+      mode: z.enum(['html5', 'pointer']).optional().default('html5'),
+      frame_id: z.number().optional(),
+      tab_id: z.number().optional(),
     },
     async ({ source_selector, target_selector, mode, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector, target_selector, mode, frame_id, tab_id });
@@ -1065,11 +1065,11 @@ export function registerTools(server, wsManager) {
   // --- clipboard ---
   server.tool(
     'clipboard',
-    'Read or write the system clipboard (text). Activates the tab first; uses the Clipboard API with execCommand fallback.',
+    'Read or write the system clipboard (text). Activates the tab first.',
     {
-      action: z.enum(['read', 'write']).describe('Clipboard operation'),
-      text: z.string().optional().describe('Text to write (for write action)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      action: z.enum(['read', 'write']),
+      text: z.string().optional().describe('For write'),
+      tab_id: z.number().optional(),
     },
     async ({ action, text, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.CLIPBOARD, { action, text, tab_id });
@@ -1080,13 +1080,13 @@ export function registerTools(server, wsManager) {
   // --- set_geolocation ---
   server.tool(
     'set_geolocation',
-    'Override navigator.geolocation with fixed coordinates (page-level patch; pages holding earlier references are unaffected). reset restores native behavior.',
+    'Override navigator.geolocation with fixed coordinates (page-level patch). reset restores native.',
     {
-      latitude: z.number().optional().describe('Latitude'),
-      longitude: z.number().optional().describe('Longitude'),
-      accuracy: z.number().optional().default(10).describe('Accuracy in meters'),
-      reset: z.boolean().optional().default(false).describe('Restore native geolocation'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      latitude: z.number().optional(),
+      longitude: z.number().optional(),
+      accuracy: z.number().optional().default(10).describe('Meters'),
+      reset: z.boolean().optional().default(false),
+      tab_id: z.number().optional(),
     },
     async ({ latitude, longitude, accuracy, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
@@ -1097,11 +1097,11 @@ export function registerTools(server, wsManager) {
   // --- manage_downloads ---
   server.tool(
     'manage_downloads',
-    'List recent downloads or wait for an in-progress/new download to complete (e.g. after clicking an export button). Files land in the ChromeOS Downloads folder, not the server filesystem.',
+    'List downloads or wait for one to complete. Files land in the browser Downloads folder, not on the server.',
     {
-      action: z.enum(['list', 'wait_for_complete']).describe('Operation'),
-      timeout: z.number().optional().default(30000).describe('Max wait in ms (wait_for_complete)'),
-      limit: z.number().optional().default(10).describe('Max items returned (list)'),
+      action: z.enum(['list', 'wait_for_complete']),
+      timeout: z.number().optional().default(30000).describe('Max ms (wait_for_complete)'),
+      limit: z.number().optional().default(10),
     },
     async ({ action, timeout, limit }) => {
       const data = await wsManager.sendCommand(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
@@ -1115,7 +1115,7 @@ export function registerTools(server, wsManager) {
     'Save the full page (DOM, styles, images) as an MHTML archive file on the server filesystem.',
     {
       output_path: z.string().describe('Absolute file path to write (e.g. /tmp/page.mhtml)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ output_path, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SAVE_PAGE, { tab_id });
@@ -1127,11 +1127,11 @@ export function registerTools(server, wsManager) {
   // --- set_zoom ---
   server.tool(
     'set_zoom',
-    'Get or set the tab zoom factor (0.25–5). Call without factor to read current zoom; reset restores default.',
+    'Get or set tab zoom (0.25–5). No factor = read current; reset restores default.',
     {
-      factor: z.number().optional().describe('Zoom factor (1 = 100%)'),
-      reset: z.boolean().optional().default(false).describe('Restore default zoom'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      factor: z.number().optional().describe('1 = 100%'),
+      reset: z.boolean().optional().default(false),
+      tab_id: z.number().optional(),
     },
     async ({ factor, reset, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.SET_ZOOM, { factor, reset, tab_id });
@@ -1142,11 +1142,11 @@ export function registerTools(server, wsManager) {
   // --- http_auth ---
   server.tool(
     'http_auth',
-    'Provide credentials for HTTP Basic/Digest auth dialogs (browser-wide until cleared). Credentials are kept in extension memory only.',
+    'Set/clear credentials for HTTP Basic/Digest auth dialogs (browser-wide, in-memory only).',
     {
-      action: z.enum(['set', 'clear']).describe('set credentials or clear them'),
-      username: z.string().optional().describe('Username (for set)'),
-      password: z.string().optional().describe('Password (for set)'),
+      action: z.enum(['set', 'clear']),
+      username: z.string().optional(),
+      password: z.string().optional(),
     },
     async ({ action, username, password }) => {
       if (action === 'set' && !username) throw new Error('username is required for action=set');
@@ -1158,9 +1158,9 @@ export function registerTools(server, wsManager) {
   // --- security_headers ---
   server.tool(
     'security_headers',
-    'Audit HTTP security headers of the current page (CSP, HSTS, X-Content-Type-Options, clickjacking protection, Referrer-Policy, Permissions-Policy, version leaks). Headers are captured from real navigations — reload the page if none are available.',
+    'Audit security headers (CSP, HSTS, XCTO, clickjacking, Referrer/Permissions-Policy, version leaks). Captured from real navigations — reload if unavailable.',
     {
-      tab_id: z.number().optional().describe('Tab ID'),
+      tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_RESPONSE_HEADERS, { tab_id });
@@ -1176,11 +1176,11 @@ export function registerTools(server, wsManager) {
   // --- session_fixture ---
   server.tool(
     'session_fixture',
-    'Save or restore a session fixture (localStorage + sessionStorage + cookies) as a named JSON file under ~/.config/chrome-bridge/sessions/. Useful to snapshot a logged-in state and restore it later. Restore overwrites existing keys but does not clear others. The fixture records the page origin at save time; restore refuses to run if the current tab is on a different origin (navigate there first).',
+    'Save/restore localStorage+sessionStorage+cookies as a named fixture (e.g. a logged-in state). Restore requires the tab to be on the origin recorded at save.',
     {
-      action: z.enum(['save', 'restore', 'list']).describe('Operation'),
-      name: z.string().optional().describe('Fixture name (required for save/restore)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      action: z.enum(['save', 'restore', 'list']),
+      name: z.string().optional().describe('Required for save/restore'),
+      tab_id: z.number().optional(),
     },
     async ({ action, name, tab_id }) => {
       if (action === 'list') {
@@ -1247,14 +1247,14 @@ export function registerTools(server, wsManager) {
   // --- get_interactives ---
   server.tool(
     'get_interactives',
-    'List actionable elements (buttons, links, inputs, [role], [onclick]) with a ready-to-use CSS selector, label, position, enabled/visible/occluded flags. Use this to discover selectors instead of dumping the full HTML.',
+    'List actionable elements (buttons, links, inputs, [role], [onclick]) with ready-to-use CSS selector, label, position, flags. Prefer this over dumping HTML to discover selectors.',
     {
-      scope: z.string().optional().describe('CSS selector to limit the search (default: whole document)'),
-      limit: z.number().optional().default(100).describe('Max elements returned'),
-      visible_only: z.boolean().optional().default(true).describe('Only return visible elements'),
-      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines = one element per line (selector, tag:type, label, flags, @x,y WxH); json = structured'),
-      frame_id: z.number().optional().describe('Frame ID (see get_frames)'),
-      tab_id: z.number().optional().describe('Tab ID'),
+      scope: z.string().optional().describe('Limit search (CSS selector)'),
+      limit: z.number().optional().default(100),
+      visible_only: z.boolean().optional().default(true),
+      format: z.enum(['lines', 'json']).optional().default('lines'),
+      frame_id: z.number().optional(),
+      tab_id: z.number().optional(),
     },
     async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
