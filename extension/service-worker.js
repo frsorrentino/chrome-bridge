@@ -186,6 +186,9 @@ function scheduleReconnect() {
 function sendMessage(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(obj));
+  } else {
+    // Il server andrà comunque in timeout sul comando: qui solo traccia diagnostica
+    console.warn('[chrome-bridge] message dropped, WebSocket not open:', obj?.type ?? '', obj?.id ?? '');
   }
 }
 
@@ -1709,7 +1712,8 @@ async function cmdAccessibilityAudit({ scope, checks = ['all'], tab_id }) {
       if (runAll || checkList.includes('images')) {
         const imgs = [...root.querySelectorAll('img')].slice(0, CAP);
         for (const img of imgs) {
-          if (!img.alt && img.alt !== '') {
+          // img.alt è '' sia per attributo mancante che vuoto: serve hasAttribute
+          if (!img.hasAttribute('alt')) {
             violations.push({ type: 'images', severity: 'error', selector: selectorFor(img), message: 'Image missing alt attribute' });
           } else if (img.alt === '') {
             violations.push({ type: 'images', severity: 'warning', selector: selectorFor(img), message: 'Image has empty alt (decorative?)' });
@@ -2598,6 +2602,11 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
       throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
     }
     const { ctx, width, height } = await captureForDiff(tabId, selector);
+    // Ricontrolla dopo l'await: due baseline concorrenti possono aver
+    // superato entrambe il check iniziale
+    if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
+      throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
+    }
     diffBaselines.set(name, {
       bitmapData: ctx.getImageData(0, 0, width, height),
       width, height,
