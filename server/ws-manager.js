@@ -148,6 +148,8 @@ export class WSManager {
       });
 
       this.wss.on('listening', () => {
+        // Porta 0 = effimera: leggi quella reale assegnata dal kernel
+        if (!this.port) this.port = this.wss.address().port;
         console.error(`[chrome-bridge] WebSocket server listening on 0.0.0.0:${this.port}`);
         this._startPing();
         resolve();

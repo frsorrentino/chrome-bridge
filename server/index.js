@@ -12,9 +12,16 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WSManager } from './ws-manager.js';
 import { registerTools } from './tools.js';
+import { launchBrowser } from './launcher.js';
 import { DEFAULT_PORT, VERSION } from './protocol.js';
 
-const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
+// Launch mode: browser dedicato (profilo effimero + estensione unpacked).
+// Porta effimera di default: zero conflitti con un bridge già attivo.
+const LAUNCH = process.argv.includes('--launch');
+const HEADLESS = process.argv.includes('--headless');
+const PORT = process.env.CHROME_BRIDGE_PORT
+  ? parseInt(process.env.CHROME_BRIDGE_PORT, 10)
+  : (LAUNCH ? 0 : DEFAULT_PORT);
 
 // Capability: default = solo set core (28 tool). --caps audits,visual o
 // CHROME_BRIDGE_CAPS attivano i gruppi opt-in; "all" registra tutto.
@@ -43,6 +50,15 @@ async function main() {
   const wsManager = new WSManager(PORT);
   await wsManager.start();
 
+  // 2b. Launch mode: browser dedicato che si connette alla nostra porta
+  let browser = null;
+  if (LAUNCH) {
+    if (wsManager.mode !== 'primary') {
+      throw new Error(`--launch requires a dedicated port, but ${wsManager.port} is owned by another chrome-bridge. Unset CHROME_BRIDGE_PORT (ephemeral) or pick a free one.`);
+    }
+    browser = await launchBrowser({ port: wsManager.port, headless: HEADLESS });
+  }
+
   // 3. Registra i tool MCP (filtrati per capability)
   registerTools(mcpServer, wsManager, parseCaps());
 
@@ -55,6 +71,7 @@ async function main() {
   // 5. Graceful shutdown
   const shutdown = async () => {
     console.error('[chrome-bridge] Shutting down...');
+    if (browser) await browser.stop();
     await wsManager.stop();
     await mcpServer.close();
     process.exit(0);

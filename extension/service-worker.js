@@ -8,11 +8,21 @@
 const DEFAULT_PORT = 8765;
 let wsUrl = `ws://localhost:${DEFAULT_PORT}`;
 let extToken = '';
+// true solo nella copia unpacked creata dal launch mode (launch.json presente)
+let launchMode = false;
 
 async function loadConfig() {
+  // launch.json esiste solo nella copia unpacked creata dal launch mode
+  // (porta effimera del server dedicato); nel pacchetto CWS non c'è.
+  let fileCfg = null;
+  try {
+    const res = await fetch(chrome.runtime.getURL('launch.json'));
+    if (res.ok) fileCfg = await res.json();
+  } catch { /* assente: modalità normale */ }
+  launchMode = fileCfg != null;
   const cfg = await chrome.storage.local.get({ port: DEFAULT_PORT, token: '' });
-  wsUrl = `ws://localhost:${cfg.port}`;
-  extToken = cfg.token || '';
+  wsUrl = `ws://localhost:${fileCfg?.port ?? cfg.port}`;
+  extToken = fileCfg?.token ?? cfg.token ?? '';
 }
 
 // --- Instrumentation MAIN-world (console/errori/web vitals/route SPA) ---
@@ -352,7 +362,6 @@ function scriptTarget(tabId, frame_id) {
 
 // --- Utility: chrome.userScripts (esecuzione codice utente, CWS-compliant) ---
 
-const USER_SCRIPTS_HELP = "User scripts are disabled. Open chrome://extensions, click Details on Chrome Bridge, and enable 'Allow user scripts' (on Chrome 135-137 enable Developer Mode instead). Then retry.";
 
 function userScriptsAvailable() {
   // L'accesso alla proprietà lancia se l'utente non ha attivato il toggle
@@ -364,11 +373,16 @@ function userScriptsAvailable() {
   }
 }
 
-function assertUserScripts() {
-  if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
-}
+const USER_SCRIPTS_HELP = "User scripts are disabled. Open chrome://extensions, click Details on Chrome Bridge, and enable 'Allow user scripts' (on Chrome 135-137 enable Developer Mode instead). Then retry.";
 
 async function runUserScript(target, code, world) {
+  if (!userScriptsAvailable()) {
+    // Fallback SOLO in launch mode (profilo effimero senza toggle).
+    // Nell'installazione normale il toggle resta il gate di consenso:
+    // nessuna elusione di chrome.userScripts nel pacchetto CWS.
+    if (launchMode) return await runViaFunction(target, code);
+    throw new Error(USER_SCRIPTS_HELP);
+  }
   const results = await chrome.userScripts.execute({
     target,
     js: [{ code }],
@@ -377,6 +391,44 @@ async function runUserScript(target, code, world) {
   const r = results?.[0];
   if (r && r.error !== undefined && r.error !== null) throw new Error(String(r.error));
   return r?.result;
+}
+
+// Fallback quando chrome.userScripts non è disponibile (tipico del launch
+// mode: profilo effimero senza il toggle "Allow user scripts"): il codice
+// utente gira nel MAIN world via new Function. La CSP della pagina può
+// bloccarlo (unsafe-eval) — l'errore spiega come rimediare.
+async function runViaFunction(target, code) {
+  const results = await chrome.scripting.executeScript({
+    target,
+    world: 'MAIN',
+    func: async (userCode) => {
+      let fn;
+      try {
+        fn = new Function(`return (${userCode});`);
+      } catch {
+        try { fn = new Function(userCode); } catch (e) {
+          return { ok: false, error: String(e?.message || e) };
+        }
+      }
+      try {
+        let v = fn();
+        if (v && typeof v.then === 'function') v = await v;
+        return { ok: true, value: v === undefined ? null : v };
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    },
+    args: [code],
+  });
+  const r = results?.[0]?.result;
+  if (!r) throw new Error('No result from page');
+  if (!r.ok) {
+    const cspHint = /unsafe-eval|Content Security Policy|EvalError/i.test(r.error)
+      ? ' (page CSP blocks dynamic code — strip it with network_rules modify_header on "content-security-policy" and reload, or enable the "Allow user scripts" toggle)'
+      : '';
+    throw new Error(r.error + cspHint);
+  }
+  return r.value;
 }
 
 // --- Utility: captureVisibleTab con timeout ---
@@ -513,9 +565,15 @@ async function cmdScreenshot({ tab_id }) {
 
 async function cmdExecuteJs({ code, tab_id, frame_id }) {
   if (!code) throw new Error('Missing required parameter: code');
-  assertUserScripts();
   const tabId = await resolveTabId(tab_id);
   const target = scriptTarget(tabId, frame_id);
+
+  // Senza userScripts: runUserScript applica il fallback launch-mode
+  // oppure l'errore-guida sul toggle — niente retry doppio
+  if (!userScriptsAvailable()) {
+    const val = await runUserScript(target, code, 'MAIN');
+    return { result: val ?? null };
+  }
 
   // Strategia: MAIN world primario — pieno accesso a variabili di pagina e
   // semantica "page context" (es. <script> tag iniettati eseguono). A differenza
@@ -3374,7 +3432,6 @@ async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab
 
 async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 100, tab_id, frame_id }) {
   if (!expression) throw new Error('Missing required parameter: expression');
-  assertUserScripts();
   const tabId = await resolveTabId(tab_id);
   const target = scriptTarget(tabId, frame_id);
   const intv = Math.max(polling_ms, 50);
