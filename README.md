@@ -2,7 +2,7 @@
 
 **MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that drives the real, logged-in Chrome on ChromeOS (Crostini). Playwright MCP and Chrome DevTools MCP can run an isolated Linux browser inside the container; only Chrome Bridge reaches the actual ChromeOS browser with your sessions.
 
-Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 58 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
+Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 59 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
 ## Why Chrome Bridge?
 
@@ -12,7 +12,7 @@ There are several browser automation tools for Claude Code. Here's how they comp
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host Chrome) | No | Container browser only | Container browser only (headless) |
 | **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Own instance, or extension mode |
-| **Tools** | **29 core (58 with opt-ins)** | ~20 | ~50 | 23 core (71 with opt-ins) |
+| **Tools** | **30 core (59 with opt-ins)** | ~20 | ~50 | 23 core (71 with opt-ins) |
 | **Uses your real browser** | Yes | Yes | Yes (with flags) | Optional (extension mode) |
 | **Shares your logins** | Yes | Yes | Yes | Persistent profile / extension mode |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
@@ -20,25 +20,27 @@ There are several browser automation tools for Claude Code. Here's how they comp
 | **A11y / SEO / security audits** | **Yes** (incl. security headers) | No | Partial (Lighthouse) | No |
 | **Media emulation** | Yes | No | Yes | Yes |
 | **Dialog handling** (JS dialogs) | Yes | Yes | Yes | Yes |
-| **Network mocking** | **Yes** (block/redirect/headers) | No | No | Yes (`browser_route`) |
+| **Network mocking** | **Yes** (block/redirect/headers/**stub**) | No | No | Yes (`browser_route`) |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
 | **Shadow DOM + iframe** | **Yes** | No | Partial | Yes |
 | **GIF / video recording** | No | Yes (GIF) | Screencast (experimental) | No |
 | **Breakpoints / profiling** | No | No | Yes (+ heap snapshots) | No |
 | **Headless / CI** | No | No | Yes | Yes |
 
-**In short:** Chrome Bridge is the only option that automates your real, logged-in Chrome on ChromeOS, ships 58 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
+**In short:** Chrome Bridge is the only option that automates your real, logged-in Chrome on ChromeOS, ships 59 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
-**Token-conscious by design.** The default toolset is 29 core tools (~3.9k tokens of schemas — less than Playwright MCP's ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`. `navigate` and `find_text` attach a compact, capped preview of nearby interactive elements with short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept directly — the agent acts immediately instead of spending turns on discovery. Actions report a `page_changed` delta only when url/title actually change. Listings come as tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px. In our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release, finishing ahead of Playwright MCP on the form task and within ~11% on the catalog. For bulk work, the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP entirely: zero schema overhead, output filterable through `grep`/`head`/`jq` before it ever reaches the model.
+**Token-conscious by design.** The default toolset is 30 core tools (~3.9k tokens of schemas — less than Playwright MCP's ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`. `navigate` and `find_text` attach a compact, capped preview of nearby interactive elements with short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept directly — the agent acts immediately instead of spending turns on discovery. Actions report a `page_changed` delta only when url/title actually change. Listings come as tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px. In our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release, finishing ahead of Playwright MCP on the form task and within ~11% on the catalog. For bulk work, the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP entirely: zero schema overhead, output filterable through `grep`/`head`/`jq` before it ever reaches the model.
 
 ## What's new in 1.6.0 (server-only)
 
-- **Capability groups**: the MCP server now registers the 29 core tools by default. Enable more with `--caps audits,visual,network,storage,dom,files` (or `CHROME_BRIDGE_CAPS`); `--caps all` restores the full 58. The extension is unchanged.
+- **Capability groups**: the MCP server now registers the 30 core tools by default. Enable more with `--caps audits,visual,network,storage,dom,files` (or `CHROME_BRIDGE_CAPS`); `--caps all` restores the full 59. The extension is unchanged.
 - **Refs**: `get_interactives`, `navigate` and `find_text` return short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept in place of a CSS selector.
 - **Act-from-result**: `navigate` attaches a capped preview of the page's interactive elements; `find_text` attaches the ones nearest the first match. `click`/`fill_form` report a `page_changed` {url, title} delta when something changed.
 - **Session tab default**: commands without `tab_id` now target the tab last navigated/created by the session instead of the user-visible active tab — automation no longer collides with what you're doing in Chrome meanwhile.
 - **`extract`**: pull repeated structured data (rows, cards, lists) in one call — item selector plus per-field relative selectors, parsed server-side. Deterministic, no LLM round-trips per item.
 - **Record & replay**: `session_record` captures the session's commands as jsonl; `chrome-bridge replay --file flow.jsonl --vars '{"user":"jane"}'` re-runs the flow in a single process with `{{var}}` substitution — repeat runs cost zero model tokens.
+- **`assert`**: polling assertions (element/text/count/url/title, substring or `/regex/`). Recorded flows replay as smoke tests: a failed assert marks the step ERR and sets exit code 1.
+- **Response stubbing**: `network_rules action=stub` serves synthetic bodies (status, content-type) for matching requests via a local helper server — API mocking beyond block/redirect/headers. MCP-session only.
 
 ## What's new in 1.5.0
 
@@ -59,7 +61,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 - **Chrome Extension** (`extension/`): Manifest V3. Executes commands with Chrome APIs and returns results. Ships with a bridge-themed icon (16/48/128px).
 - Page scripts run via `chrome.scripting.executeScript` in the **MAIN world**. User-authored code (`execute_js`, `wait_for` expressions) runs via **`chrome.userScripts.execute()`** — the CWS-sanctioned API for user scripts, gated behind the "Allow user scripts" toggle. `chrome.debugger` is **not** used (it is broken on ChromeOS).
 
-## Tools (58 — 29 core by default, rest via `--caps`)
+## Tools (59 — 30 core by default, rest via `--caps`)
 
 ### Core & navigation (7)
 | Tool | Description |
@@ -102,10 +104,11 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `watch_dom` | MutationObserver for attribute / childList / characterData changes |
 | `measure_spacing` | Pixel distance, gap, overlap, margin/padding between two elements |
 
-### Waiting (1)
+### Waiting & asserting (2)
 | Tool | Description |
 |------|-------------|
 | `wait_for` | One tool, four conditions: `element` (selector appears), `function` (JS expression truthy), `navigation` (page load or `mode=spa` route change), `network_idle` (no XHR/fetch in flight) |
+| `assert` | Page assertion with polling: element exists/visible (with count or text), text on page, tab url/title (substring or `/regex/`). In a recorded flow, `replay` turns it into a smoke test (exit code 1 on failure) |
 
 ### Debugging & network (8)
 | Tool | Description |
@@ -250,7 +253,7 @@ Rule of thumb: MCP tools for interactive/visual work (screenshots feed the model
 ## Tests
 
 ```bash
-# Unit tests — 68 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers, tools, caps/refs)
+# Unit tests — 77 tests, no Chrome needed (protocol, ws-manager, link-checker, HAR, security-headers, tools, caps/refs)
 npm run test:unit
 
 # End-to-end suite — 25 tests; requires the extension loaded (with "Allow user scripts" on) and the bridge port free
@@ -266,7 +269,7 @@ chrome-bridge/
   server/
     index.js                # Entry point: MCP server + WebSocket
     protocol.js             # Message types, version, timeouts, command builder
-    tools.js                # 58 MCP tool registrations (Zod schemas)
+    tools.js                # 59 MCP tool registrations (Zod schemas)
     cli.js                  # CLI entry point (relay client, pipeable output)
     formatters.js           # Line-format output shared by MCP tools and CLI
     ws-manager.js           # WebSocket server, handshake, relay mode
