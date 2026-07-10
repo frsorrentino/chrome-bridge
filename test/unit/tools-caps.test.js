@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { registerTools, TOOL_CAPS } from '../../server/tools.js';
 
 function setup(canned = {}, caps = 'all') {
@@ -29,14 +32,14 @@ function textOf(result) {
 
 // --- capability opt-in ---
 
-test('caps=all registra tutti i 56 tool', () => {
-  assert.equal(setup().size, 56);
+test('caps=all registra tutti i 58 tool', () => {
+  assert.equal(setup().size, 58);
 });
 
-test('caps=core registra solo il set core (28 tool)', () => {
+test('caps=core registra solo il set core (29 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
-  assert.equal(handlers.size, 56 - optInCount);
+  assert.equal(handlers.size, 58 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
   assert.ok(!handlers.has('accessibility_audit'));
@@ -50,6 +53,19 @@ test('caps con gruppi aggiunge solo quei gruppi al core', () => {
   assert.ok(handlers.has('screenshot_diff'));
   assert.ok(!handlers.has('network_rules'));
   assert.ok(!handlers.has('session_fixture'));
+});
+
+test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', async () => {
+  // Guardia di regressione: gli schemi zod devono sopravvivere alla
+  // conversione JSON-schema dell'SDK (es. z.record cambiato in zod 4)
+  const server = new McpServer({ name: 't', version: '0' });
+  registerTools(server, { isConnected: () => true, mode: 'p', port: 1, sendCommand: async () => ({}) }, 'all');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'c', version: '0' });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const { tools } = await client.listTools();
+  assert.equal(tools.length, 58);
+  await client.close();
 });
 
 test('ogni tool nei gruppi TOOL_CAPS esiste davvero', () => {

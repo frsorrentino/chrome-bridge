@@ -5,9 +5,10 @@
  * e restituisce il risultato al client MCP.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
+import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
@@ -16,6 +17,10 @@ import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
+const RECORDINGS_DIR = process.env.CHROME_BRIDGE_RECORD_DIR || join(homedir(), '.config', 'chrome-bridge', 'recordings');
+
+// Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
+const RECORD_EXCLUDE = new Set([MessageType.GET_TABS]);
 
 function truncateText(text, max) {
   if (typeof text !== 'string' || text.length <= max) return text;
@@ -67,7 +72,7 @@ export const TOOL_CAPS = {
   network: ['network_rules', 'monitor_websocket', 'http_auth', 'set_geolocation'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'list_event_listeners', 'drag_and_drop'],
-  files: ['save_page', 'manage_downloads', 'extract_table'],
+  files: ['save_page', 'manage_downloads', 'extract_table', 'session_record'],
 };
 
 const TOOL_TO_CAP = new Map();
@@ -104,7 +109,15 @@ export function registerTools(server, wsManager, caps = 'all') {
   // che sta guardando lui, non quella navigata dall'agente).
   let sessionTabId = null;
 
+  // Recording attivo: { name, file }. I comandi (senza tab_id, che in un
+  // replay sarebbe stale) vengono appesi come jsonl replayabile dal CLI.
+  let recording = null;
+
   const send = (type, params = {}) => {
+    if (recording && !RECORD_EXCLUDE.has(type)) {
+      const { tab_id: _tab, ...rest } = params;
+      appendFile(recording.file, JSON.stringify({ command: type, params: rest }) + '\n').catch(() => {});
+    }
     if (params.tab_id == null && sessionTabId != null) params = { ...params, tab_id: sessionTabId };
     return wsManager.sendCommand(type, params);
   };
@@ -1414,6 +1427,80 @@ export function registerTools(server, wsManager, caps = 'all') {
           text: truncateText(interactivesLines(data), DEFAULT_MAX_OUTPUT),
         }],
       };
+    }
+  );
+
+  // --- extract ---
+  server.tool(
+    'extract',
+    'Extract repeated structured data (rows, cards, lists) in one call: item_selector matches the items, fields map names to relative selectors. Deterministic, parses the main-document HTML server-side.',
+    {
+      item_selector: z.string().describe('CSS selector matching each item'),
+      fields: z.record(z.string(), z.object({
+        selector: z.string().optional().describe('Relative to the item (default: the item itself)'),
+        attr: z.string().optional().describe('Attribute to read (default: text content)'),
+      })).describe('field name → {selector, attr}'),
+      max_items: z.number().optional().default(50),
+      format: z.enum(['lines', 'json']).optional().default('lines'),
+      tab_id: z.number().optional(),
+      max_length: z.number().optional().default(20000).describe('Max output chars'),
+    },
+    async ({ item_selector, fields, max_items, format, tab_id, max_length }) => {
+      max_length = max_length ?? DEFAULT_MAX_OUTPUT;
+      const html = await send(MessageType.READ_PAGE, { mode: 'html', tab_id });
+      if (typeof html !== 'string') throw new Error('Could not read page HTML');
+      const root = parseHtml(html);
+      const names = Object.keys(fields);
+      const nodes = root.querySelectorAll(item_selector);
+      const items = nodes.slice(0, max_items ?? 50).map((node) => {
+        const row = {};
+        for (const name of names) {
+          const { selector, attr } = fields[name];
+          const el = selector ? node.querySelector(selector) : node;
+          const value = el ? (attr ? el.getAttribute(attr) : el.text.trim().replace(/\s+/g, ' ')) : null;
+          row[name] = value ?? null;
+        }
+        return row;
+      });
+      if ((format ?? 'lines') === 'json') {
+        return { content: [{ type: 'text', text: truncateText(JSON.stringify({ total: nodes.length, shown: items.length, items }), max_length) }] };
+      }
+      const lines = [`extract total=${nodes.length} shown=${items.length}`, names.join('\t'),
+        ...items.map((row) => names.map((n) => row[n] ?? '').join('\t'))];
+      return { content: [{ type: 'text', text: truncateText(lines.join('\n'), max_length) }] };
+    }
+  );
+
+  // --- session_record ---
+  server.tool(
+    'session_record',
+    'Record the commands of this session as a replayable jsonl file (replay with the CLI: chrome-bridge replay --file <path>). tab_id is stripped — replays target the tab they navigate.',
+    {
+      action: z.enum(['start', 'stop', 'status', 'list']),
+      name: z.string().optional().describe('Required for start'),
+    },
+    async ({ action, name }) => {
+      if (action === 'status') {
+        return { content: [{ type: 'text', text: jsonText(recording ? { recording: recording.name, file: recording.file } : { recording: null }) }] };
+      }
+      if (action === 'list') {
+        const { readdir } = await import('node:fs/promises');
+        let files = [];
+        try { files = (await readdir(RECORDINGS_DIR)).filter((f) => f.endsWith('.jsonl')); } catch {}
+        return { content: [{ type: 'text', text: jsonText({ recordings: files.map((f) => join(RECORDINGS_DIR, f)) }) }] };
+      }
+      if (action === 'start') {
+        if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
+        await mkdir(RECORDINGS_DIR, { recursive: true });
+        const file = join(RECORDINGS_DIR, `${name}.jsonl`);
+        await writeFile(file, '');
+        recording = { name, file };
+        return { content: [{ type: 'text', text: jsonText({ recording: name, file }) }] };
+      }
+      // stop
+      const stopped = recording;
+      recording = null;
+      return { content: [{ type: 'text', text: jsonText(stopped ? { stopped: stopped.name, file: stopped.file } : { stopped: null }) }] };
     }
   );
 }

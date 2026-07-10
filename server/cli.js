@@ -29,7 +29,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -149,9 +149,61 @@ async function writeImages(images, outBase) {
   return paths;
 }
 
+// ─── Replay ──────────────────────────────────────────────────────
+
+/** Sostituisce i placeholder {{key}} nelle stringhe di un albero di params. */
+export function substituteVars(value, vars) {
+  if (typeof value === 'string') {
+    return value.replace(/\{\{(\w+)\}\}/g, (m, key) => (key in vars ? String(vars[key]) : m));
+  }
+  if (Array.isArray(value)) return value.map((v) => substituteVars(v, vars));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substituteVars(v, vars)]));
+  }
+  return value;
+}
+
+/** Legge un recording jsonl e ritorna gli step {command, params}. */
+export function parseReplayFile(content) {
+  return content.split('\n').filter((l) => l.trim()).map((line, i) => {
+    let step;
+    try { step = JSON.parse(line); } catch { throw new Error(`Invalid JSON at line ${i + 1}`); }
+    if (!step.command) throw new Error(`Missing "command" at line ${i + 1}`);
+    return { command: step.command, params: step.params ?? {} };
+  });
+}
+
+async function replay(client, params) {
+  if (!params.file) throw new Error('replay requires --file /path/to/flow.jsonl');
+  const vars = params.vars ? (typeof params.vars === 'string' ? JSON.parse(params.vars) : params.vars) : {};
+  const delay = params.delay ?? 0;
+  const stopOnError = params.stop_on_error ?? true;
+  const steps = parseReplayFile(await readFile(params.file, 'utf8'));
+  const out = [];
+  let failed = 0;
+  for (let i = 0; i < steps.length; i++) {
+    const { command, params: stepParams } = steps[i];
+    try {
+      const data = await client.sendCommand(command, substituteVars(stepParams, vars));
+      const summary = JSON.stringify(data);
+      out.push(`${i + 1} ${command} ok ${summary.length > 120 ? summary.slice(0, 120) + '…' : summary}`);
+    } catch (err) {
+      failed++;
+      out.push(`${i + 1} ${command} ERR ${err.message}`);
+      if (stopOnError) break;
+    }
+    if (delay && i < steps.length - 1) await new Promise((r) => setTimeout(r, delay));
+  }
+  out.push(`replay ${params.file}: ${out.length - failed}/${steps.length} ok${failed ? `, ${failed} failed` : ''}`);
+  return out.join('\n');
+}
+
 // ─── Dispatch ────────────────────────────────────────────────────
 
 async function run(client, command, params, opts) {
+  if (command === 'replay') {
+    return replay(client, params);
+  }
   // Comandi virtuali
   if (command === 'status') {
     const tabs = await client.sendCommand(MessageType.GET_TABS);
@@ -261,6 +313,7 @@ Examples:
   chrome-bridge js --code 'document.title'
   chrome-bridge screenshot --out /tmp/shot.png
   chrome-bridge check_links --scope same-origin
+  chrome-bridge replay --file ~/.config/chrome-bridge/recordings/login.jsonl --vars '{"user":"jane"}'
 `);
 }
 
