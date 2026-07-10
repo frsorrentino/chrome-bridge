@@ -23,7 +23,7 @@ const PORT = process.env.CHROME_BRIDGE_PORT
   ? parseInt(process.env.CHROME_BRIDGE_PORT, 10)
   : (LAUNCH ? 0 : DEFAULT_PORT);
 
-// Capability: default = solo set core (28 tool). --caps audits,visual o
+// Capability: default = solo set core (30 tool). --caps audits,visual o
 // CHROME_BRIDGE_CAPS attivano i gruppi opt-in; "all" registra tutto.
 function parseCaps() {
   const i = process.argv.indexOf('--caps');

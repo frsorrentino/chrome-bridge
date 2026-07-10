@@ -75,7 +75,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 | `get_frames` | List all frames (main + iframes) with `frameId` for frame targeting |
 | `screenshot` | Capture a tab as PNG — activates it in its window without focusing the window, then restores the previous tab |
 
-### Interaction (12)
+### Interaction (11)
 | Tool | Description |
 |------|-------------|
 | `click` | Click an element by CSS selector or ref; occlusion-checked, optional `wait_after`, reports `page_changed` |
@@ -128,7 +128,7 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 |------|-------------|
 | `element_screenshot` | Screenshot of a single element, cropped via OffscreenCanvas |
 | `full_page_screenshot` | Scroll-and-capture full page, stitched into one PNG (or one image per viewport) |
-| `screenshot_diff` | Visual regression: named baselines, changed-pixel percentage, red-overlay diff image |
+| `screenshot_diff` | Visual regression: named baselines (max 10, in-memory — lost if the service worker suspends), changed-pixel percentage, red-overlay diff image |
 | `viewport_resize` | Resize the window to a preset (mobile/tablet/desktop) or custom size |
 | `set_zoom` | Get/set the tab zoom factor (0.25–5) |
 | `emulate_media` | Override prefers-color-scheme, reduced-motion, print mode |
@@ -218,6 +218,7 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 | `CHROME_BRIDGE_CAPS` | `core` | Tool groups to register: `core`, comma list (`audits,visual,network,storage,dom,files`), or `all` (same as the `--caps` arg) |
 | `CHROME_BRIDGE_BROWSER` | _(auto)_ | Chromium/Chrome binary for launch mode |
 | `CHROME_BRIDGE_STUB_HOST` | _(auto)_ | Host the browser uses to reach the stub helper (`penguin.linux.test` on Crostini, else `127.0.0.1`) |
+| `CHROME_BRIDGE_RECORD_DIR` | `~/.config/chrome-bridge/recordings` | Where `session_record` writes replayable jsonl flows |
 
 ## Selected capabilities
 
@@ -232,7 +233,7 @@ The extension popup has **Port** and **Token** fields (persisted in `chrome.stor
 - **Server-side link checking:** `check_links` verifies URLs from the server, so external links get real HTTP statuses without CORS limits.
 - **HttpOnly cookies:** read/written via `chrome.cookies`, so HttpOnly cookies are visible.
 - **HAR export:** `monitor_network` can emit HAR 1.2.
-- **Timeouts:** 120s `full_page_screenshot`; 60s for waits, `upload_file`, `manage_downloads`, `save_page`; 10s screenshots; 30s for everything else.
+- **Timeouts:** 120s `full_page_screenshot`; 60s for waits, `scroll` (`action=until`), `upload_file`, `manage_downloads`, `save_page`; 10s screenshots; 30s for everything else.
 
 ## CLI (token-efficient alternative for batch work)
 
