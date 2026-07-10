@@ -10,6 +10,8 @@ import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
+import { runAssert } from './assertions.js';
+import { ensureStubServer, addStub, clearStubs, listStubs, stubHost } from './stub-server.js';
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
@@ -112,9 +114,12 @@ export function registerTools(server, wsManager, caps = 'all') {
   // Recording attivo: { name, file }. I comandi (senza tab_id, che in un
   // replay sarebbe stale) vengono appesi come jsonl replayabile dal CLI.
   let recording = null;
+  // >0 mentre un tool composito (assert) esegue query interne che nel
+  // recording sarebbero rumore: registra il tool, non le sue query.
+  let recordSuppressed = 0;
 
   const send = (type, params = {}) => {
-    if (recording && !RECORD_EXCLUDE.has(type)) {
+    if (recording && !recordSuppressed && !RECORD_EXCLUDE.has(type)) {
       const { tab_id: _tab, ...rest } = params;
       appendFile(recording.file, JSON.stringify({ command: type, params: rest }) + '\n').catch(() => {});
     }
@@ -277,7 +282,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       return {
         content: [{
           type: 'text',
-          text: truncateText(JSON.stringify(data), max_length),
+          text: truncateText(JSON.stringify(data), max_length ?? DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -354,7 +359,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       return {
         content: [{
           type: 'text',
-          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length),
+          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length ?? 50000),
         }],
       };
     }
@@ -1072,17 +1077,34 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- network_rules ---
   server.tool(
     'network_rules',
-    'Network interception, browser-wide, survives reloads until cleared: block requests, redirect URLs (mock endpoints), set/remove request headers.',
+    'Network interception, browser-wide, survives reloads until cleared: block requests, redirect URLs, set/remove request headers, or stub responses with a synthetic body (served by a local helper; from HTTPS pages the stub host must be trustworthy).',
     {
-      action: z.enum(['block', 'redirect', 'modify_header', 'list', 'clear']),
+      action: z.enum(['block', 'redirect', 'modify_header', 'stub', 'list', 'clear']),
       url_filter: z.string().optional().describe('declarativeNetRequest urlFilter, e.g. "||example.com/api/*"'),
       redirect_url: z.string().optional(),
       header: z.string().optional(),
       header_value: z.string().optional().describe('Omit to remove header'),
+      body: z.string().optional().describe('Response body (action=stub)'),
+      status: z.number().optional().default(200).describe('action=stub'),
+      content_type: z.string().optional().default('application/json').describe('action=stub'),
       resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional(),
     },
-    async ({ action, url_filter, redirect_url, header, header_value, resource_types }) => {
+    async ({ action, url_filter, redirect_url, header, header_value, body, status, content_type, resource_types }) => {
+      if (action === 'stub') {
+        if (!url_filter) throw new Error('url_filter is required for action=stub');
+        if (body == null) throw new Error('body is required for action=stub');
+        const port = await ensureStubServer();
+        const id = addStub({ body, status: status ?? 200, content_type: content_type ?? 'application/json' });
+        const stub_url = `http://${stubHost()}:${port}/__stub__/${id}`;
+        const data = await send(MessageType.NETWORK_RULES, { action: 'redirect', url_filter, redirect_url: stub_url, resource_types });
+        return { content: [{ type: 'text', text: jsonText({ ...data, stub: id, stub_url }) }] };
+      }
+      if (action === 'clear') clearStubs();
       const data = await send(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
+      if (action === 'list') {
+        const stubsInfo = listStubs();
+        if (stubsInfo.length) return { content: [{ type: 'text', text: jsonText({ ...data, stubs: stubsInfo }) }] };
+      }
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1468,6 +1490,36 @@ export function registerTools(server, wsManager, caps = 'all') {
       const lines = [`extract total=${nodes.length} shown=${items.length}`, names.join('\t'),
         ...items.map((row) => names.map((n) => row[n] ?? '').join('\t'))];
       return { content: [{ type: 'text', text: truncateText(lines.join('\n'), max_length) }] };
+    }
+  );
+
+  // --- assert ---
+  server.tool(
+    'assert',
+    'Assert a page condition, polling until timeout: element exists/visible (optionally with count or containing text), text on page, tab url/title. Patterns: substring, or "/…/" for regex. Recorded flows replay it as a test.',
+    {
+      selector: z.string().optional(),
+      state: z.enum(['attached', 'visible']).optional().default('attached'),
+      text: z.string().optional().describe('In the element (with selector) or anywhere on the page'),
+      count: z.number().optional().describe('Exact match count for selector'),
+      url: z.string().optional().describe('Tab url pattern'),
+      title: z.string().optional().describe('Tab title pattern'),
+      timeout: z.number().optional().default(5000),
+      tab_id: z.number().optional(),
+    },
+    async ({ selector, state, text, count, url, title, timeout, tab_id }) => {
+      const params = { selector, state, text, count, url, title, timeout, tab_id: tab_id ?? sessionTabId ?? undefined };
+      if (recording) {
+        const { tab_id: _tab, ...rest } = params;
+        appendFile(recording.file, JSON.stringify({ command: 'assert', params: rest }) + '\n').catch(() => {});
+      }
+      recordSuppressed++;
+      try {
+        const result = await runAssert(send, params);
+        return { content: [{ type: 'text', text: jsonText(result) }] };
+      } finally {
+        recordSuppressed--;
+      }
     }
   );
 

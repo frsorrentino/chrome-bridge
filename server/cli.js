@@ -19,6 +19,7 @@ import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, MessageType, createCommand, getTimeout } from './protocol.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
+import { runAssert } from './assertions.js';
 import { checkLinksBatch } from './link-checker.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { toHar } from './har.js';
@@ -29,7 +30,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -184,7 +185,10 @@ async function replay(client, params) {
   for (let i = 0; i < steps.length; i++) {
     const { command, params: stepParams } = steps[i];
     try {
-      const data = await client.sendCommand(command, substituteVars(stepParams, vars));
+      const p = substituteVars(stepParams, vars);
+      const data = command === 'assert'
+        ? await runAssert(client.sendCommand, p)
+        : await client.sendCommand(command, p);
       const summary = JSON.stringify(data);
       out.push(`${i + 1} ${command} ok ${summary.length > 120 ? summary.slice(0, 120) + '…' : summary}`);
     } catch (err) {
@@ -195,6 +199,7 @@ async function replay(client, params) {
     if (delay && i < steps.length - 1) await new Promise((r) => setTimeout(r, delay));
   }
   out.push(`replay ${params.file}: ${out.length - failed}/${steps.length} ok${failed ? `, ${failed} failed` : ''}`);
+  if (failed) process.exitCode = 1;
   return out.join('\n');
 }
 
@@ -203,6 +208,9 @@ async function replay(client, params) {
 async function run(client, command, params, opts) {
   if (command === 'replay') {
     return replay(client, params);
+  }
+  if (command === 'assert') {
+    return JSON.stringify(await runAssert(client.sendCommand, params));
   }
   // Comandi virtuali
   if (command === 'status') {
