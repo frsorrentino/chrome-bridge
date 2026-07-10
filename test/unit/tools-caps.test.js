@@ -165,6 +165,24 @@ test('find_text senza match visibili non allega nulla', async () => {
   assert.equal(text, JSON.stringify(payload));
 });
 
+test('dopo navigate i comandi senza tab_id usano il tab di sessione', async () => {
+  const seen = [];
+  const handlers = setup({
+    navigate: { url: 'https://x.test', title: 'X', tabId: 42 },
+    find_text: (params) => { seen.push(params.tab_id); return { count: 0, matches: [] }; },
+    tab_action: {},
+  });
+  await handlers.get('navigate')({ url: 'https://x.test' });
+  await handlers.get('find_text')({ text: 'q' });
+  assert.equal(seen[0], 42, 'tab di sessione iniettato');
+  await handlers.get('find_text')({ text: 'q', tab_id: 7 });
+  assert.equal(seen[1], 7, 'tab_id esplicito vince');
+  // close del tab di sessione: si torna al tab attivo
+  await handlers.get('tab_action')({ action: 'close' });
+  await handlers.get('find_text')({ text: 'q' });
+  assert.equal(seen[2], undefined);
+});
+
 test('click occluso non calcola delta né attese', async () => {
   const handlers = setup({
     click: { occluded: true },

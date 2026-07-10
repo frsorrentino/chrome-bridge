@@ -34,9 +34,8 @@ async function main() {
   }, {
     instructions: [
       'Selector parameters on DOM tools support shadow-DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
-      'tab_id omitted = active tab. frame_id omitted = main frame (list frames with get_frames).',
+      'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
       'Prefer get_interactives over read_page(html) to discover targets; its refs (n1, n2…) work as the ref param of click/type_text/hover.',
-      'navigate returns the tabId — pass it as tab_id in later calls, the user may switch the active tab meanwhile.',
     ].join(' '),
   });
 

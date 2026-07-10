@@ -41,17 +41,17 @@ const MIME_BY_EXT = {
 /**
  * Dopo un'azione (click/type/fill), attende navigazione o network idle se richiesto.
  *
- * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
+ * @param {(type: string, params?: object) => Promise<object>} send - invio comandi (con default tab di sessione)
  * @param {'none'|'navigation'|'networkidle'} wait_after - tipo di attesa
  * @param {number} [tab_id] - tab target
  * @returns {Promise<object|null>} risultato dell'attesa, o null se none
  */
-async function applyWaitAfter(wsManager, wait_after, tab_id) {
+async function applyWaitAfter(send, wait_after, tab_id) {
   if (wait_after === 'navigation') {
-    return await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id });
+    return await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id });
   }
   if (wait_after === 'networkidle') {
-    return await wsManager.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
+    return await send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
   }
   return null;
 }
@@ -98,11 +98,22 @@ export function registerTools(server, wsManager, caps = 'all') {
     };
   }
 
+  // Ultimo tab toccato da navigate/create_tab in questa sessione: è il default
+  // dei comandi senza tab_id esplicito. "Tab attivo" è una landmine quando
+  // l'utente usa Chrome durante l'automazione (il comando colpirebbe la pagina
+  // che sta guardando lui, non quella navigata dall'agente).
+  let sessionTabId = null;
+
+  const send = (type, params = {}) => {
+    if (params.tab_id == null && sessionTabId != null) params = { ...params, tab_id: sessionTabId };
+    return wsManager.sendCommand(type, params);
+  };
+
   // Mappa ref → selector per tab, popolata da get_interactives.
   // Permette click/type_text/hover per ref (n1, n2…) senza ripetere selettori lunghi.
   const interactivesRefs = new Map();
 
-  const refsKey = (tab_id) => tab_id ?? 'active';
+  const refsKey = (tab_id) => tab_id ?? sessionTabId ?? 'active';
 
   function resolveTarget(selector, ref, tab_id) {
     if (selector) return selector;
@@ -117,9 +128,10 @@ export function registerTools(server, wsManager, caps = 'all') {
   // Snapshot url/title del tab target, per il delta post-azione.
   async function tabSnapshot(tab_id) {
     try {
-      const tabs = await wsManager.sendCommand(MessageType.GET_TABS);
+      const tabs = await send(MessageType.GET_TABS);
       const list = Array.isArray(tabs) ? tabs : [];
-      const tab = tab_id != null ? list.find((t) => t.id === tab_id) : list.find((t) => t.active);
+      const eff = tab_id ?? sessionTabId;
+      const tab = eff != null ? list.find((t) => t.id === eff) : list.find((t) => t.active);
       return tab ? { url: tab.url, title: tab.title } : null;
     } catch { return null; }
   }
@@ -139,7 +151,7 @@ export function registerTools(server, wsManager, caps = 'all') {
   // il client può agire subito senza un giro di discovery. Cappata e best-effort.
   async function interactivesPreview(tab_id, limit = 12) {
     try {
-      const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { limit, visible_only: true, tab_id });
+      const data = await send(MessageType.GET_INTERACTIVES, { limit, visible_only: true, tab_id });
       const refMap = new Map();
       (data?.elements ?? []).forEach((e, i) => {
         e.ref = `n${i + 1}`;
@@ -177,7 +189,7 @@ export function registerTools(server, wsManager, caps = 'all') {
     'List all open Chrome tabs',
     {},
     async () => {
-      const data = await wsManager.sendCommand(MessageType.GET_TABS);
+      const data = await send(MessageType.GET_TABS);
       return {
         content: [{
           type: 'text',
@@ -196,9 +208,9 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ url, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.NAVIGATE, { url, tab_id });
-      // Il tab della navigazione è il target giusto per la preview anche se
-      // l'utente cambia tab attivo nel frattempo
+      const data = await send(MessageType.NAVIGATE, { url, tab_id });
+      // Il tab navigato diventa il default di sessione per i comandi successivi
+      if (data?.tabId != null) sessionTabId = data.tabId;
       const preview = await interactivesPreview(data?.tabId ?? tab_id);
       return {
         content: [{
@@ -217,7 +229,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SCREENSHOT, { tab_id });
+      const data = await send(MessageType.SCREENSHOT, { tab_id });
       // data.image è base64 PNG
       if (data && data.image) {
         return {
@@ -248,7 +260,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       max_length: z.number().optional().default(20000).describe('Max output chars'),
     },
     async ({ code, tab_id, frame_id, max_length }) => {
-      const data = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code, tab_id, frame_id });
+      const data = await send(MessageType.EXECUTE_JS, { code, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -273,9 +285,9 @@ export function registerTools(server, wsManager, caps = 'all') {
     async ({ selector, ref, force, wait_after, tab_id, frame_id }) => {
       const target = resolveTarget(selector, ref, tab_id);
       const before = await tabSnapshot(tab_id);
-      const data = await wsManager.sendCommand(MessageType.CLICK, { selector: target, force, frame_id, tab_id });
+      const data = await send(MessageType.CLICK, { selector: target, force, frame_id, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
-      const waited = data?.occluded ? null : await applyWaitAfter(wsManager, wait_after, tab_id);
+      const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id);
       const changed = data?.occluded ? null : pageDelta(before, await tabSnapshot(tab_id));
       const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
@@ -302,8 +314,8 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ selector, ref, text, mode, wait_after, tab_id, frame_id }) => {
       const target = resolveTarget(selector, ref, tab_id);
-      const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id });
-      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      const data = await send(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id });
+      const waited = await applyWaitAfter(send, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
       return {
         content: [{
@@ -325,7 +337,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       max_length: z.number().optional().default(50000).describe('Max output chars'),
     },
     async ({ mode, tab_id, frame_id, max_length }) => {
-      const data = await wsManager.sendCommand(MessageType.READ_PAGE, { mode, tab_id, frame_id });
+      const data = await send(MessageType.READ_PAGE, { mode, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -344,7 +356,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       frame_id: z.number().optional(),
     },
     async ({ tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_PAGE_INFO, { tab_id, frame_id });
+      const data = await send(MessageType.GET_PAGE_INFO, { tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -363,7 +375,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ type, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type, tab_id });
+      const data = await send(MessageType.GET_STORAGE, { type, tab_id });
       return {
         content: [{
           type: 'text',
@@ -381,7 +393,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_PERFORMANCE, { tab_id });
+      const data = await send(MessageType.GET_PERFORMANCE, { tab_id });
       return {
         content: [{
           type: 'text',
@@ -403,7 +415,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       frame_id: z.number().optional(),
     },
     async ({ selector, properties, limit, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.QUERY_DOM, { selector, properties, limit, tab_id, frame_id });
+      const data = await send(MessageType.QUERY_DOM, { selector, properties, limit, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -427,7 +439,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       frame_id: z.number().optional(),
     },
     async ({ selector, action, name, value, className, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector, action, name, value, className, tab_id, frame_id });
+      const data = await send(MessageType.MODIFY_DOM, { selector, action, name, value, className, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -446,7 +458,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ css, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.INJECT_CSS, { css, tab_id });
+      const data = await send(MessageType.INJECT_CSS, { css, tab_id });
       return {
         content: [{
           type: 'text',
@@ -468,7 +480,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ clear, level, limit, format, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.READ_CONSOLE, { clear, level, tab_id });
+      const data = await send(MessageType.READ_CONSOLE, { clear, level, tab_id });
       const all = data?.messages ?? [];
       const tail = all.slice(-(limit ?? 50));
       const total = data?.count ?? all.length;
@@ -496,7 +508,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ clear, source, format, limit, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
+      const data = await send(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
       const { requests, count, ...rest } = data ?? {};
       const all = requests ?? [];
       const tail = all.slice(-(limit ?? 100));
@@ -526,7 +538,8 @@ export function registerTools(server, wsManager, caps = 'all') {
       active: z.boolean().optional().default(true),
     },
     async ({ url, active }) => {
-      const data = await wsManager.sendCommand(MessageType.CREATE_TAB, { url, active });
+      const data = await send(MessageType.CREATE_TAB, { url, active });
+      if (data?.id != null) sessionTabId = data.id;
       return {
         content: [{
           type: 'text',
@@ -555,19 +568,19 @@ export function registerTools(server, wsManager, caps = 'all') {
     async ({ condition, selector, expression, visible, mode, idle_ms, timeout, interval, tab_id, frame_id }) => {
       let data;
       if (condition === 'element') {
-        data = await wsManager.sendCommand(MessageType.WAIT_FOR_ELEMENT, {
+        data = await send(MessageType.WAIT_FOR_ELEMENT, {
           selector, timeout: timeout ?? 10000, interval: interval ?? 200, visible: visible ?? false, tab_id, frame_id,
         });
       } else if (condition === 'function') {
-        data = await wsManager.sendCommand(MessageType.WAIT_FOR_FUNCTION, {
+        data = await send(MessageType.WAIT_FOR_FUNCTION, {
           expression, timeout: timeout ?? 10000, polling_ms: interval ?? 100, tab_id, frame_id,
         });
       } else if (condition === 'navigation') {
-        data = await wsManager.sendCommand(MessageType.WAIT_FOR_NAVIGATION, {
+        data = await send(MessageType.WAIT_FOR_NAVIGATION, {
           timeout: timeout ?? 15000, mode: mode ?? 'load', tab_id,
         });
       } else {
-        data = await wsManager.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, {
+        data = await send(MessageType.WAIT_FOR_NETWORK_IDLE, {
           idle_ms: idle_ms ?? 500, timeout: timeout ?? 15000, tab_id,
         });
       }
@@ -595,8 +608,8 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ action, selector, x, y, behavior, offset_y, until, max_scrolls, step_px, settle_ms, tab_id, frame_id }) => {
       const data = (action ?? 'to') === 'until'
-        ? await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until, selector, max_scrolls, step_px, settle_ms, tab_id })
-        : await wsManager.sendCommand(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id, frame_id });
+        ? await send(MessageType.SCROLL_UNTIL, { until, selector, max_scrolls, step_px, settle_ms, tab_id })
+        : await send(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id, frame_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -619,7 +632,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id });
+      const data = await send(MessageType.SET_STORAGE, { type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id });
       return {
         content: [{
           type: 'text',
@@ -645,8 +658,8 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ fields, submit_selector, wait_after, tab_id, frame_id }) => {
       const before = await tabSnapshot(tab_id);
-      const data = await wsManager.sendCommand(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
-      const waited = await applyWaitAfter(wsManager, wait_after, tab_id);
+      const data = await send(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
+      const waited = await applyWaitAfter(send, wait_after, tab_id);
       const changed = pageDelta(before, await tabSnapshot(tab_id));
       const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
@@ -669,7 +682,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ preset, width, height, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { preset, width, height, tab_id });
+      const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, tab_id });
       return {
         content: [{
           type: 'text',
@@ -688,7 +701,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ selector, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.ELEMENT_SCREENSHOT, { selector, tab_id });
+      const data = await send(MessageType.ELEMENT_SCREENSHOT, { selector, tab_id });
       if (data && data.image) {
         return { content: [{ type: 'image', data: data.image, mimeType: 'image/png' }] };
       }
@@ -707,7 +720,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ max_scrolls, delay, stitch, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
+      const data = await send(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
       if (data && data.images) {
         const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}${data.truncated ? ' (page continues beyond captured area — raise max_scrolls to capture more)' : ''}`;
         return {
@@ -743,7 +756,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ selector, color, border, label, remove, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.HIGHLIGHT_ELEMENTS, { selector, color, border, label, remove, tab_id });
+      const data = await send(MessageType.HIGHLIGHT_ELEMENTS, { selector, color, border, label, remove, tab_id });
       return {
         content: [{
           type: 'text',
@@ -763,7 +776,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ scope, checks, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.ACCESSIBILITY_AUDIT, { scope, checks, tab_id });
+      const data = await send(MessageType.ACCESSIBILITY_AUDIT, { scope, checks, tab_id });
       return {
         content: [{
           type: 'text',
@@ -786,7 +799,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ scope, selector, timeout, max_links, format, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
+      const data = await send(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
       const links = data.links ?? [];
       const results = await checkLinksBatch(links, timeout);
       const broken = results.filter((r) => r.broken).length;
@@ -817,7 +830,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ selector1, selector2, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MEASURE_SPACING, { selector1, selector2, tab_id });
+      const data = await send(MessageType.MEASURE_SPACING, { selector1, selector2, tab_id });
       return {
         content: [{
           type: 'text',
@@ -842,7 +855,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ selector, attributes, childList, characterData, subtree, clear, stop, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, tab_id });
+      const data = await send(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, tab_id });
       return {
         content: [{
           type: 'text',
@@ -864,7 +877,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ colorScheme, reducedMotion, printMode, reset, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, reset, tab_id });
+      const data = await send(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, reset, tab_id });
       return {
         content: [{
           type: 'text',
@@ -885,7 +898,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       frame_id: z.number().optional(),
     },
     async ({ selector, ref, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.HOVER, { selector: resolveTarget(selector, ref, tab_id), tab_id, frame_id });
+      const data = await send(MessageType.HOVER, { selector: resolveTarget(selector, ref, tab_id), tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -910,7 +923,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       frame_id: z.number().optional(),
     },
     async ({ key, selector, ctrl, shift, alt, meta, tab_id, frame_id }) => {
-      const data = await wsManager.sendCommand(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
+      const data = await send(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
       return {
         content: [{
           type: 'text',
@@ -928,7 +941,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_FRAMES, { tab_id });
+      const data = await send(MessageType.GET_FRAMES, { tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -943,7 +956,9 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ action, bypass_cache, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
+      const data = await send(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
+      if (action === 'close' && (tab_id == null || tab_id === sessionTabId)) sessionTabId = null;
+      if (action === 'activate' && tab_id != null) sessionTabId = tab_id;
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -962,7 +977,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       const buf = await readFile(path);
       if (buf.length > 10 * 1024 * 1024) throw new Error(`File too large: ${buf.length} bytes (max 10MB)`);
       const mime = mime_type || MIME_BY_EXT[extname(path).toLowerCase()] || 'application/octet-stream';
-      const data = await wsManager.sendCommand(MessageType.UPLOAD_FILE, {
+      const data = await send(MessageType.UPLOAD_FILE, {
         selector, name: basename(path), mime_type: mime, content_b64: buf.toString('base64'), tab_id,
       });
       return { content: [{ type: 'text', text: jsonText(data) }] };
@@ -977,7 +992,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.DISMISS_OVERLAYS, { tab_id });
+      const data = await send(MessageType.DISMISS_OVERLAYS, { tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -992,7 +1007,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ action, prompt_text, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.HANDLE_DIALOGS, { action, prompt_text, tab_id });
+      const data = await send(MessageType.HANDLE_DIALOGS, { action, prompt_text, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1008,7 +1023,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ text, case_sensitive, max_results, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
+      const data = await send(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
       // Interactives vicini al primo match visibile, con ref: rende il match
       // azionabile subito (click sul bottone della stessa riga/sezione).
       // Nota coordinate: match.position è in coordinate pagina, i rect degli
@@ -1019,7 +1034,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       const first = (data?.matches ?? []).find((m) => m.visible && m.position);
       if (first) {
         try {
-          const inter = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { limit: 3000, visible_only: true, tab_id });
+          const inter = await send(MessageType.GET_INTERACTIVES, { limit: 3000, visible_only: true, tab_id });
           const els = (inter?.elements ?? [])
             .map((e) => ({ e, dy: Math.abs((e.rect?.y ?? Infinity) - first.position.y), dx: Math.abs((e.rect?.x ?? Infinity) - first.position.x) }))
             .filter((c) => c.dy <= 150)
@@ -1054,7 +1069,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional(),
     },
     async ({ action, url_filter, redirect_url, header, header_value, resource_types }) => {
-      const data = await wsManager.sendCommand(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
+      const data = await send(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1071,7 +1086,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ action, name, selector, threshold, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, tab_id });
+      const data = await send(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, tab_id });
       if (data && data.diff_image) {
         const { diff_image, ...rest } = data;
         return {
@@ -1093,7 +1108,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.WEB_VITALS, { tab_id });
+      const data = await send(MessageType.WEB_VITALS, { tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1108,7 +1123,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ type, limit, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
+      const data = await send(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1122,7 +1137,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ clear, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
+      const data = await send(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1135,7 +1150,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SEO_AUDIT, { tab_id });
+      const data = await send(MessageType.SEO_AUDIT, { tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1151,7 +1166,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ selector, index, max_rows, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
+      const data = await send(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1165,7 +1180,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ max_selectors, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.UNUSED_CSS, { max_selectors, tab_id });
+      const data = await send(MessageType.UNUSED_CSS, { max_selectors, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1182,7 +1197,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ source_selector, target_selector, mode, frame_id, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector, target_selector, mode, frame_id, tab_id });
+      const data = await send(MessageType.DRAG_AND_DROP, { source_selector, target_selector, mode, frame_id, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1197,7 +1212,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ action, text, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.CLIPBOARD, { action, text, tab_id });
+      const data = await send(MessageType.CLIPBOARD, { action, text, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1214,7 +1229,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ latitude, longitude, accuracy, reset, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
+      const data = await send(MessageType.SET_GEOLOCATION, { latitude, longitude, accuracy, reset, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1229,7 +1244,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       limit: z.number().optional().default(10),
     },
     async ({ action, timeout, limit }) => {
-      const data = await wsManager.sendCommand(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
+      const data = await send(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1243,7 +1258,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ output_path, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SAVE_PAGE, { tab_id });
+      const data = await send(MessageType.SAVE_PAGE, { tab_id });
       await writeFile(output_path, Buffer.from(data.mhtml_b64, 'base64'));
       return { content: [{ type: 'text', text: jsonText({ saved: output_path, size: data.size }) }] };
     }
@@ -1259,7 +1274,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ factor, reset, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.SET_ZOOM, { factor, reset, tab_id });
+      const data = await send(MessageType.SET_ZOOM, { factor, reset, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1275,7 +1290,7 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ action, username, password }) => {
       if (action === 'set' && !username) throw new Error('username is required for action=set');
-      const data = await wsManager.sendCommand(MessageType.HTTP_AUTH, { action, username, password });
+      const data = await send(MessageType.HTTP_AUTH, { action, username, password });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1288,7 +1303,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_RESPONSE_HEADERS, { tab_id });
+      const data = await send(MessageType.GET_RESPONSE_HEADERS, { tab_id });
       if (!data.available) {
         return { content: [{ type: 'text', text: jsonText(data) }] };
       }
@@ -1319,14 +1334,14 @@ export function registerTools(server, wsManager, caps = 'all') {
 
       // Origin del tab target (match per tab_id, altrimenti tab attivo)
       const getTabOrigin = async () => {
-        const tabs = await wsManager.sendCommand(MessageType.GET_TABS);
+        const tabs = await send(MessageType.GET_TABS);
         const list = Array.isArray(tabs) ? tabs : [];
         const tab = tab_id != null ? list.find((t) => t.id === tab_id) : list.find((t) => t.active);
         try { return tab?.url ? new URL(tab.url).origin : null; } catch { return null; }
       };
 
       if (action === 'save') {
-        const data = await wsManager.sendCommand(MessageType.GET_STORAGE, { type: 'all', tab_id });
+        const data = await send(MessageType.GET_STORAGE, { type: 'all', tab_id });
         const origin = await getTabOrigin();
         await mkdir(SESSIONS_DIR, { recursive: true });
         // File su disco per umani: pretty-print qui non costa token
@@ -1345,13 +1360,13 @@ export function registerTools(server, wsManager, caps = 'all') {
       const restored = { localStorage: 0, sessionStorage: 0, cookies: 0, cookie_errors: [] };
       for (const storageType of ['localStorage', 'sessionStorage']) {
         for (const [k, v] of Object.entries(fixture[storageType] || {})) {
-          await wsManager.sendCommand(MessageType.SET_STORAGE, { type: storageType, action: 'set', key: k, value: v, tab_id });
+          await send(MessageType.SET_STORAGE, { type: storageType, action: 'set', key: k, value: v, tab_id });
           restored[storageType]++;
         }
       }
       for (const c of fixture.cookies || []) {
         try {
-          await wsManager.sendCommand(MessageType.SET_STORAGE, {
+          await send(MessageType.SET_STORAGE, {
             type: 'cookie', action: 'set', key: c.name, value: c.value,
             path: c.path, domain: c.domain && c.domain.startsWith('.') ? c.domain : undefined,
             expires: c.expirationDate ? new Date(c.expirationDate * 1000).toUTCString() : undefined,
@@ -1382,7 +1397,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
-      const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
+      const data = await send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
       // Assegna ref n1..nN e memorizza la mappa ref → selector per click/type_text/hover
       const refMap = new Map();
       (data?.elements ?? []).forEach((e, i) => {
