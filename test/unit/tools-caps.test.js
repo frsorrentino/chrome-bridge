@@ -138,6 +138,33 @@ test('navigate senza interactives disponibili non allega nulla', async () => {
   assert.equal(text, JSON.stringify({ url: 'https://x.test', title: 'X', tabId: 7 }));
 });
 
+test('find_text allega interactives vicini al primo match, con ref usabili', async () => {
+  let clicked = null;
+  const handlers = setup({
+    find_text: { count: 1, matches: [{ selector: 'td', context: 'Quantum Widget 1042', visible: true, position: { x: 20, y: 41680 } }] },
+    get_interactives: { count: 3, elements: [
+      { selector: 'nav > a', tag: 'a', text: 'Home', enabled: true, visible: true, rect: { x: 0, y: 10, width: 50, height: 20 } },
+      { selector: '#row-1042 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 41682, width: 60, height: 24 } },
+      { selector: '#row-1050 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 42000, width: 60, height: 24 } },
+    ] },
+    click: (params) => { clicked = params.selector; return { clicked: true }; },
+    get_tabs: [],
+  });
+  const text = textOf(await handlers.get('find_text')({ text: 'Quantum Widget 1042' }));
+  assert.ok(text.includes('near first match'));
+  assert.ok(text.includes('n1\t#row-1042 .details-btn'), 'il più vicino è n1');
+  assert.ok(!text.includes('nav > a'), 'lontani (dy>150) esclusi');
+  await handlers.get('click')({ ref: 'n1' });
+  assert.equal(clicked, '#row-1042 .details-btn');
+});
+
+test('find_text senza match visibili non allega nulla', async () => {
+  const payload = { count: 0, matches: [] };
+  const handlers = setup({ find_text: payload });
+  const text = textOf(await handlers.get('find_text')({ text: 'nope' }));
+  assert.equal(text, JSON.stringify(payload));
+});
+
 test('click occluso non calcola delta né attese', async () => {
   const handlers = setup({
     click: { occluded: true },

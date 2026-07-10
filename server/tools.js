@@ -1000,7 +1000,7 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- find_text ---
   server.tool(
     'find_text',
-    'Find text on the page: parent selector, context, visibility, position per match.',
+    'Find text on the page: parent selector, context, visibility, position per match. Attaches nearby interactive elements (with refs for click/type_text/hover) for the first visible match.',
     {
       text: z.string(),
       case_sensitive: z.boolean().optional().default(false),
@@ -1009,7 +1009,35 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ text, case_sensitive, max_results, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.FIND_TEXT, { text, case_sensitive, max_results, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
+      // Interactives vicini al primo match visibile, con ref: rende il match
+      // azionabile subito (click sul bottone della stessa riga/sezione).
+      // Nota coordinate: match.position è in coordinate pagina, i rect degli
+      // interactives in coordinate viewport — coincidono a scroll 0 (il flusso
+      // tipico navigate → find_text). Con pagina scrollata il filtro per
+      // distanza non trova candidati e non allega nulla: degradazione sicura.
+      let near = null;
+      const first = (data?.matches ?? []).find((m) => m.visible && m.position);
+      if (first) {
+        try {
+          const inter = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { limit: 3000, visible_only: true, tab_id });
+          const els = (inter?.elements ?? [])
+            .map((e) => ({ e, dy: Math.abs((e.rect?.y ?? Infinity) - first.position.y), dx: Math.abs((e.rect?.x ?? Infinity) - first.position.x) }))
+            .filter((c) => c.dy <= 150)
+            .sort((a, b) => (a.dy * 4 + a.dx) - (b.dy * 4 + b.dx))
+            .slice(0, 5)
+            .map((c) => c.e);
+          if (els.length) {
+            const refMap = new Map();
+            els.forEach((e, i) => {
+              e.ref = `n${i + 1}`;
+              if (e.selector) refMap.set(e.ref, e.selector);
+            });
+            interactivesRefs.set(refsKey(tab_id), refMap);
+            near = truncateText(interactivesLines({ count: els.length, elements: els, note: 'near first match' }), 1200);
+          }
+        } catch {}
+      }
+      return { content: [{ type: 'text', text: jsonText(data) + (near ? `\n${near}` : '') }] };
     }
   );
 
