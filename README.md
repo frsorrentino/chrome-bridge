@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that works on ChromeOS (Crostini).
+**MCP server that connects Claude Code to Chrome through a WebSocket bridge and a Chrome extension.** Cross-platform — Windows, macOS, Linux, any Chrome 135+ — and the only Claude Code browser automation that drives the real, logged-in Chrome on ChromeOS (Crostini). Playwright MCP and Chrome DevTools MCP can run an isolated Linux browser inside the container; only Chrome Bridge reaches the actual ChromeOS browser with your sessions.
 
 Chrome Bridge drives your real, logged-in browser — no headless instance, no CDP debugging port, no paid plan. It exposes 58 specialized web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) over a single local WebSocket.
 
@@ -10,9 +10,9 @@ There are several browser automation tools for Claude Code. Here's how they comp
 
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
-| **ChromeOS / Crostini** | **Yes** | No | No | No |
+| **ChromeOS / Crostini** | **Yes** (real host Chrome) | No | Container browser only | Container browser only (headless) |
 | **Connection** | WebSocket | Native Messaging | CDP (`--remote-debugging-port`) | Own instance, or extension mode |
-| **Tools** | **58** | ~20 | ~50 | 23 core (71 with opt-ins) |
+| **Tools** | **29 core (58 with opt-ins)** | ~20 | ~50 | 23 core (71 with opt-ins) |
 | **Uses your real browser** | Yes | Yes | Yes (with flags) | Optional (extension mode) |
 | **Shares your logins** | Yes | Yes | Yes | Persistent profile / extension mode |
 | **Requires paid plan** | No | Yes (Pro/Max/Team) | No | No |
@@ -27,7 +27,7 @@ There are several browser automation tools for Claude Code. Here's how they comp
 | **Breakpoints / profiling** | No | No | Yes (+ heap snapshots) | No |
 | **Headless / CI** | No | No | Yes | Yes |
 
-**In short:** Chrome Bridge is the only option that works on ChromeOS, ships 58 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
+**In short:** Chrome Bridge is the only option that automates your real, logged-in Chrome on ChromeOS, ships 58 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording, no CDP-level debugging (breakpoints/profiling), and no headless mode.
 
 **Token-conscious by design.** The default toolset is 29 core tools (~3.9k tokens of schemas — less than Playwright MCP's ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`. `navigate` and `find_text` attach a compact, capped preview of nearby interactive elements with short refs (`n1`, `n2`…) that `click`/`type_text`/`hover` accept directly — the agent acts immediately instead of spending turns on discovery. Actions report a `page_changed` delta only when url/title actually change. Listings come as tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px. In our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release, finishing ahead of Playwright MCP on the form task and within ~11% on the catalog. For bulk work, the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP entirely: zero schema overhead, output filterable through `grep`/`head`/`jq` before it ever reaches the model.
 
