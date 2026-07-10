@@ -135,6 +135,21 @@ export function registerTools(server, wsManager, caps = 'all') {
     return Object.keys(delta).length ? delta : null;
   }
 
+  // Anteprima compatta dei primi interactives (con ref), allegata a navigate:
+  // il client può agire subito senza un giro di discovery. Cappata e best-effort.
+  async function interactivesPreview(tab_id, limit = 12) {
+    try {
+      const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { limit, visible_only: true, tab_id });
+      const refMap = new Map();
+      (data?.elements ?? []).forEach((e, i) => {
+        e.ref = `n${i + 1}`;
+        if (e.selector) refMap.set(e.ref, e.selector);
+      });
+      interactivesRefs.set(refsKey(tab_id), refMap);
+      return refMap.size ? truncateText(interactivesLines(data), 1500) : null;
+    } catch { return null; }
+  }
+
   // --- get_status ---
   server.tool(
     'get_status',
@@ -175,17 +190,20 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- navigate ---
   server.tool(
     'navigate',
-    'Navigate a Chrome tab to a URL',
+    'Navigate a Chrome tab to a URL. Returns a preview of interactive elements with refs usable in click/type_text/hover.',
     {
       url:    z.string(),
       tab_id: z.number().optional(),
     },
     async ({ url, tab_id }) => {
       const data = await wsManager.sendCommand(MessageType.NAVIGATE, { url, tab_id });
+      // Il tab della navigazione è il target giusto per la preview anche se
+      // l'utente cambia tab attivo nel frattempo
+      const preview = await interactivesPreview(data?.tabId ?? tab_id);
       return {
         content: [{
           type: 'text',
-          text: jsonText(data),
+          text: jsonText(data) + (preview ? `\n${preview}` : ''),
         }],
       };
     }

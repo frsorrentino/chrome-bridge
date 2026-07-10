@@ -117,6 +117,27 @@ test('click riporta page_changed solo quando url/title cambiano', async () => {
   assert.equal(out2.page_changed, undefined);
 });
 
+test('navigate allega preview interactives con ref e la mappa è usabile', async () => {
+  let clicked = null;
+  const handlers = setup({
+    navigate: { url: 'https://x.test', title: 'X', tabId: 7 },
+    get_interactives: structuredClone(ELEMENTS),
+    click: (params) => { clicked = params.selector; return { clicked: true }; },
+    get_tabs: [],
+  });
+  const text = textOf(await handlers.get('navigate')({ url: 'https://x.test' }));
+  assert.ok(text.includes('n1\t#btn-save'), 'preview con ref presente');
+  // La preview usa il tabId della navigazione come chiave refs
+  await handlers.get('click')({ ref: 'n1', tab_id: 7 });
+  assert.equal(clicked, '#btn-save');
+});
+
+test('navigate senza interactives disponibili non allega nulla', async () => {
+  const handlers = setup({ navigate: { url: 'https://x.test', title: 'X', tabId: 7 } });
+  const text = textOf(await handlers.get('navigate')({ url: 'https://x.test' }));
+  assert.equal(text, JSON.stringify({ url: 'https://x.test', title: 'X', tabId: 7 }));
+});
+
 test('click occluso non calcola delta né attese', async () => {
   const handlers = setup({
     click: { occluded: true },
