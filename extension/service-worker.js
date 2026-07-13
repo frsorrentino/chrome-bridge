@@ -3009,7 +3009,10 @@ async function cmdSeoAudit({ tab_id }) {
 
 // --- extract_table ---
 
-async function cmdExtractTable({ selector = 'table', index = 0, max_rows = 100, tab_id }) {
+async function cmdExtractTable({ selector = 'table', index = 0, scan_rows, max_rows, tab_id }) {
+  // scan_rows = quante righe materializzare in pagina (il filtro/paginazione
+  // avviene lato server). Fallback a max_rows per compatibilità con vecchi client.
+  const cap = scan_rows ?? max_rows ?? 2000;
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
@@ -3064,7 +3067,7 @@ async function cmdExtractTable({ selector = 'table', index = 0, max_rows = 100, 
         tables_found: tables.length,
       };
     },
-    args: [selector, index, max_rows],
+    args: [selector, index, cap],
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { headers: [], rows: [], row_count: 0, truncated: false, tables_found: 0 };

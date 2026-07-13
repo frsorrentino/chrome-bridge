@@ -38,6 +38,56 @@ function jsonText(data, max = DEFAULT_MAX_OUTPUT) {
   return truncateText(JSON.stringify(data), max);
 }
 
+/** Una riga (oggetto colonna→valore o array di celle) soddisfa il filtro where. */
+function tableRowMatches(row, where) {
+  return Object.entries(where).every(([col, needle]) => {
+    const n = String(needle).toLowerCase();
+    if (Array.isArray(row)) return row.some((cell) => String(cell).toLowerCase().includes(n));
+    if (col === 'any') return Object.values(row).some((cell) => String(cell).toLowerCase().includes(n));
+    const cell = row[col];
+    return cell != null && String(cell).toLowerCase().includes(n);
+  });
+}
+
+/** Proietta solo le colonne richieste (solo righe-oggetto; array intatti). */
+function projectCols(row, columns) {
+  if (Array.isArray(row)) return row;
+  const o = {};
+  for (const c of columns) o[c] = row[c] ?? '';
+  return o;
+}
+
+/**
+ * Modella la risposta grezza di extract_table lato server: filtra (where),
+ * pagina (offset/max_rows) e proietta (columns) PRIMA di spedire al modello,
+ * così il payload resta piccolo anche su tabelle enormi. row_count resta il
+ * totale reale della tabella; match_count è quante righe passano il filtro.
+ */
+function shapeTable(data, { where, columns, offset = 0, max_rows = 100 } = {}) {
+  let rows = Array.isArray(data.rows) ? data.rows : [];
+  const total = data.row_count ?? rows.length;
+  const hasWhere = where && Object.keys(where).length > 0;
+  let match_count;
+  if (hasWhere) {
+    rows = rows.filter((r) => tableRowMatches(r, where));
+    match_count = rows.length;
+  }
+  const available = rows.length;
+  const page = rows.slice(offset, offset + max_rows);
+  const projected = (columns && columns.length) ? page.map((r) => projectCols(r, columns)) : page;
+  const out = {
+    caption: data.caption ?? null,
+    headers: data.headers ?? [],
+    row_count: total,
+    rows: projected,
+    truncated: (offset + page.length) < available || Boolean(data.truncated && !hasWhere),
+    tables_found: data.tables_found ?? 0,
+  };
+  if (hasWhere) out.match_count = match_count;
+  if (offset) out.offset = offset;
+  return out;
+}
+
 const MIME_BY_EXT = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
@@ -1193,16 +1243,21 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- extract_table ---
   server.tool(
     'extract_table',
-    'Extract an HTML table as JSON (thead headers, rows as objects). index picks among multiple matches.',
+    'Extract an HTML table as JSON (thead headers, rows as objects). Use `where` to pull only matching rows from a large table without reading it all (server-side filter). `row_count` is always the table total; `match_count` is how many rows pass the filter. index picks among multiple matches.',
     {
       selector: z.string().optional().default('table'),
       index: z.number().optional().default(0),
-      max_rows: z.number().optional().default(100),
+      max_rows: z.number().optional().default(100).describe('Max rows returned to you (output cap).'),
+      where: z.record(z.string(), z.string()).optional().describe('Keep only rows where each {column: substring} matches (case-insensitive contains). Use key "any" (or when the table has no headers) to match against any cell.'),
+      columns: z.array(z.string()).optional().describe('Return only these columns per row.'),
+      offset: z.number().optional().default(0).describe('Skip N rows of the (filtered) set before applying max_rows.'),
+      scan_rows: z.number().optional().default(2000).describe('Max rows materialized in-page to scan/filter; raise for very large tables.'),
       tab_id: z.number().optional(),
     },
-    async ({ selector, index, max_rows, tab_id }) => {
-      const data = await send(MessageType.EXTRACT_TABLE, { selector, index, max_rows, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
+    async ({ selector, index, max_rows, where, columns, offset, scan_rows, tab_id }) => {
+      const data = await send(MessageType.EXTRACT_TABLE, { selector, index, scan_rows, tab_id });
+      const shaped = shapeTable(data, { where, columns, offset, max_rows });
+      return { content: [{ type: 'text', text: jsonText(shaped) }] };
     }
   );
 
