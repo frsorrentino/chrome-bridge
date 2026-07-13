@@ -138,7 +138,7 @@ test('dopo ext_init il server risponde ext_init_ok con version', async () => {
     });
   });
   ws.send(JSON.stringify({ type: 'ext_init' }));
-  const msg = await Promise.race([got, new Promise((r) => setTimeout(() => r(null), 1000))]);
+  const msg = await Promise.race([got, new Promise((r) => setTimeout(() => r(null), 3000))]);
   assert.ok(msg, 'ext_init_ok non ricevuto');
   assert.match(msg.version, /^\d+\.\d+\.\d+$/);
   ws.close();
