@@ -5,24 +5,60 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
+  <header class="hdr">
+    <img src="icons/icon-48.png" alt="" class="logo">
     <h1>Chrome Bridge</h1>
-    <div class="status">
-      <div id="indicator" class="indicator disconnected"></div>
-      <span id="status-text">Disconnected</span>
-    </div>
-    <div id="us-warning" class="warning" hidden>
-      ⚠ execute_js and wait_for(function) need "Allow user scripts":<br>
-      chrome://extensions → Chrome Bridge → Details → Allow user scripts
-    </div>
-    <p class="info">WebSocket: <span id="ws-url">ws://localhost:8765</span></p>
-    <div class="config">
-      <label>Port <input type="number" id="port" min="1" max="65535"></label>
-      <label>Token <input type="password" id="token" placeholder="(none)"></label>
-      <label class="check"><input type="checkbox" id="instrument"> Capture page console &amp; metrics</label>
-      <button id="save">Save &amp; Reconnect</button>
-    </div>
+    <span class="ver" id="versions">v—</span>
+  </header>
+
+  <div class="status-row">
+    <span id="indicator" class="dot disconnected"></span>
+    <b id="status-text">Disconnesso</b>
+    <span class="ws-url" id="ws-url">ws://localhost:8765</span>
   </div>
+
+  <div id="us-warning" class="warn" hidden>
+    <b>⚠ Script utente disattivati</b>
+    <span>execute_js e wait_for(function) non sono disponibili senza il permesso dedicato.</span>
+    <button id="us-fix" class="fixbtn">Apri impostazioni →</button>
+  </div>
+
+  <section class="card" id="page-card">
+    <div class="card-title">Pagina corrente</div>
+    <div id="page-body">
+      <div class="kv"><span>Errori console</span><b id="pg-errors">—</b></div>
+      <div class="kv"><span>LCP / CLS</span><b id="pg-vitals">—</b></div>
+      <div class="kv"><span>Stack</span><b id="pg-stack">—</b></div>
+      <div class="hint" id="pg-hint" hidden>Attiva "Capture console &amp; metrics" (⚙) per errori e metriche.</div>
+    </div>
+    <div id="page-unavailable" hidden>Non disponibile su questa pagina.</div>
+  </section>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="st-calls">0</div><div class="l">tool call</div></div>
+    <div class="stat"><div class="n small" id="st-last">—</div><div class="l" id="st-last-ago">ultimo</div></div>
+    <div class="stat"><div class="n" id="st-errors">0</div><div class="l">errori</div></div>
+  </div>
+
+  <div id="err-list" class="card" hidden>
+    <div class="card-title">Errori recenti</div>
+    <ul id="err-items"></ul>
+  </div>
+
+  <div class="acts">
+    <button id="reconnect" class="abtn">↻ Riconnetti</button>
+    <button id="diagnostics" class="abtn">⧉ Diagnostica</button>
+    <button id="toggle-config" class="abtn icon" title="Impostazioni">⚙</button>
+  </div>
+
+  <div class="config" id="config" hidden>
+    <label>Porta <input type="number" id="port" min="1" max="65535"></label>
+    <label>Token <input type="password" id="token" placeholder="(nessuno)"></label>
+    <label class="check"><input type="checkbox" id="instrument"> Capture console &amp; metrics</label>
+    <button id="save" class="abtn primary">Salva e riconnetti</button>
+  </div>
+
+  <script src="telemetry.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
