@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Registrazione</title></head>
+<body>
+  <h1>Registrazione cliente</h1>
+  <form id="reg" onsubmit="event.preventDefault(); done();">
+    <label>Nome <input type="text" id="nome" required></label><br>
+    <label>Email <input type="email" id="email" required></label><br>
+    <label>Telefono <input type="tel" id="telefono"></label><br>
+    <label>Regione
+      <select id="regione" required>
+        <option value="">--</option>
+        <option>Calabria</option>
+        <option>Lazio</option>
+        <option>Lombardia</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" id="privacy" required> Accetto la privacy policy</label><br>
+    <label><input type="checkbox" id="newsletter"> Iscrivimi alla newsletter</label><br>
+    <button type="submit">Registra</button>
+  </form>
+  <div id="success" style="display:none">
+    <h2>Registrazione completata</h2>
+    <p id="recap"></p>
+  </div>
+  <script>
+    function done() {
+      if (!document.getElementById('privacy').checked) return;
+      document.getElementById('reg').style.display = 'none';
+      const s = document.getElementById('success');
+      s.style.display = 'block';
+      document.getElementById('recap').textContent =
+        `Registrato: ${document.getElementById('nome').value} <${document.getElementById('email').value}> — ` +
+        `${document.getElementById('regione').value}, newsletter: ${document.getElementById('newsletter').checked ? 'sì' : 'no'}`;
+    }
+  </script>
+</body>
+</html>
