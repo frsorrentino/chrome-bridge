@@ -128,3 +128,18 @@ test('stop() impedisce promozione successiva', async () => {
   });
   assert.equal(failed, true);
 });
+
+test('dopo ext_init il server risponde ext_init_ok con version', async () => {
+  const ws = await connect({ origin: 'chrome-extension://abcdefghijklmnop' });
+  const got = new Promise((resolve) => {
+    ws.on('message', (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'ext_init_ok') resolve(msg);
+    });
+  });
+  ws.send(JSON.stringify({ type: 'ext_init' }));
+  const msg = await Promise.race([got, new Promise((r) => setTimeout(() => r(null), 1000))]);
+  assert.ok(msg, 'ext_init_ok non ricevuto');
+  assert.match(msg.version, /^\d+\.\d+\.\d+$/);
+  ws.close();
+});

@@ -14,7 +14,7 @@
  */
 
 import WebSocket, { WebSocketServer } from 'ws';
-import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType } from './protocol.js';
+import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType, VERSION } from './protocol.js';
 
 export class WSManager {
   constructor(port = DEFAULT_PORT, opts = {}) {
@@ -230,6 +230,7 @@ export class WSManager {
 
   _setupChromeClient(ws) {
     console.error('[chrome-bridge] Chrome extension connected');
+    try { ws.send(JSON.stringify({ type: 'ext_init_ok', version: VERSION })); } catch {}
 
     if (this.client) {
       console.error('[chrome-bridge] Replacing existing Chrome connection');
