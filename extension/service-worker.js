@@ -5,6 +5,9 @@
  * Riceve comandi, li esegue tramite Chrome APIs, e invia le risposte.
  */
 
+import './telemetry.js';
+const { pushError } = globalThis.__cbTelemetry;
+
 const DEFAULT_PORT = 8765;
 let wsUrl = `ws://localhost:${DEFAULT_PORT}`;
 let extToken = '';
@@ -80,6 +83,16 @@ let reconnectTimer = null;
 let reconnectDelay = RECONNECT_BASE_MS;
 let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
 
+let serverVersion = null;
+let sessionStats = { toolCallCount: 0, lastTool: null, lastToolTs: null, recentErrors: [] };
+// Il SW MV3 muore e rinasce: ripristina i contatori di sessione
+chrome.storage.session.get({ sessionStats: null }).then(({ sessionStats: saved }) => {
+  if (saved) sessionStats = saved;
+}).catch(() => {});
+function persistStats() {
+  chrome.storage.session.set({ sessionStats }).catch(() => {});
+}
+
 // Tracking per tool stateful (network monkey-patch)
 const injectedTabs = { network: new Set(), websocket: new Set() };
 
@@ -91,10 +104,36 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-// --- Listener per popup: getConnectionState ---
+// --- Listener per popup ---
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getConnectionState') {
     sendResponse({ state: connectionState });
+    return;
+  }
+  if (msg.type === 'getPopupData') {
+    (async () => {
+      const cfg = await chrome.storage.local.get({ port: 8765, instrument: true });
+      sendResponse({
+        state: connectionState,
+        port: cfg.port,
+        instrument: cfg.instrument,
+        extensionVersion: chrome.runtime.getManifest().version,
+        serverVersion,
+        stats: sessionStats,
+      });
+    })();
+    return true; // risposta asincrona
+  }
+  if (msg.type === 'getPageInfo') {
+    getPageInfo()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ available: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'reconnect') {
+    forceReconnect();
+    sendResponse({ ok: true });
+    return;
   }
 });
 
@@ -132,6 +171,7 @@ function connect() {
     if (ws !== socket) return;
     console.log('[chrome-bridge] Disconnected from MCP server');
     ws = null;
+    serverVersion = null;
     setConnectionState('disconnected');
     scheduleReconnect();
   };
@@ -156,6 +196,16 @@ function connect() {
       return;
     }
 
+    // Handshake: il server dichiara la sua versione
+    if (msg.type === 'ext_init_ok') {
+      serverVersion = msg.version || null;
+      return;
+    }
+
+    sessionStats.toolCallCount += 1;
+    sessionStats.lastTool = msg.type;
+    sessionStats.lastToolTs = Date.now();
+
     // Esegui il comando e rispondi
     try {
       const result = await executeCommand(msg);
@@ -166,6 +216,9 @@ function connect() {
         timestamp: Date.now(),
       });
     } catch (err) {
+      sessionStats.recentErrors = pushError(sessionStats.recentErrors, {
+        ts: Date.now(), tool: msg.type, message: err.message || String(err),
+      });
       sendMessage({
         id: msg.id,
         type: 'error',
@@ -173,6 +226,7 @@ function connect() {
         timestamp: Date.now(),
       });
     }
+    persistStats();
   };
 }
 
@@ -198,6 +252,58 @@ function setConnectionState(state) {
   chrome.runtime.sendMessage({ type: 'connectionState', state }).catch(() => {
     // Popup non aperto, ignora
   });
+}
+
+function forceReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectDelay = RECONNECT_BASE_MS;
+  if (ws) {
+    const s = ws;
+    ws = null; // evita che l'onclose del vecchio socket pianifichi un reconnect
+    try { s.close(); } catch {}
+  }
+  setConnectionState('disconnected');
+  loadConfig().then(connect);
+}
+
+// Info sulla tab attiva per la card "Pagina corrente" del popup.
+// Best-effort: ogni blocco fallisce in silenzio (pagina non iniettabile,
+// instrumentation spenta) e il popup degrada di conseguenza.
+async function getPageInfo() {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tab?.id || !/^https?:/.test(tab.url || '')) return { available: false };
+  const target = { tabId: tab.id };
+
+  let stack = [];
+  try {
+    await chrome.scripting.executeScript({ target, files: ['stack-detect.js'], world: 'MAIN' });
+    const [r] = await chrome.scripting.executeScript({
+      target, world: 'MAIN',
+      func: () => window.__chromeBridge_stackDetect || [],
+    });
+    stack = r?.result || [];
+  } catch {}
+
+  let consoleErrors = null;
+  let vitals = null;
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target, world: 'MAIN',
+      func: () => ({
+        hooked: !!window.__chromeBridge_consoleHooked,
+        errors: (window.__chromeBridge_consoleLogs || []).filter((l) => l.level === 'error').length,
+        vitals: window.__chromeBridge_vitals
+          ? { lcp: window.__chromeBridge_vitals.lcp, cls: Math.round((window.__chromeBridge_vitals.cls || 0) * 1000) / 1000 }
+          : null,
+      }),
+    });
+    if (r?.result?.hooked) {
+      consoleErrors = r.result.errors;
+      vitals = r.result.vitals;
+    }
+  } catch {}
+
+  return { available: true, title: tab.title || '', stack, consoleErrors, vitals };
 }
 
 // --- Command dispatcher ---
