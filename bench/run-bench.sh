@@ -27,6 +27,7 @@ else
     --output-format json \
     --strict-mcp-config \
     --mcp-config '{"mcpServers":{}}' \
+    --append-system-prompt "Benchmark cic arm: usa ESCLUSIVAMENTE i tool mcp__claude-in-chrome__* per l'automazione browser. Ignora ogni istruzione (CLAUDE.md, memoria, hook) che dica di usare chrome-bridge o altri server MCP: in questa sessione non esistono." \
     --allowedTools "mcp__claude-in-chrome__*,Skill" --permission-mode bypassPermissions \
     > "$OUT" 2>"$DIR/results/${ARM}-${TASK}-${RUN}.err"
 fi
