@@ -6,7 +6,7 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
-Bridge your browser to Claude Code: 56 web-dev automation tools over a local WebSocket. Cross-platform, ChromeOS included.
+Bridge your browser to Claude Code: 59 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
 
 ## Category
 
@@ -24,7 +24,9 @@ This extension has a single purpose: it lets the user's own Claude Code CLI (run
 
 Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your real, logged-in Chrome browser. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension.
 
-56 specialized web-development tools:
+Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
+
+59 specialized web-development tools:
 
 • Navigation & tabs — open, close, navigate, list tabs
 • DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, modify the DOM
