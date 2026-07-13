@@ -28,7 +28,7 @@ There are several browser automation tools for Claude Code. Here's how they comp
 | **Breakpoints / profiling** | No | No | Yes (+ heap snapshots) | No |
 | **Headless / CI** | Yes (launch mode) | No | Yes | Yes |
 
-**In short:** Chrome Bridge is the only option that automates your real, logged-in Chrome on ChromeOS, ships 59 specialized web-development tools, and runs entirely self-hosted with no paid plan. It's also the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording and no CDP-level debugging (breakpoints/profiling).
+**In short:** versus Claude in Chrome specifically, Chrome Bridge is both **more powerful** — 59 specialized tools vs ~20, adding audits, network mocking, visual regression, DevTools-grade performance/DOM inspection, headless CI and ChromeOS support — and **more efficient**: [~2.3–2.8× fewer turns and tokens](bench/RESULTS.md) on the same tasks, with no paid plan required. Against the wider field it's the only option that reaches your real, logged-in Chrome on ChromeOS, and the only one with visual regression (`screenshot_diff`) and header-level network mocking without CDP. The tradeoff is no GIF recording and no CDP-level breakpoints/profiling.
 
 ## Quickstart
 
@@ -49,7 +49,7 @@ Claude Code calls `navigate` (which returns the page's clickable elements), `scr
 - **Small default surface**: 30 core tools ≈ 3.9k tokens of schemas (Playwright MCP: ~4.6k); audits, visual, network, storage, DOM and file groups load on demand via `--caps`.
 - **Act from the result**: `navigate` and `find_text` attach a capped preview of nearby interactive elements with refs — short element handles like `n1` that `click`/`type_text`/`hover` accept directly, so the agent acts without discovery turns. Actions report a `page_changed` delta only when url/title actually change.
 - **Capped, compact outputs**: listings are tab-separated lines, every text output is capped by default, screenshots are downscaled to ≤1568px.
-- **Measured**: in our two-task benchmark (form fill + 1500-row catalog, Claude Code headless, July 2026) this cut end-to-end cost by ~44% versus the previous release — ahead of Playwright MCP on the form task, within ~11% on the catalog.
+- **Measured vs Claude in Chrome**: in a same-model, two-task benchmark (form fill + 1500-row catalog lookup, Claude Sonnet 5 headless, July 2026) Chrome Bridge used **~2.3–2.8× fewer turns, tokens and dollars** than Claude in Chrome on *both* tasks — structured DOM refs beat the screenshot→coordinate loop, and server-side table filtering (`extract_table where`) turns "find one row in 1500" into a single call. Full numbers and method: [`bench/RESULTS.md`](bench/RESULTS.md).
 - **Zero-token escape hatches**: the [CLI](#cli-token-efficient-alternative-for-batch-work) skips MCP schemas entirely and pipes output through `grep`/`jq` before it reaches the model; recorded flows [replay](#launch-mode-headless--ci) without any model in the loop.
 
 ## Highlights in 1.6.0
