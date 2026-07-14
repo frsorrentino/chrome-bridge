@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0 (unreleased)
+## 1.7.0 (unreleased — extension update pending Chrome Web Store submission)
 
 ### Popup ridisegnato
 - Tema automatico dark/light (`prefers-color-scheme`), layout 320px.
@@ -12,7 +12,7 @@
 ### Server
 - Handshake `ext_init_ok { version }` in risposta a `ext_init`: il popup mostra versione extension e server affiancate.
 
-## 1.6.0 (unreleased — server available from source; extension update pending Chrome Web Store review)
+## 1.6.0 (2026-07-14 — published on the Chrome Web Store)
 
 - **Launch mode — headless & CI**: `node server/index.js --launch [--headless]` starts a dedicated Chromium with an ephemeral profile and the extension loaded unpacked, on an ephemeral WS port (no conflict with your everyday bridge). Isolated, reproducible sessions; combine with `replay` + `assert` for zero-token CI smoke tests. In launch mode `execute_js`/`wait_for(function)` run through a `new Function` fallback (no userScripts toggle in a fresh profile) — pages with a strict CSP need a `network_rules` header strip first. The Web Store package is unaffected: the fallback only activates in launch-mode copies.
 - **Capability groups**: the MCP server registers the 30 core tools by default. Enable more with `--caps audits,visual,network,storage,dom,files` (or `CHROME_BRIDGE_CAPS`); `--caps all` restores the full 59.

@@ -1,6 +1,6 @@
 # Foglio copia-incolla — submission CWS nell'ordine esatto del form
 
-Apri https://chrome.google.com/webstore/devconsole → **+ New item** → trascina `dist/chrome-bridge-extension-1.5.0.zip`.
+Apri https://chrome.google.com/webstore/devconsole → **+ New item** → trascina `dist/chrome-bridge-extension-1.7.0.zip`.
 Poi segui questo foglio dall'alto in basso. Ogni blocco tra righe ``` va incollato integro.
 
 ---
@@ -16,7 +16,7 @@ Chrome Bridge for Claude Code
 **Summary** (precompilato dal manifest, verifica):
 
 ```
-Bridge your browser to Claude Code: 56 web-dev automation tools over a local WebSocket. Cross-platform, ChromeOS included.
+Bridge your browser to Claude Code: 59 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
 ```
 
 **Description:**
@@ -24,7 +24,9 @@ Bridge your browser to Claude Code: 56 web-dev automation tools over a local Web
 ```
 Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your real, logged-in Chrome browser. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension.
 
-56 specialized web-development tools:
+Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
+
+59 specialized web-development tools:
 
 • Navigation & tabs — open, close, navigate, list tabs
 • DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, modify the DOM
