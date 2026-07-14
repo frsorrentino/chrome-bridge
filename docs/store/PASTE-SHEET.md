@@ -1,6 +1,7 @@
 # Foglio copia-incolla — submission CWS nell'ordine esatto del form
 
-Apri https://chrome.google.com/webstore/devconsole → **+ New item** → trascina `dist/chrome-bridge-extension-1.7.0.zip`.
+**Prima submission** (item nuovo): https://chrome.google.com/webstore/devconsole → **+ New item** → trascina `dist/chrome-bridge-extension-1.7.0.zip`.
+**Update** (item già pubblicato, es. 1.6.0 → 1.7.0): apri l'item → tab **Package** → **Upload new package** → `dist/chrome-bridge-extension-1.7.0.zip`. Il listing sotto resta invariato tranne i blocchi aggiornati (Summary/Description con 59 tool + riga token-efficient).
 Poi segui questo foglio dall'alto in basso. Ogni blocco tra righe ``` va incollato integro.
 
 ---
