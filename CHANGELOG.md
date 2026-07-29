@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8.0 (unreleased)
+## 1.8.0 — 2026-07-29
 
 Correttezza, sicurezza e onestà dei numeri, dopo un audit a tappeto
 (`docs/ANALISI-2026-07-25.md`).
@@ -116,7 +116,7 @@ Correttezza, sicurezza e onestà dei numeri, dopo un audit a tappeto
   scritta e `aggregate.py` che segnala run scartate e confronti non appaiati. Il
   risultato sul task `form` (2,75× turni, 2,28× costo) è confermato.
 
-## 1.7.0 (unreleased — extension update pending Chrome Web Store submission)
+## 1.7.0 — pubblicata sul Chrome Web Store (listing: "Version 1.7.0")
 
 ### Popup ridisegnato
 - Tema automatico dark/light (`prefers-color-scheme`), layout 320px.
