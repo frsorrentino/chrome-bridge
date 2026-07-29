@@ -84,14 +84,33 @@ test('monitor_network: limit applicato anche al formato HAR', async () => {
   assert.equal(out.log.entries.length, 5);
 });
 
-test('truncation globale a 20000 char sui tool senza max_length', async () => {
+test('oltre il cap si riducono gli ELEMENTI e il JSON resta parsabile', async () => {
   const elements = Array.from({ length: 500 }, (_, i) => ({
     tagName: 'div', id: `el-${i}`, textContent: 'x'.repeat(100),
   }));
   const handlers = setup({ query_dom: { count: 500, elements } });
   const text = textOf(await handlers.get('query_dom')({ selector: 'div' }));
-  assert.ok(text.length < 20200, `output ${text.length} char, atteso troncato ~20000`);
-  assert.ok(text.includes('[truncated'), 'manca marker di troncamento');
+  assert.ok(text.length <= 20200, `output ${text.length} char, atteso sotto il cap`);
+  // Il taglio per carattere produceva JSON non parsabile ("Bad control
+  // character in string literal"): il modello riceveva un frammento inutile.
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.truncated, true, 'il payload deve dichiarare di essere ridotto');
+  assert.equal(parsed.total, 500);
+  assert.ok(parsed.shown > 0 && parsed.shown < 500, `shown=${parsed.shown}`);
+  assert.equal(parsed.elements.length, parsed.shown);
+});
+
+test('il messaggio di troncamento non suggerisce max_length dove non esiste', async () => {
+  const handlers = setup({ read_page: { text: 'z'.repeat(60000) } });
+  const text = textOf(await handlers.get('read_page')({ mode: 'text', max_length: 30000 }));
+  // read_page espone max_length: qui il suggerimento è corretto.
+  assert.ok(text.includes('use max_length to get less data'), 'read_page deve suggerire max_length');
+
+  // get_page_info non espone max_length: il rimedio deve indicare altro.
+  const noParam = setup({ get_page_info: { meta: { title: 'x'.repeat(60000) } } });
+  const info = textOf(await noParam.get('get_page_info')({}));
+  assert.ok(!info.includes('use max_length to get less data'), 'non deve suggerire un parametro inesistente');
+  assert.ok(info.includes('this tool has no max_length'), `rimedio assente: ${info.slice(-160)}`);
 });
 
 test('execute_js: max_length esplicito rispettato', async () => {

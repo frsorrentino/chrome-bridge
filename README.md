@@ -1,8 +1,8 @@
 # Chrome Bridge
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-95%20unit%20%2B%2025%20e2e-brightgreen) ![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-109%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
-**Chrome Bridge is an MCP server that connects Claude Code to your real, logged-in Chrome browser — 2.3–2.8× more token-efficient and ~3× the toolset of the official "Claude in Chrome" extension, with no paid plan.**
+**Chrome Bridge is an MCP server that connects Claude Code to your real, logged-in Chrome browser — measured 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome" extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
 By using a local WebSocket bridge and a specialized Chrome extension, Chrome Bridge provides 59 web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) and a dedicated headless instance for CI. It is self-hosted, local-only, and requires no paid plan.
 
@@ -10,18 +10,25 @@ By using a local WebSocket bridge and a specialized Chrome extension, Chrome Bri
 
 Chrome Bridge is designed to be both more efficient and more powerful than Anthropic's official browser extension.
 
-### 1. Directional Efficiency Benchmark
-In a same-model, two-task benchmark (Claude Sonnet 5, headless, July 2026, n=2 per cell), Chrome Bridge used **2.3–2.8× fewer turns, tokens, and dollars** than Claude in Chrome.
+### 1. Efficiency Benchmark
+Same model (Claude Sonnet 5), same task, paired runs on the same date and versions, **all runs included** (n=2 per arm — a small sample: direction, not precision):
 
-| Task | Chrome Bridge | Claude in Chrome | Savings |
+| Task | Chrome Bridge | Claude in Chrome | Ratio |
 | :--- | :--- | :--- | :--- |
-| **Form fill task** | 6.0 turns / $0.21 | 16.5 turns / $0.48 | **~2.3x** |
-| **1500-row table lookup** | 4.0 turns / $0.18 | 11.0 turns / $0.41 | **~2.3x** |
+| **Form fill** | 6.0 turns (6-6) / $0.211 | 16.5 turns (16-17) / $0.481 | **2.75× turns, 2.28× cost** |
+| **1500-row table lookup** | see note | not re-run on this version | *not published* |
 
-**Why it wins:**
+On the table-lookup task, an `extract_table` fix took our side from 13.5 to 4.0
+turns, but the Claude-in-Chrome arm has not been re-run on that version — so no
+ratio is published for it. The inclusion rule, every raw run (including the
+unfavourable ones) and the harness limits are in
+[bench/RESULTS.md](bench/RESULTS.md).
+
+**Why it wins — it makes fewer round trips, not smaller payloads:**
 - **Compact References:** The agent acts on short element handles (e.g., `n1`, `n2`) returned by `navigate` or `get_interactives` instead of the slow screenshot → read-coordinates → click loop.
-- **Server-Side Processing:** Filtering and paginating large tables happens server-side (`extract_table` with `where`). The extension-to-model payload is the token bottleneck; Chrome Bridge moves the heavy lifting to localhost.
-- *Full method and data available in [bench/RESULTS.md](bench/RESULTS.md).*
+- **Batching:** `fill_form` fills N fields and submits in one call — measured, 3 calls instead of 9 for the same form, at the same byte count.
+- **Server-Side Processing:** Filtering large tables happens server-side (`extract_table` with `where`): 236 bytes to find one row among 1500, against 50,070 bytes for `read_page`. The extension-to-model payload is the token bottleneck; Chrome Bridge moves the heavy lifting to localhost.
+- **Honest caveat:** per *turn*, Chrome Bridge costs slightly more than Claude in Chrome (41,985 vs 36,613 cache-read tokens; $0.0373 vs $0.0337). The win is in the number of turns.
 
 ### 2. Feature Comparison
 Chrome Bridge ships 59 specialized tools (30 core by default) compared to ~20 in Claude in Chrome. It is also the only automation that drives the real host Chrome on ChromeOS/Crostini.
@@ -47,7 +54,7 @@ git clone git@github.com:frsorrentino/chrome-bridge.git && cd chrome-bridge && .
 1. Load the extension: Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the `extension/` folder.
 2. Restart Claude Code.
 
-> On **ChromeOS/Crostini**, install the published extension from the Chrome Web Store instead of loading it unpacked — a filesystem-loaded extension is dropped on every reboot (the container isn't mounted when Chrome starts). See the [project homepage](https://frsorrentino.github.io/chrome-bridge/) for the store link.
+> On **ChromeOS/Crostini**, install the published extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb) instead of loading it unpacked — a filesystem-loaded extension is dropped on every reboot (the container isn't mounted when Chrome starts).
 
 ### Example Session
 > *"Open localhost:3000, run an accessibility audit, and find the 'Sign Up' button"*
@@ -121,10 +128,13 @@ claude mcp add --scope user chrome-bridge node /path/to/server/index.js
 
 ## Configuration
 
-Configure the server via environment variables:
+Configure the server via environment variables (or the matching CLI flags):
 - `CHROME_BRIDGE_PORT`: Default `8765`.
-- `CHROME_BRIDGE_TOKEN`: Optional shared secret for WebSocket security.
-- `CHROME_BRIDGE_CAPS`: Tool groups to load (`core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, or `all`).
+- `CHROME_BRIDGE_HOST` / `--host`: Bind address, default `127.0.0.1`. Set to `0.0.0.0` **only** where the browser lives outside the container (ChromeOS/Crostini port-forward) — and pair it with a token.
+- `CHROME_BRIDGE_TOKEN`: Shared secret required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind is not loopback.
+- `CHROME_BRIDGE_CAPS` / `--caps`: Tool groups to load (`core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, or `all`). `install.sh` registers with `all`; the bare server defaults to `core` (30 tools). `get_status` reports `caps_active` and `caps_available`.
+
+Run `node tools/measure-schema.mjs` to see the exact schema cost of the active set.
 
 ## CLI
 
@@ -146,13 +156,30 @@ Perfect for CI smoke tests using `session_record` + `replay`. Note: `execute_js`
 
 ## Security
 
-- **Origin Validation**: Extension connections are only accepted from the `chrome-extension://` origin.
-- **Relay Security**: Secondary MCP instances (relays) must connect via loopback.
-- **Shared Token**: Use `CHROME_BRIDGE_TOKEN` to gate access on untrusted networks (especially on Crostini where the server binds `0.0.0.0`).
+- **Loopback by default**: the WebSocket server binds `127.0.0.1`. Exposing it to the network is opt-in via `CHROME_BRIDGE_HOST`/`--host`.
+- **Origin validation**: extension connections are only accepted from a `chrome-extension://` origin, and — with a loopback bind — only from loopback.
+- **Token on both handshakes**: `CHROME_BRIDGE_TOKEN`, when set, is required for `ext_init` *and* `relay_init`. Without it, any local process could act as a relay and reach `execute_js` in your authenticated browser session.
+- **Relay security**: secondary MCP instances must connect via loopback and are acknowledged with `relay_init_ok`, so a foreign process holding the port fails fast instead of timing out per command.
+- **What is *not* protected**: page content reaches the model unfiltered, so a hostile page's text is untrusted input; `get_storage`, `session_fixture`, HAR exports and screenshots are **not** redacted and may carry cookies, tokens or personal data. Do not point the automation at pages holding secrets you would not paste into a chat.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `Chrome extension not connected` | Extension disabled, or its port differs from the server's. The error names the actual host/port; check them in the popup (⚙). |
+| Port 8765 already in use | Expected: a second MCP session becomes a **relay** and shares the one bridge. Set `CHROME_BRIDGE_PORT` for a separate one. |
+| `Port N is held by a process that is not chrome-bridge` | Something else owns the port. Free it or change `CHROME_BRIDGE_PORT`. |
+| `execute_js` fails | Enable **Allow user scripts** in `chrome://extensions` → Chrome Bridge → Details (Chrome 138+; on 135-137 enable Developer Mode). |
+| `read_console` returns a `note=Instrumentation not loaded` | The page was opened before the extension, "Capture console & metrics" is off, or the page is not injectable (`chrome://`). Reload the page. |
+| Screenshot times out | On ChromeOS a fully occluded window stops producing frames; captures fail after 10s. Bring the window forward. |
+| Commands work then stop after a while | The MV3 service worker restarted and in-memory state (network log, diff baselines, HTTP auth) was reset. Re-run the monitoring call. |
+| Extension is dropped on every ChromeOS reboot | Install from the Chrome Web Store instead of Load unpacked: the Crostini filesystem isn't mounted when Chrome starts. |
+| Tool missing from the list | It's in an opt-in capability group. Check `get_status` → `caps_available`, then set `CHROME_BRIDGE_CAPS=all`. |
 
 ## Tests
-- **Unit**: `npm run test:unit` (95 tests).
-- **E2E**: `node test/test-devtools.js` (25 tests, requires Chrome).
+- **Unit**: `npm test` (Chrome-free, ~22s).
+- **E2E**: `npm run test:e2e` (requires Chrome and a connected extension).
+- **Schema cost**: `npm run measure`.
 
 ## License
 MIT

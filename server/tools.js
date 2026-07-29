@@ -24,18 +24,76 @@ const RECORDINGS_DIR = process.env.CHROME_BRIDGE_RECORD_DIR || join(homedir(), '
 // Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
 const RECORD_EXCLUDE = new Set([MessageType.GET_TABS]);
 
-function truncateText(text, max) {
+// `hint` è il parametro REALE del tool chiamante che riduce i dati. Suggerire
+// max_length quando 56 tool su 59 non lo espongono mandava il modello a
+// ritentare con un argomento inesistente: un turno bruciato per un consiglio
+// sbagliato.
+function truncateText(text, max, hint = null) {
   if (typeof text !== 'string' || text.length <= max) return text;
-  return text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — use max_length to raise the limit]`;
+  const remedy = hint
+    ? `use ${hint} to get less data`
+    : "narrow the request (limit / max_rows / scope / selector) — this tool has no max_length";
+  return text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — ${remedy}]`;
 }
 
 // Limite di default sull'output testuale di ogni tool: protegge il contesto
 // del client MCP da payload fuori scala (es. buffer console/network pieni).
 const DEFAULT_MAX_OUTPUT = 20000;
 
-/** Serializza compatto (niente pretty-print: solo token sprecati per il modello) e tronca. */
-function jsonText(data, max = DEFAULT_MAX_OUTPUT) {
-  return truncateText(JSON.stringify(data), max);
+/**
+ * Serializza compatto (niente pretty-print: solo token sprecati per il modello).
+ *
+ * Se il payload supera il cap, si riducono gli ELEMENTI e non i caratteri:
+ * tagliare la stringa a metà di un valore produceva JSON non parsabile su ogni
+ * path format=json/har (verificato: `JSON.parse` falliva con "Bad control
+ * character in string literal"). Qui il risultato resta sempre valido e dichiara
+ * quanto è stato omesso.
+ */
+function jsonText(data, max = DEFAULT_MAX_OUTPUT, hint = null) {
+  const text = JSON.stringify(data);
+  if (text == null || text.length <= max) return text;
+
+  // Caso array puro
+  if (Array.isArray(data)) {
+    const kept = fitArray(data, max, (items) => JSON.stringify({ shown: items.length, total: data.length, items }));
+    return JSON.stringify({ shown: kept.length, total: data.length, truncated: true, hint: hint ?? undefined, items: kept });
+  }
+
+  // Caso oggetto con un array dominante (requests, messages, violations, rows…)
+  if (data && typeof data === 'object') {
+    let key = null;
+    let best = -1;
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(v) && v.length > best) { key = k; best = v.length; }
+    }
+    if (key) {
+      const full = data[key];
+      const kept = fitArray(full, max, (items) => JSON.stringify({ ...data, [key]: items }));
+      return JSON.stringify({
+        ...data,
+        [key]: kept,
+        shown: kept.length,
+        total: full.length,
+        truncated: kept.length < full.length,
+        ...(hint && kept.length < full.length ? { hint } : {}),
+      });
+    }
+  }
+
+  // Nessun array da ridurre: resta il taglio testuale, ma con il rimedio giusto.
+  return truncateText(text, max, hint);
+}
+
+/** Il più lungo prefisso di `items` la cui serializzazione sta sotto `max` (ricerca binaria). */
+function fitArray(items, max, serialize) {
+  if (serialize(items).length <= max) return items;
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (serialize(items.slice(0, mid)).length <= max) lo = mid; else hi = mid - 1;
+  }
+  return items.slice(0, lo);
 }
 
 /** Una riga (oggetto colonna→valore o array di celle) soddisfa il filtro where. */
@@ -141,6 +199,9 @@ for (const [group, names] of Object.entries(TOOL_CAPS)) {
  */
 export function registerTools(server, wsManager, caps = 'all') {
   const startedAt = Date.now();
+  const activeCaps = caps === 'all'
+    ? ['core', ...Object.keys(TOOL_CAPS)]
+    : ['core', ...String(caps).split(',').map((s) => s.trim()).filter((s) => s && s !== 'core')];
 
   // Filtro capability: i tool opt-in fuori dai gruppi attivi non vengono registrati
   if (caps !== 'all') {
@@ -164,17 +225,37 @@ export function registerTools(server, wsManager, caps = 'all') {
   // Recording attivo: { name, file }. I comandi (senza tab_id, che in un
   // replay sarebbe stale) vengono appesi come jsonl replayabile dal CLI.
   let recording = null;
+  // Gli append del recording erano fire-and-forget: un comando registrato
+  // poteva non essere ancora sul disco quando session_record stop tornava, e
+  // uno step mancante rende un replay silenziosamente sbagliato. La catena
+  // serializza le scritture e stop() la attende.
+  let recordChain = Promise.resolve();
   // >0 mentre un tool composito (assert) esegue query interne che nel
   // recording sarebbero rumore: registra il tool, non le sue query.
   let recordSuppressed = 0;
 
-  const send = (type, params = {}) => {
+  const send = async (type, params = {}) => {
     if (recording && !recordSuppressed && !RECORD_EXCLUDE.has(type)) {
       const { tab_id: _tab, ...rest } = params;
-      appendFile(recording.file, JSON.stringify({ command: type, params: rest }) + '\n').catch(() => {});
+      const file = recording.file;
+      const line = JSON.stringify({ command: type, params: rest }) + '\n';
+      recordChain = recordChain.then(() => appendFile(file, line)).catch(() => {});
     }
-    if (params.tab_id == null && sessionTabId != null) params = { ...params, tab_id: sessionTabId };
-    return wsManager.sendCommand(type, params);
+    const implicitTab = params.tab_id == null && sessionTabId != null;
+    if (implicitTab) params = { ...params, tab_id: sessionTabId };
+    try {
+      return await wsManager.sendCommand(type, params);
+    } catch (err) {
+      // Se l'utente chiude a mano la tab di sessione, ogni comando successivo
+      // fallisce fino al prossimo navigate. Un solo ritentativo sulla tab
+      // attiva salva un turno intero al modello.
+      const gone = /No tab with id|No active tab|No tab found/i.test(err?.message ?? '');
+      if (!gone || !implicitTab) throw err;
+      sessionTabId = null;
+      const { tab_id: _drop, ...retry } = params;
+      const data = await wsManager.sendCommand(type, retry);
+      return data;
+    }
   };
 
   // Mappa ref → selector per tab, popolata da get_interactives.
@@ -242,8 +323,15 @@ export function registerTools(server, wsManager, caps = 'all') {
           text: jsonText({
             connected: wsManager.isConnected(),
             mode: wsManager.mode,
+            host: wsManager.host,
             port: wsManager.port,
             version: VERSION,
+            extension_version: wsManager.extVersion ?? null,
+            // Un agente che non trova accessibility_audit non aveva modo di
+            // scoprire che esiste ma è in un gruppo disattivato.
+            caps_active: activeCaps,
+            caps_available: ['core', ...Object.keys(TOOL_CAPS)],
+            session_tab_id: sessionTabId,
             uptime_sec: Math.round((Date.now() - startedAt) / 1000),
           }),
         }],
@@ -332,7 +420,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       return {
         content: [{
           type: 'text',
-          text: truncateText(JSON.stringify(data), max_length ?? DEFAULT_MAX_OUTPUT),
+          text: truncateText(JSON.stringify(data), max_length ?? DEFAULT_MAX_OUTPUT, 'max_length'),
         }],
       };
     }
@@ -409,7 +497,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       return {
         content: [{
           type: 'text',
-          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length ?? 50000),
+          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length ?? 50000, 'max_length'),
         }],
       };
     }
@@ -548,17 +636,24 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ clear, level, limit, format, tab_id }) => {
-      const data = await send(MessageType.READ_CONSOLE, { clear, level, tab_id });
+      // limit va all'estensione: taglia in pagina e cancella (con clear) solo
+      // ciò che ha restituito. Lo slice qui resta come fallback per estensioni
+      // più vecchie che ignorano il parametro.
+      const data = await send(MessageType.READ_CONSOLE, { clear, level, limit, tab_id });
       const all = data?.messages ?? [];
       const tail = all.slice(-(limit ?? 50));
       const total = data?.count ?? all.length;
+      const note = data?.note;
       if ((format ?? 'lines') === 'json') {
-        return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, messages: tail }) }] };
+        return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, ...(note ? { note } : {}), messages: tail }) }] };
       }
       return {
         content: [{
           type: 'text',
-          text: truncateText(consoleLines(tail, total), DEFAULT_MAX_OUTPUT),
+          text: truncateText(
+            (note ? `note=${note}\n` : '') + consoleLines(tail, total),
+            DEFAULT_MAX_OUTPUT,
+          ),
         }],
       };
     }
@@ -576,8 +671,10 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: z.number().optional(),
     },
     async ({ clear, source, format, limit, tab_id }) => {
-      const data = await send(MessageType.MONITOR_NETWORK, { clear, source, tab_id });
-      const { requests, count, ...rest } = data ?? {};
+      // limit va all'estensione (taglia in pagina, clear solo del restituito);
+      // lo slice qui resta come fallback per estensioni non ancora aggiornate.
+      const data = await send(MessageType.MONITOR_NETWORK, { clear, source, limit, tab_id });
+      const { requests, count, note, ...rest } = data ?? {};
       const all = requests ?? [];
       const tail = all.slice(-(limit ?? 100));
       const total = count ?? all.length;
@@ -585,13 +682,16 @@ export function registerTools(server, wsManager, caps = 'all') {
       if (fmt !== 'lines') {
         const out = fmt === 'har'
           ? toHar(tail)
-          : { ...rest, total, shown: tail.length, requests: tail };
+          : { ...rest, total, shown: tail.length, ...(note ? { note } : {}), requests: tail };
         return { content: [{ type: 'text', text: jsonText(out) }] };
       }
       return {
         content: [{
           type: 'text',
-          text: truncateText(networkLines(tail, total), DEFAULT_MAX_OUTPUT),
+          text: truncateText(
+            (note ? `note=${note}\n` : '') + networkLines(tail, total),
+            DEFAULT_MAX_OUTPUT,
+          ),
         }],
       };
     }
@@ -785,16 +885,28 @@ export function registerTools(server, wsManager, caps = 'all') {
       max_scrolls: z.number().optional().default(20),
       delay: z.number().optional().default(500).describe('ms between captures (min 500, Chrome quota)'),
       stitch: z.boolean().optional().default(true).describe('false = one image per viewport'),
+      max_segments: z.number().optional().default(3).describe('Images returned, from the top (each ≈2.7k image tokens); raise or use segment_offset for the rest'),
+      segment_offset: z.number().optional().default(0).describe('Skip the first N segments'),
       tab_id: z.number().optional(),
     },
-    async ({ max_scrolls, delay, stitch, tab_id }) => {
+    async ({ max_scrolls, delay, stitch, max_segments, segment_offset, tab_id }) => {
       const data = await send(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls, delay, stitch, tab_id });
       if (data && data.images) {
-        const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}${data.truncated ? ' (page continues beyond captured area — raise max_scrolls to capture more)' : ''}`;
+        // DEFAULT_MAX_OUTPUT protegge solo il testo: senza questo cap una sola
+        // chiamata su una pagina lunga restituiva 10 immagini (~4 MB base64,
+        // ~27k token) ed era l'unico output del set capace di saturare il contesto.
+        const off = Math.max(0, segment_offset ?? 0);
+        const cap = Math.max(1, max_segments ?? 3);
+        const slice = data.images.slice(off, off + cap);
+        const more = data.images.length - (off + slice.length);
+        const note = `Full page: ${data.totalCaptures} captures, ${data.images.length} segments (top→bottom), scrollHeight=${data.scrollHeight}`
+          + `, showing ${off + 1}-${off + slice.length}`
+          + (more > 0 ? ` — ${more} more: call with segment_offset=${off + slice.length}` : '')
+          + (data.truncated ? ' (page continues beyond captured area — raise max_scrolls to capture more)' : '');
         return {
           content: [
             { type: 'text', text: note },
-            ...data.images.map((img) => ({ type: 'image', data: img, mimeType: 'image/png' })),
+            ...slice.map((img) => ({ type: 'image', data: img, mimeType: 'image/png' })),
           ],
         };
       }
@@ -920,10 +1032,11 @@ export function registerTools(server, wsManager, caps = 'all') {
       subtree: z.boolean().optional().default(true),
       clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
       stop: z.boolean().optional().default(false).describe('Disconnect observer'),
+      limit: z.number().optional().default(100).describe('Most recent mutations; buffer 1000'),
       tab_id: z.number().optional(),
     },
-    async ({ selector, attributes, childList, characterData, subtree, clear, stop, tab_id }) => {
-      const data = await send(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, tab_id });
+    async ({ selector, attributes, childList, characterData, subtree, clear, stop, limit, tab_id }) => {
+      const data = await send(MessageType.WATCH_DOM, { selector, attributes, childList, characterData, subtree, clear, stop, limit, tab_id });
       return {
         content: [{
           type: 'text',
@@ -1134,12 +1247,13 @@ export function registerTools(server, wsManager, caps = 'all') {
       redirect_url: z.string().optional(),
       header: z.string().optional(),
       header_value: z.string().optional().describe('Omit to remove header'),
+      header_target: z.enum(['request', 'response']).optional().default('request').describe("response = strip content-security-policy / x-frame-options, inject CORS"),
       body: z.string().optional().describe('Response body (action=stub)'),
       status: z.number().optional().default(200).describe('action=stub'),
       content_type: z.string().optional().default('application/json').describe('action=stub'),
       resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional(),
     },
-    async ({ action, url_filter, redirect_url, header, header_value, body, status, content_type, resource_types }) => {
+    async ({ action, url_filter, redirect_url, header, header_value, header_target, body, status, content_type, resource_types }) => {
       if (action === 'stub') {
         if (!url_filter) throw new Error('url_filter is required for action=stub');
         if (body == null) throw new Error('body is required for action=stub');
@@ -1150,7 +1264,7 @@ export function registerTools(server, wsManager, caps = 'all') {
         return { content: [{ type: 'text', text: jsonText({ ...data, stub: id, stub_url }) }] };
       }
       if (action === 'clear') clearStubs();
-      const data = await send(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, resource_types });
+      const data = await send(MessageType.NETWORK_RULES, { action, url_filter, redirect_url, header, header_value, header_target, resource_types });
       if (action === 'list') {
         const stubsInfo = listStubs();
         if (stubsInfo.length) return { content: [{ type: 'text', text: jsonText({ ...data, stubs: stubsInfo }) }] };
@@ -1540,11 +1654,11 @@ export function registerTools(server, wsManager, caps = 'all') {
         return row;
       });
       if ((format ?? 'lines') === 'json') {
-        return { content: [{ type: 'text', text: truncateText(JSON.stringify({ total: nodes.length, shown: items.length, items }), max_length) }] };
+        return { content: [{ type: 'text', text: truncateText(JSON.stringify({ total: nodes.length, shown: items.length, items }), max_length, 'max_items or max_length') }] };
       }
       const lines = [`extract total=${nodes.length} shown=${items.length}`, names.join('\t'),
         ...items.map((row) => names.map((n) => row[n] ?? '').join('\t'))];
-      return { content: [{ type: 'text', text: truncateText(lines.join('\n'), max_length) }] };
+      return { content: [{ type: 'text', text: truncateText(lines.join('\n'), max_length, 'max_items or max_length') }] };
     }
   );
 
@@ -1607,6 +1721,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       // stop
       const stopped = recording;
       recording = null;
+      await recordChain; // il file deve essere completo quando il tool ritorna
       return { content: [{ type: 'text', text: jsonText(stopped ? { stopped: stopped.name, file: stopped.file } : { stopped: null }) }] };
     }
   );

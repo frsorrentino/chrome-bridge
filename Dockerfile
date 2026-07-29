@@ -6,4 +6,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server/ ./server/
-CMD ["node", "server/index.js"]
+# --caps all: i registry enumerano i tool via tools/list; col default
+# caps=core pubblicavano 30 tool contro i 59 dichiarati.
+CMD ["node", "server/index.js", "--caps", "all"]

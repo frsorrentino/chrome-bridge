@@ -42,10 +42,33 @@ const VALID_COMMANDS = new Set([
 // Opzioni consumate dalla CLI, mai inoltrate all'estensione
 const CLI_OPTS = new Set(['out', 'format', 'max_chars']);
 
-function coerce(raw) {
+// La coercizione numerica cieca corrompeva i valori testuali: `--text 00185`
+// diventava 185 (CAP, prefissi telefonici, codici con zeri iniziali digitati
+// sbagliati in silenzio) e `--code 42` diventava un numero invece di sorgente
+// JS. Solo le chiavi che sono davvero numeriche/booleane vengono convertite.
+const NUMERIC_KEYS = new Set([
+  'tab_id', 'frame_id', 'limit', 'timeout', 'interval', 'max_length', 'max_chars',
+  'max_rows', 'max_items', 'max_scrolls', 'max_segments', 'segment_offset', 'max_selectors',
+  'delay', 'offset', 'scan_rows', 'width', 'height', 'x', 'y', 'level_num',
+  'status', 'zoom', 'depth', 'count', 'index', 'port', 'threshold', 'scale',
+  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat',
+]);
+const BOOLEAN_KEYS = new Set([
+  'clear', 'stop', 'force', 'visible', 'visible_only', 'stitch', 'reset',
+  'attributes', 'childList', 'characterData', 'subtree', 'print_mode',
+  'include_cross_origin', 'headless', 'active', 'submit', 'accept', 'include_rect',
+]);
+
+function coerce(raw, key) {
+  if (BOOLEAN_KEYS.has(key)) {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+  }
+  if (NUMERIC_KEYS.has(key) && /^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  // Chiavi non dichiarate: true/false restano booleani (comodo per i flag noti
+  // dei tool), tutto il resto resta stringa.
   if (raw === 'true') return true;
   if (raw === 'false') return false;
-  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
   return raw;
 }
 
@@ -63,7 +86,7 @@ export function parseCliArgs(argv) {
     const key = arg.slice(2).replaceAll('-', '_');
     let value = true;
     if (i + 1 < rest.length && !rest[i + 1].startsWith('--')) {
-      value = coerce(rest[++i]);
+      value = coerce(rest[++i], key);
     }
     if (key === 'json') {
       Object.assign(params, JSON.parse(value));
@@ -130,7 +153,15 @@ const MIME_BY_EXT = {
 };
 
 function printResult(text, opts) {
-  const max = opts.max_chars ?? 20000;
+  // Nessun troncamento quando l'output non va a un terminale (pipe verso
+  // jq/grep) o quando è JSON: la nota per umani rendeva il JSON non parsabile.
+  const isJson = (() => {
+    const t = text.trimStart();
+    if (!t.startsWith('{') && !t.startsWith('[')) return false;
+    try { JSON.parse(text); return true; } catch { return false; }
+  })();
+  const explicit = opts.max_chars !== undefined;
+  const max = explicit ? opts.max_chars : (process.stdout.isTTY && !isJson ? 20000 : 0);
   if (max > 0 && text.length > max) {
     text = text.slice(0, max) + `\n…[truncated, ${text.length - max} more chars — use --max-chars 0 for full output, or pipe through grep/head]`;
   }

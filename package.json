@@ -1,8 +1,9 @@
 {
   "name": "chrome-bridge-mcp",
+  "mcpName": "io.github.frsorrentino/chrome-bridge",
   "version": "1.7.0",
   "type": "module",
-  "description": "MCP server with 56 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
+  "description": "MCP server with 59 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
   "main": "server/index.js",
   "bin": {
     "chrome-bridge-mcp": "server/index.js",
@@ -10,8 +11,10 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/test-devtools.js",
-    "test:unit": "node --test test/unit/*.test.js"
+    "test": "node --test test/unit/*.test.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:e2e": "node test/test-devtools.js",
+    "measure": "node tools/measure-schema.mjs"
   },
   "keywords": [
     "mcp",
@@ -38,6 +41,7 @@
   },
   "files": [
     "server/",
+    "tools/",
     "extension/",
     "install.sh",
     "README.md"

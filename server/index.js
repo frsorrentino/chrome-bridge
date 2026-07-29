@@ -19,6 +19,12 @@ import { DEFAULT_PORT, VERSION } from './protocol.js';
 // Porta effimera di default: zero conflitti con un bridge già attivo.
 const LAUNCH = process.argv.includes('--launch');
 const HEADLESS = process.argv.includes('--headless');
+function argValue(flag) {
+  const i = process.argv.indexOf(flag);
+  return i !== -1 ? process.argv[i + 1] : undefined;
+}
+// Bind: loopback di default, 0.0.0.0 solo su richiesta esplicita (Crostini).
+const HOST = argValue('--host') ?? process.env.CHROME_BRIDGE_HOST ?? '127.0.0.1';
 const PORT = process.env.CHROME_BRIDGE_PORT
   ? parseInt(process.env.CHROME_BRIDGE_PORT, 10)
   : (LAUNCH ? 0 : DEFAULT_PORT);
@@ -43,15 +49,40 @@ async function main() {
       'Selector parameters on DOM tools support shadow-DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
       'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
       'Prefer get_interactives over read_page(html) to discover targets; its refs (n1, n2…) work as the ref param of click/type_text/hover.',
+      // Il costo dominante sono i TURNI, non i byte: un turno vale ~15-30 volte
+      // un KB di output risparmiato. Queste due clausole si pagano una volta
+      // qui e valgono più di qualunque ottimizzazione di schema.
+      'For more than one field use fill_form once (with submit_selector to submit in the same call) instead of repeated type_text: one turn instead of N.',
+      'For tables use extract_table (server-side where/columns filtering) or extract, never read_page: read_page on a big table costs tens of thousands of tokens for data you filter anyway.',
     ].join(' '),
   });
 
   // 2. Avvia il WebSocket server
-  const wsManager = new WSManager(PORT);
+  const wsManager = new WSManager(PORT, { host: HOST });
   await wsManager.start();
 
-  // 2b. Launch mode: browser dedicato che si connette alla nostra porta
+  // 2b. Launch mode: browser dedicato che si connette alla nostra porta.
+  // Gli handler di shutdown sono registrati PRIMA del launch: registrarli dopo
+  // lasciava Chromium e il profilo temporaneo orfani a ogni segnale ricevuto
+  // durante l'avvio (osservate 3 directory residue, una da 122 MB).
   let browser = null;
+  const shutdown = async () => {
+    console.error('[chrome-bridge] Shutting down...');
+    try { if (browser) await browser.stop(); } catch {}
+    try { await wsManager.stop(); } catch {}
+    try { await mcpServer.close(); } catch {}
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  process.on('uncaughtException', (err) => {
+    console.error('[chrome-bridge] Uncaught exception:', err);
+    shutdown().catch(() => process.exit(1));
+  });
+  process.on('unhandledRejection', (err) => {
+    console.error('[chrome-bridge] Unhandled rejection:', err);
+  });
+
   if (LAUNCH) {
     if (wsManager.mode !== 'primary') {
       throw new Error(`--launch requires a dedicated port, but ${wsManager.port} is owned by another chrome-bridge. Unset CHROME_BRIDGE_PORT (ephemeral) or pick a free one.`);
@@ -68,17 +99,6 @@ async function main() {
 
   console.error(`[chrome-bridge] MCP server ready (stdio + WebSocket, mode: ${wsManager.mode})`);
 
-  // 5. Graceful shutdown
-  const shutdown = async () => {
-    console.error('[chrome-bridge] Shutting down...');
-    if (browser) await browser.stop();
-    await wsManager.stop();
-    await mcpServer.close();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 }
 
 main().catch((err) => {

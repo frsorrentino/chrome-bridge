@@ -1,4 +1,4 @@
 node_modules/
-chrome-bridge-plan.md
 dist/
 .superpowers/
+.claude/settings.local.json

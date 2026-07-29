@@ -93,8 +93,15 @@ function persistStats() {
   chrome.storage.session.set({ sessionStats }).catch(() => {});
 }
 
-// Tracking per tool stateful (network monkey-patch)
-const injectedTabs = { network: new Set(), websocket: new Set() };
+// Boot del service worker: MV3 lo termina e lo rianima, azzerando ogni stato
+// in RAM (browserNetLog, mainFrameHeaders, diffBaselines, httpAuthCreds). La
+// perdita era indistinguibile da "nessun dato": esporre il boot permette ai
+// tool di dire `log_since` invece di un `count: 0` ambiguo.
+const swBootedAt = Date.now();
+chrome.storage.session.get({ swBootedAt: null }).then(({ swBootedAt: prev }) => {
+  if (prev) console.log(`[chrome-bridge] service worker restarted (previous boot ${new Date(prev).toISOString()})`);
+  chrome.storage.session.set({ swBootedAt }).catch(() => {});
+}).catch(() => {});
 
 // --- Keep-alive: impedisce che il service worker venga fermato ---
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
@@ -160,7 +167,7 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[chrome-bridge] Connected to MCP server');
-    const init = { type: 'ext_init' };
+    const init = { type: 'ext_init', version: chrome.runtime.getManifest().version };
     if (extToken) init.token = extToken;
     ws.send(JSON.stringify(init));
     setConnectionState('connected');
@@ -608,6 +615,18 @@ async function canvasToBase64(canvas) {
 // pixel oltre quella soglia non arrivano mai al modello, gonfiano solo il
 // payload base64. Downscale qui = stesso dettaglio percepito, meno byte.
 const MAX_IMAGE_SIDE = 1568;
+
+// Stessa regola per un canvas già disegnato (es. l'immagine di diff): senza
+// questo, screenshot_diff era l'unico output visuale fuori dal cap.
+async function canvasToBase64Capped(canvas, maxSide = MAX_IMAGE_SIDE) {
+  const scale = Math.min(1, maxSide / Math.max(canvas.width, canvas.height));
+  if (scale === 1) return await canvasToBase64(canvas);
+  const w = Math.max(1, Math.round(canvas.width * scale));
+  const h = Math.max(1, Math.round(canvas.height * scale));
+  const out = new OffscreenCanvas(w, h);
+  out.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  return await canvasToBase64(out);
+}
 
 async function bitmapToBase64Capped(bitmap, maxSide = MAX_IMAGE_SIDE) {
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -1200,32 +1219,52 @@ async function cmdInjectCss({ css, tab_id }) {
 // Hook installed at document_start via console-capture.js content script (MAIN world).
 // This function only reads the accumulated logs.
 
-async function cmdReadConsole({ clear = false, level = 'all', tab_id }) {
+// limit = 0 quando il server non lo manda: un server più VECCHIO di questa
+// estensione (caso normale, la CWS ha latenza di review) fa lo slice da sé, e un
+// default in pagina gli consegnerebbe meno voci di quelle che ha chiesto.
+async function cmdReadConsole({ clear = false, level = 'all', limit = 0, tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (shouldClear, filterLevel) => {
+    // Il taglio a `limit` avviene IN PAGINA: il WebSocket non trasporta ciò che
+    // il modello non vedrà. E `clear` rimuove solo le voci effettivamente
+    // restituite (e solo del level richiesto): cancellare l'intero buffer
+    // distruggeva messaggi che nessuno aveva letto.
+    func: (shouldClear, filterLevel, lim) => {
+      const hooked = !!window.__chromeBridge_consoleHooked;
       const logs = window.__chromeBridge_consoleLogs || [];
       const filtered = filterLevel === 'all' ? logs : logs.filter((l) => l.level === filterLevel);
-      if (shouldClear) {
-        window.__chromeBridge_consoleLogs = [];
+      const shown = lim > 0 ? filtered.slice(-lim) : filtered;
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_consoleLogs = logs.filter((l) => !drop.has(l));
       }
-      return filtered;
+      return { hooked, total: filtered.length, messages: shown };
     },
-    args: [clear, level],
+    args: [clear, level, limit],
     world: 'MAIN',
   });
 
-  const messages = results?.[0]?.result ?? [];
-  return { count: messages.length, messages };
+  const out = results?.[0]?.result ?? {};
+  const messages = out.messages ?? [];
+  // "count: 0" senza contesto è indistinguibile da "hook mai installato":
+  // read_console è il tool di debug più usato e non deve far concludere
+  // "pagina pulita" quando in realtà non stava osservando nulla.
+  const note = out.hooked === false
+    ? 'Instrumentation not loaded (page opened before the extension, "Capture console & metrics" off, or a non-injectable page) — no console messages are being captured.'
+    : undefined;
+  return { count: out.total ?? messages.length, messages, hooked: out.hooked !== false, ...(note ? { note } : {}) };
 }
 
 // --- DevTools: monitor_network (stateful) ---
 
+// Always-inject: il guard in-page `__chromeBridge_networkHooked` rende
+// l'operazione idempotente e costa pochi ms. Un Set per-tab lato SW andava
+// invece fuori sincrono con la navigazione (il tab veniva rimosso su
+// 'loading', reinserito da un'iniezione risolta contro il documento morente,
+// e il nuovo documento restava senza hook con `count: 0` silenzioso).
 async function ensureNetworkHook(tabId) {
-  if (injectedTabs.network.has(tabId)) return;
-
   await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
@@ -1249,8 +1288,12 @@ async function ensureNetworkHook(tabId) {
           const resp = await origFetch(...args);
           entry.status = resp.status;
           entry.duration = Date.now() - entry.startTime;
-          if (window.__chromeBridge_networkRequests.length < MAX) {
-            window.__chromeBridge_networkRequests.push(entry);
+          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
+          // faceva consegnare al modello le richieste dei primi secondi di vita
+          // della pagina etichettate come "most recent".
+          window.__chromeBridge_networkRequests.push(entry);
+          if (window.__chromeBridge_networkRequests.length > MAX) {
+            window.__chromeBridge_networkRequests.shift();
           }
           window.__chromeBridge_inflight -= 1;
           window.__chromeBridge_lastNetActivity = Date.now();
@@ -1258,8 +1301,12 @@ async function ensureNetworkHook(tabId) {
         } catch (err) {
           entry.error = err.message;
           entry.duration = Date.now() - entry.startTime;
-          if (window.__chromeBridge_networkRequests.length < MAX) {
-            window.__chromeBridge_networkRequests.push(entry);
+          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
+          // faceva consegnare al modello le richieste dei primi secondi di vita
+          // della pagina etichettate come "most recent".
+          window.__chromeBridge_networkRequests.push(entry);
+          if (window.__chromeBridge_networkRequests.length > MAX) {
+            window.__chromeBridge_networkRequests.shift();
           }
           window.__chromeBridge_inflight -= 1;
           window.__chromeBridge_lastNetActivity = Date.now();
@@ -1281,15 +1328,23 @@ async function ensureNetworkHook(tabId) {
         this.addEventListener('load', () => {
           entry.status = this.status;
           entry.duration = Date.now() - entry.startTime;
-          if (window.__chromeBridge_networkRequests.length < MAX) {
-            window.__chromeBridge_networkRequests.push(entry);
+          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
+          // faceva consegnare al modello le richieste dei primi secondi di vita
+          // della pagina etichettate come "most recent".
+          window.__chromeBridge_networkRequests.push(entry);
+          if (window.__chromeBridge_networkRequests.length > MAX) {
+            window.__chromeBridge_networkRequests.shift();
           }
         });
         this.addEventListener('error', () => {
           entry.error = 'Network error';
           entry.duration = Date.now() - entry.startTime;
-          if (window.__chromeBridge_networkRequests.length < MAX) {
-            window.__chromeBridge_networkRequests.push(entry);
+          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
+          // faceva consegnare al modello le richieste dei primi secondi di vita
+          // della pagina etichettate come "most recent".
+          window.__chromeBridge_networkRequests.push(entry);
+          if (window.__chromeBridge_networkRequests.length > MAX) {
+            window.__chromeBridge_networkRequests.shift();
           }
         });
         // loadend copre load, error e abort: traccia sempre la fine dell'in-flight
@@ -1304,36 +1359,44 @@ async function ensureNetworkHook(tabId) {
     },
     world: 'MAIN',
   });
-  injectedTabs.network.add(tabId);
 }
 
-async function cmdMonitorNetwork({ clear = false, source = 'page', tab_id }) {
+async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   if (source === 'browser') {
-    const requests = browserNetLog.get(tabId) ?? [];
-    if (clear) browserNetLog.set(tabId, []);
-    return { count: requests.length, requests: [...requests] };
+    const all = browserNetLog.get(tabId) ?? [];
+    const shown = limit > 0 ? all.slice(-limit) : [...all];
+    if (clear) browserNetLog.set(tabId, all.slice(0, Math.max(0, all.length - shown.length)));
+    return { count: all.length, requests: shown, log_since: swBootedAt };
   }
 
   await ensureNetworkHook(tabId);
 
-  // Leggi le richieste
+  // Taglio e clear in pagina: il WebSocket non trasporta 1000 voci (~154 KB)
+  // per consegnarne 100, e clear non distrugge ciò che nessuno ha letto.
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (shouldClear) => {
+    func: (shouldClear, lim) => {
+      const hooked = !!window.__chromeBridge_networkHooked;
       const requests = window.__chromeBridge_networkRequests || [];
-      if (shouldClear) {
-        window.__chromeBridge_networkRequests = [];
+      const shown = lim > 0 ? requests.slice(-lim) : requests.slice();
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_networkRequests = requests.filter((r) => !drop.has(r));
       }
-      return requests;
+      return { hooked, total: requests.length, requests: shown };
     },
-    args: [clear],
+    args: [clear, limit],
     world: 'MAIN',
   });
 
-  const requests = results?.[0]?.result ?? [];
-  return { count: requests.length, requests };
+  const out = results?.[0]?.result ?? {};
+  const requests = out.requests ?? [];
+  const note = out.hooked === false
+    ? 'Network hook not installed on this document — no page requests are being captured.'
+    : undefined;
+  return { count: out.total ?? requests.length, requests, ...(note ? { note } : {}) };
 }
 
 // --- wait_for_element ---
@@ -2031,7 +2094,7 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
 
 // --- watch_dom (stateful) ---
 
-async function cmdWatchDom({ selector = 'body', attributes = true, childList = true, characterData = false, subtree = true, clear = false, stop = false, tab_id }) {
+async function cmdWatchDom({ selector = 'body', attributes = true, childList = true, characterData = false, subtree = true, clear = false, stop = false, limit = 0, tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   if (stop) {
@@ -2067,7 +2130,9 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
       const target = document.querySelector(sel) || document.body;
       const observer = new MutationObserver((mutationList) => {
         for (const m of mutationList) {
-          if (window.__chromeBridge_domMutations.length >= MAX) break;
+          // Ring buffer: dopo un'azione interessano le mutation RECENTI, quindi
+          // si scartano le vecchie invece di smettere di registrare.
+          if (window.__chromeBridge_domMutations.length >= MAX) window.__chromeBridge_domMutations.shift();
           const entry = {
             type: m.type,
             target: m.target.tagName ? m.target.tagName.toLowerCase() : '#text',
@@ -2093,16 +2158,21 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
   // Read mutations
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (shouldClear) => {
+    func: (shouldClear, lim) => {
       const mutations = window.__chromeBridge_domMutations || [];
-      if (shouldClear) window.__chromeBridge_domMutations = [];
-      return mutations;
+      const shown = lim > 0 ? mutations.slice(-lim) : mutations.slice();
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_domMutations = mutations.filter((m) => !drop.has(m));
+      }
+      return { total: mutations.length, mutations: shown };
     },
-    args: [clear],
+    args: [clear, limit],
     world: 'MAIN',
   });
-  const mutations = results?.[0]?.result ?? [];
-  return { count: mutations.length, mutations };
+  const out = results?.[0]?.result ?? {};
+  const mutations = out.mutations ?? [];
+  return { count: out.total ?? mutations.length, mutations };
 }
 
 // --- emulate_media ---
@@ -2592,7 +2662,7 @@ async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab
 // --- network_rules (declarativeNetRequest) ---
 // Nota: le regole dinamiche sono globali per il browser, non per-tab.
 
-async function cmdNetworkRules({ action, url_filter, redirect_url, header, header_value, resource_types }) {
+async function cmdNetworkRules({ action, url_filter, redirect_url, header, header_value, header_target = 'request', resource_types }) {
   if (!action) throw new Error('Missing required parameter: action');
 
   if (action === 'list') {
@@ -2626,7 +2696,14 @@ async function cmdNetworkRules({ action, url_filter, redirect_url, header, heade
     const op = header_value === undefined || header_value === null || header_value === ''
       ? { header, operation: 'remove' }
       : { header, operation: 'set', value: header_value };
-    rule = { id: nextId, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [op] }, condition };
+    // `target` decide request vs response: senza il ramo responseHeaders era
+    // impossibile strippare content-security-policy / x-frame-options o
+    // iniettare access-control-allow-origin — i tre blocchi più frequenti in
+    // sviluppo locale — pur essendo declarativeNetRequest già concesso.
+    const headerAction = header_target === 'response'
+      ? { type: 'modifyHeaders', responseHeaders: [op] }
+      : { type: 'modifyHeaders', requestHeaders: [op] };
+    rule = { id: nextId, priority: 1, action: headerAction, condition };
   } else {
     throw new Error(`Unknown action: ${action}`);
   }
@@ -2757,12 +2834,15 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
     diffCtx.putImageData(out, 0, 0);
     const totalPixels = width * height;
     const diffPercent = (changed / totalPixels) * 100;
+    // L'immagine è allegata solo se c'è qualcosa da guardare, e passa dal cap
+    // a 1568px come ogni altro screenshot: un diff a 2560x1440 DPR2 sono 14,7 MP
+    // spediti contro 1,38 MP che sopravvivono al ridimensionamento lato client.
     return {
       match: changed === 0,
       diff_percent: Math.round(diffPercent * 100) / 100,
       changed_pixels: changed,
       total_pixels: totalPixels,
-      diff_image: await canvasToBase64(diffCanvas),
+      ...(changed === 0 ? {} : { diff_image: await canvasToBase64Capped(diffCanvas) }),
     };
   }
 
@@ -2822,8 +2902,8 @@ async function cmdListEventListeners({ type, limit = 100, tab_id }) {
 
 // --- monitor_websocket (hook lazy, come ensureNetworkHook) ---
 
+// Always-inject idempotente, come ensureNetworkHook: il guard è __chromeBridge_wsHooked.
 async function ensureWsHook(tabId) {
-  if (injectedTabs.websocket.has(tabId)) return;
   await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
@@ -2863,7 +2943,6 @@ async function ensureWsHook(tabId) {
     },
     world: 'MAIN',
   });
-  injectedTabs.websocket.add(tabId);
 }
 
 async function cmdMonitorWebsocket({ clear = false, tab_id }) {
@@ -3463,16 +3542,7 @@ async function cmdHttpAuth({ action, username, password }) {
 
 // --- Tab lifecycle: cleanup injection state ---
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
-    injectedTabs.network.delete(tabId);
-    injectedTabs.websocket.delete(tabId);
-  }
-});
-
 chrome.tabs.onRemoved.addListener((tabId) => {
-  injectedTabs.network.delete(tabId);
-  injectedTabs.websocket.delete(tabId);
   browserNetLog.delete(tabId);
   mainFrameHeaders.delete(tabId);
 });

@@ -19,6 +19,12 @@ import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS,
 export class WSManager {
   constructor(port = DEFAULT_PORT, opts = {}) {
     this.port = port;
+    // Default loopback: il bind su 0.0.0.0 esponeva il bridge a tutta la rete
+    // con l'unico gate di un header Origin falsificabile e token null di
+    // default — chiunque poteva prendere lo slot estensione e ottenere
+    // execute_js nella sessione autenticata del browser. Su Crostini il
+    // port-forward richiede 0.0.0.0: opt-in esplicito, non default.
+    this.host = opts.host ?? process.env.CHROME_BRIDGE_HOST ?? '127.0.0.1';
     this.identTimeout = opts.identTimeout ?? IDENT_TIMEOUT_MS;
     this.token = opts.token ?? process.env.CHROME_BRIDGE_TOKEN ?? null;
     this.pingIntervalMs = opts.pingInterval ?? PING_INTERVAL_MS;
@@ -26,6 +32,9 @@ export class WSManager {
     this.lastPong = 0;
     this.stopped = false;
     this.mode = null;            // 'primary' | 'relay'
+    this.relayExtConnected = undefined;  // relay mode: stato estensione riportato dal primary
+    this.relayExtVersion = null;
+    this._extVersion = null;     // versione estensione da ext_init (primary)
 
     // --- primary mode ---
     this.wss = null;
@@ -66,9 +75,18 @@ export class WSManager {
    */
   isConnected() {
     if (this.mode === 'relay') {
-      return this.relaySocket !== null && this.relaySocket.readyState === WebSocket.OPEN;
+      // Il socket relay aperto non implica un'estensione collegata: get_status
+      // rispondeva connected:true senza estensione da nessuna parte.
+      return this.relaySocket !== null
+        && this.relaySocket.readyState === WebSocket.OPEN
+        && this.relayExtConnected !== false;
     }
     return this.client !== null && this.client.readyState === WebSocket.OPEN;
+  }
+
+  /** Versione dell'estensione collegata (da ext_init), o null. */
+  get extVersion() {
+    return this.mode === 'relay' ? (this.relayExtVersion ?? null) : (this._extVersion ?? null);
   }
 
   /**
@@ -78,17 +96,32 @@ export class WSManager {
   sendCommand(type, params = {}) {
     return new Promise((resolve, reject) => {
       if (!this.isConnected()) {
-        const target = this.mode === 'relay' ? 'Relay connection' : 'Chrome extension';
-        reject(new Error(`${target} not connected`));
+        // Un errore vago qui costa un turno intero al modello: dice cosa
+        // osservare e qual è la prossima azione.
+        reject(new Error(
+          `Chrome extension not connected (server ${this.mode} on ${this.host}:${this.port}`
+          + `${this.mode === 'relay' ? ', reached through another chrome-bridge instance' : ''})`
+          + ' — open Chrome, check the chrome-bridge extension is enabled and its port matches',
+        ));
         return;
       }
 
       const command = createCommand(type, params);
-      const timeout = getTimeout(type);
+      // Il timeout di trasporto non può essere più basso di quello chiesto dal
+      // chiamante: `wait_for --timeout 90000` moriva a 60 s con un messaggio
+      // che il modello leggeva come "l'elemento non è comparso".
+      const asked = Number(params?.timeout);
+      const timeout = Number.isFinite(asked) && asked > 0
+        ? Math.max(getTimeout(type), asked + 5000)
+        : getTimeout(type);
 
       const timer = setTimeout(() => {
         this.pending.delete(command.id);
-        reject(new Error(`Command ${type} timed out after ${timeout}ms`));
+        reject(new Error(
+          `Command ${type} timed out after ${timeout}ms`
+          + (params?.tab_id != null ? ` (tab ${params.tab_id})` : '')
+          + ' — the tab may be busy, crashed or showing a modal dialog: try tab_action reload, handle_dialogs, or raise the timeout',
+        ));
       }, timeout);
 
       this.pending.set(command.id, { resolve, reject, timer });
@@ -119,21 +152,23 @@ export class WSManager {
       return;
     }
 
-    // primary mode — terminate forzato per evitare hang sull'handshake
-    for (const relay of this.relayClients) {
-      relay.terminate();
-    }
+    // primary mode — terminate forzato per evitare hang sull'handshake.
+    // Si itera wss.clients, non i due Set tracciati: un peer che completava
+    // l'handshake DURANTE lo shutdown restava OPEN, wss.close() non richiamava
+    // mai la callback e il processo MCP non usciva più (SIGKILL necessario).
     this.relayClients.clear();
     this.pendingRelay.clear();
-
-    if (this.client) {
-      this.client.terminate();
-      this.client = null;
-    }
+    this.client = null;
 
     if (this.wss) {
+      for (const ws of this.wss.clients) {
+        try { ws.terminate(); } catch {}
+      }
       return new Promise((resolve) => {
-        this.wss.close(() => resolve());
+        // Rete di sicurezza: close() può non richiamare se un socket resta
+        // appeso. Lo shutdown non deve dipendere dalla buona volontà di ws.
+        const safety = setTimeout(resolve, 500);
+        this.wss.close(() => { clearTimeout(safety); resolve(); });
       });
     }
   }
@@ -143,14 +178,15 @@ export class WSManager {
   _startPrimary() {
     return new Promise((resolve, reject) => {
       this.wss = new WebSocketServer({
-        host: '0.0.0.0',
+        host: this.host,
         port: this.port,
+        maxPayload: 32 * 1024 * 1024,
       });
 
       this.wss.on('listening', () => {
         // Porta 0 = effimera: leggi quella reale assegnata dal kernel
         if (!this.port) this.port = this.wss.address().port;
-        console.error(`[chrome-bridge] WebSocket server listening on 0.0.0.0:${this.port}`);
+        console.error(`[chrome-bridge] WebSocket server listening on ${this.host}:${this.port}`);
         this._startPing();
         resolve();
       });
@@ -173,6 +209,9 @@ export class WSManager {
    * Connessioni mute o non valide vengono terminate.
    */
   _handleNewConnection(ws, req) {
+    // Durante lo shutdown non si accettano nuovi peer: era la via per cui un
+    // handshake in corso rimetteva un socket OPEN dopo il terminate.
+    if (this.stopped) { try { ws.terminate(); } catch {} return; }
     const origin = req.headers.origin || '';
     const remote = req.socket.remoteAddress || '';
     const isLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
@@ -201,11 +240,25 @@ export class WSManager {
           ws.terminate();
           return;
         }
+        // Il token proteggeva solo ext_init: un relay locale non autenticato
+        // aggirava interamente il segreto condiviso.
+        if (this.token && msg.token !== this.token) {
+          console.error('[chrome-bridge] relay_init with invalid token — rejected');
+          ws.terminate();
+          return;
+        }
         this._setupRelayClient(ws);
         return;
       }
 
       if (msg.type === MessageType.EXT_INIT) {
+        // L'estensione pubblicata si collega solo a ws://localhost: una
+        // ext_init non-loopback è per definizione un client artigianale.
+        if (!isLoopback && this.host === '127.0.0.1') {
+          console.error(`[chrome-bridge] ext_init from non-loopback ${remote} — rejected`);
+          ws.terminate();
+          return;
+        }
         if (!origin.startsWith('chrome-extension://')) {
           console.error(`[chrome-bridge] ext_init with origin "${origin}" — rejected`);
           ws.terminate();
@@ -216,7 +269,7 @@ export class WSManager {
           ws.terminate();
           return;
         }
-        this._setupChromeClient(ws);
+        this._setupChromeClient(ws, msg.version ?? null);
         return;
       }
 
@@ -228,8 +281,14 @@ export class WSManager {
     ws.on('close', () => clearTimeout(idTimer));
   }
 
-  _setupChromeClient(ws) {
-    console.error('[chrome-bridge] Chrome extension connected');
+  _setupChromeClient(ws, extVersion = null) {
+    this._extVersion = extVersion;
+    // Lo skew server/estensione era invisibile: con la latenza di review del
+    // Chrome Web Store è la norma, non l'eccezione.
+    if (extVersion && extVersion !== VERSION) {
+      console.error(`[chrome-bridge] Version skew: server ${VERSION}, extension ${extVersion}`);
+    }
+    console.error(`[chrome-bridge] Chrome extension connected${extVersion ? ` (v${extVersion})` : ''}`);
     try { ws.send(JSON.stringify({ type: 'ext_init_ok', version: VERSION })); } catch {}
 
     if (this.client) {
@@ -251,6 +310,7 @@ export class WSManager {
 
     this.client = ws;
     this.lastPong = Date.now();
+    this._broadcastExtState();
 
     ws.on('message', (raw) => {
       let msg;
@@ -267,6 +327,8 @@ export class WSManager {
       console.error('[chrome-bridge] Chrome extension disconnected');
       if (this.client === ws) {
         this.client = null;
+        this._extVersion = null;
+        this._broadcastExtState();
         // Rigetta pending locali
         this._rejectAllPending('Extension disconnected');
         // Notifica relay clients
@@ -291,6 +353,10 @@ export class WSManager {
   _setupRelayClient(ws) {
     console.error('[chrome-bridge] Relay client connected');
     this.relayClients.add(ws);
+    // Ack: senza questo, un relay puntato su un WS server ESTRANEO che occupa
+    // la porta dichiarava mode=relay e isConnected()=true, e il primo comando
+    // moriva 30 s dopo con un messaggio che non nominava la causa.
+    this._sendRelayHello(ws);
 
     ws.on('message', (raw) => {
       let msg;
@@ -370,15 +436,79 @@ export class WSManager {
 
   // ─── Relay mode ────────────────────────────────────────────────
 
+  /** Ack di identificazione verso un relay client + stato corrente dell'estensione. */
+  _sendRelayHello(ws) {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify({
+        type: 'relay_init_ok',
+        version: VERSION,
+        ext_connected: this.client !== null && this.client.readyState === WebSocket.OPEN,
+        ext_version: this._extVersion ?? null,
+      }));
+    } catch {}
+  }
+
+  /** Notifica a tutti i relay che lo stato dell'estensione è cambiato. */
+  _broadcastExtState() {
+    for (const ws of this.relayClients) this._sendRelayHello(ws);
+  }
+
   _startRelay() {
     return new Promise((resolve, reject) => {
       this.relaySocket = new WebSocket(`ws://127.0.0.1:${this.port}`);
+      // Attende l'ack: una porta occupata da un processo che non è
+      // chrome-bridge deve fallire subito e con un messaggio azionabile,
+      // non costare un timeout di 30 s al primo comando.
+      //
+      // Il silenzio però è ambiguo: un primary chrome-bridge PRECEDENTE a questa
+      // versione non conosce relay_init_ok, e durante un aggiornamento è il caso
+      // normale (una sessione vecchia è ancora attiva). Prima di fallire si
+      // sonda il peer con un comando reale: un chrome-bridge risponde sempre —
+      // col risultato o con un errore "extension not connected" — mentre un
+      // server estraneo resta muto.
+      let settled = false;
+      const finish = (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(ackTimer);
+        clearTimeout(this._probeTimer);
+        this._relayAck = null;
+        this._probeId = null;
+        if (!err) return resolve();
+        const sock = this.relaySocket;
+        this.relaySocket = null;
+        try { sock?.terminate(); } catch {}
+        reject(err);
+      };
+
+      const probe = () => {
+        const cmd = createCommand(MessageType.GET_TABS);
+        this._probeId = cmd.id;
+        try {
+          this.relaySocket.send(JSON.stringify(cmd));
+        } catch {
+          finish(new Error(`Port ${this.port} is held by a process that is not chrome-bridge — set CHROME_BRIDGE_PORT to a free port or stop that process`));
+          return;
+        }
+        this._probeTimer = setTimeout(() => {
+          finish(new Error(`Port ${this.port} is held by a process that is not chrome-bridge (no relay_init_ok and no answer to a probe command) — set CHROME_BRIDGE_PORT to a free port or stop that process`));
+        }, 1500);
+      };
+
+      const ackTimer = setTimeout(probe, 2000);
+      this._relayAck = () => finish(null);
+      this._probeAnswered = () => {
+        console.error('[chrome-bridge] Relay peer answered a probe but not relay_init_ok: older chrome-bridge, proceeding');
+        finish(null);
+      };
 
       this.relaySocket.on('open', () => {
         // Identifica questa connessione come relay
-        this.relaySocket.send(JSON.stringify({ type: MessageType.RELAY_INIT }));
+        const init = { type: MessageType.RELAY_INIT };
+        if (this.token) init.token = this.token;
+        this.relaySocket.send(JSON.stringify(init));
         console.error(`[chrome-bridge] Connected as relay to existing server on port ${this.port}`);
-        resolve();
       });
 
       this.relaySocket.on('message', (raw) => {
@@ -386,6 +516,22 @@ export class WSManager {
         try {
           msg = JSON.parse(raw.toString());
         } catch {
+          return;
+        }
+
+        if (msg.type === 'relay_init_ok') {
+          this.primaryVersion = msg.version ?? null;
+          this.relayExtConnected = msg.ext_connected === true;
+          this.relayExtVersion = msg.ext_version ?? null;
+          if (this._relayAck) this._relayAck();
+          return;
+        }
+
+        // Risposta alla sonda: il peer parla il protocollo, è un chrome-bridge
+        // più vecchio. relayExtConnected resta undefined (sconosciuto), che
+        // isConnected() tratta come "non bloccare".
+        if (this._probeId && msg.id === this._probeId) {
+          if (this._probeAnswered) this._probeAnswered();
           return;
         }
 

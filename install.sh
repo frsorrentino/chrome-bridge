@@ -26,22 +26,42 @@ echo "[OK] Dependencies installed"
 echo ""
 if command -v claude &>/dev/null; then
   echo "Registering MCP server in Claude Code..."
-  claude mcp add --scope user chrome-bridge node "$SERVER_ENTRY" 2>/dev/null && \
-    echo "[OK] MCP server registered (scope: user)" || \
+  # -e CHROME_BRIDGE_CAPS=all: senza questo il default e caps=core (30 tool su 59)
+  # e chi installa non ha extract_table/audits, che i doc promettono.
+  claude mcp add --scope user chrome-bridge -e CHROME_BRIDGE_CAPS=all -- node "$SERVER_ENTRY" 2>/dev/null && \
+    echo "[OK] MCP server registered (scope: user, all 59 tools)" || \
     echo "[SKIP] MCP server already registered or claude command failed"
 else
   echo "[SKIP] 'claude' CLI not found. Register manually:"
   echo "  claude mcp add --scope user chrome-bridge node $SERVER_ENTRY"
 fi
 
-# 4. Chrome extension instructions
+# 4. Preflight: porta e piattaforma
+echo ""
+if command -v ss &>/dev/null && ss -ltn 2>/dev/null | grep -q ':8765 '; then
+  echo "[NOTE] Port 8765 is already in use — a second chrome-bridge starts as a relay"
+  echo "       and shares the existing bridge. Set CHROME_BRIDGE_PORT to change it."
+fi
+
+# 5. Chrome extension instructions
 echo ""
 echo "=== Chrome Extension Setup ==="
 echo ""
-echo "  1. Open chrome://extensions in Chrome"
-echo "  2. Enable 'Developer mode' (top right toggle)"
-echo "  3. Click 'Load unpacked'"
-echo "  4. Select: $SCRIPT_DIR/extension"
+if [ "$(hostname)" = "penguin" ]; then
+  # Su ChromeOS/Crostini un'estensione caricata da filesystem viene scartata a
+  # ogni reboot: il container non e montato quando Chrome parte.
+  echo "  ChromeOS/Crostini detected — install from the Chrome Web Store instead"
+  echo "  of Load unpacked (a filesystem-loaded extension is dropped on reboot):"
+  echo "  https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb"
+else
+  echo "  1. Open chrome://extensions in Chrome"
+  echo "  2. Enable 'Developer mode' (top right toggle)"
+  echo "  3. Click 'Load unpacked'"
+  echo "  4. Select: $SCRIPT_DIR/extension"
+fi
+echo ""
+echo "  Then enable 'Allow user scripts' in the extension Details page"
+echo "  (needed by execute_js and wait_for(condition=function))."
 echo ""
 echo "=== Done ==="
 echo ""
