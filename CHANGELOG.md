@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.0 (unreleased)
+
+### Annotations MCP su tutti i 59 tool
+Nessun tool le dichiarava. Sono l'unico modo che l'agente ha di sapere cosa fa
+un tool al mondo *prima* di chiamarlo: senza `readOnlyHint`, `click` e
+`read_page` si equivalgono al momento della scelta. Ora ogni tool dichiara tutti
+e quattro gli hint, da una tabella sola (`TOOL_ANNOTATIONS`) applicata dallo
+stesso wrapper che filtra le capability — se fossero state aggiunte solo al ramo
+`caps === 'all'`, con `--caps core` (il default di chi installa) sarebbero
+sparite in silenzio.
+
+`destructiveHint: true` è riservato a ciò che distrugge davvero: `tab_action`
+(chiude una tab dell'utente), `set_storage` e `session_fixture` (sovrascrivono
+cookie e storage), `save_page` (sovrascrive un file), `read_console` con
+`clear:true` (cancella il buffer), `execute_js` (codice arbitrario).
+
+Costo misurato sul payload `tools/list`: +784 token con `caps=core` (+18,9%),
+cioè +1,9% della componente cache read del benchmark `form`. La variante
+"emetti solo i valori diversi dal default dello spec" risparmierebbe 173 token
+ma lascerebbe `annotations: {}` proprio su `execute_js` e `tab_action`, il cui
+profilo coincide con i default — indistinguibile da nessuna annotation. Scartata:
+un turno di quel benchmark costa ~41,5k di cache read, quindi una sola scelta di
+tool evitata ripaga l'overhead ~8,8 volte.
+
 ## 1.8.0 — 2026-07-29
 
 Correttezza, sicurezza e onestà dei numeri, dopo un audit a tappeto

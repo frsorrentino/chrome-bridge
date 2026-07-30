@@ -9,8 +9,8 @@ import { registerTools } from '../../server/tools.js';
 function setup(canned = {}) {
   const handlers = new Map();
   const fakeServer = {
-    tool(name, _desc, _schema, handler) {
-      handlers.set(name, handler);
+    tool(name, _desc, _schema, ...rest) {
+      handlers.set(name, rest[rest.length - 1]);
     },
   };
   const fakeWs = {

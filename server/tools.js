@@ -191,6 +191,101 @@ for (const [group, names] of Object.entries(TOOL_CAPS)) {
 }
 
 /**
+ * Annotations MCP, una voce per tool.
+ *
+ * Sono l'unico modo che l'agente ha di sapere cosa fa un tool al mondo PRIMA di
+ * chiamarlo: la descrizione in prosa la legge, ma non la può confrontare. Senza
+ * `readOnlyHint`, `click` e `read_page` si equivalgono al momento della scelta.
+ *
+ * Stanno qui e non sui singoli `server.tool(...)` perché il wrapper in
+ * registerTools le applica tutte da un punto solo, e
+ * `test/unit/tool-annotations.test.js` fallisce se un tool nuovo non ha la sua
+ * voce — impossibile aggiungere un tool e dimenticarle.
+ *
+ * openWorldHint = il tool può raggiungere o farsi raggiungere da server remoti
+ * (navigazione, fetch, mock di rete), non solo leggere lo stato già caricato.
+ */
+const ro = (open = false) => ({
+  readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: open,
+});
+const rw = ({ destructive = false, idempotent = false, open = false } = {}) => ({
+  readOnlyHint: false, destructiveHint: destructive, idempotentHint: idempotent, openWorldHint: open,
+});
+
+export const TOOL_ANNOTATIONS = {
+  // --- osservazione pura ---
+  accessibility_audit: ro(),
+  assert: ro(),
+  check_links: ro(true),
+  element_screenshot: ro(),
+  extract: ro(),
+  extract_table: ro(),
+  find_text: ro(),
+  full_page_screenshot: ro(),
+  get_frames: ro(),
+  get_interactives: ro(),
+  get_page_info: ro(),
+  get_performance: ro(),
+  get_status: ro(),
+  get_storage: ro(),
+  get_tabs: ro(),
+  list_event_listeners: ro(),
+  manage_downloads: ro(),
+  measure_spacing: ro(),
+  monitor_network: ro(true),
+  monitor_websocket: ro(true),
+  query_dom: ro(),
+  read_page: ro(),
+  screenshot: ro(),
+  security_headers: ro(true),
+  seo_audit: ro(),
+  unused_css: ro(),
+  wait_for: ro(),
+  watch_dom: ro(),
+  web_vitals: ro(),
+
+  // --- interazione con la pagina ---
+  click: rw({ open: true }),          // un click può navigare
+  drag_and_drop: rw(),
+  fill_form: rw({ idempotent: true }),
+  hover: rw({ idempotent: true }),
+  press_key: rw(),
+  scroll: rw(),
+  type_text: rw({ idempotent: true }),
+  upload_file: rw(),
+
+  // --- modifica di pagina, tab o resa ---
+  dismiss_overlays: rw({ idempotent: true }),
+  emulate_media: rw({ idempotent: true }),
+  handle_dialogs: rw({ idempotent: true }),
+  highlight_elements: rw({ idempotent: true }),
+  inject_css: rw({ idempotent: true }),
+  modify_dom: rw({ idempotent: true }),
+  screenshot_diff: rw({ idempotent: true }),
+  set_zoom: rw({ idempotent: true }),
+  viewport_resize: rw({ idempotent: true }),
+  create_tab: rw({ open: true }),
+  navigate: rw({ idempotent: true, open: true }),
+  tab_action: rw({ destructive: true, open: true }),  // close chiude una tab dell'utente
+
+  // --- rete, identità, posizione ---
+  http_auth: rw({ idempotent: true, open: true }),
+  network_rules: rw({ idempotent: true, open: true }),
+  set_geolocation: rw({ idempotent: true }),
+
+  // --- codice arbitrario ---
+  execute_js: rw({ destructive: true, open: true }),
+
+  // --- stato che può essere distrutto o sovrascritto ---
+  clipboard: rw({ idempotent: true }),
+  read_console: rw({ destructive: true }),                        // clear:true cancella il buffer
+  save_page: rw({ destructive: true, idempotent: true }),         // sovrascrive output_path
+  session_fixture: rw({ destructive: true, idempotent: true }),   // restore sovrascrive cookie e storage
+  session_record: rw(),
+  set_storage: rw({ destructive: true, idempotent: true }),
+};
+
+/**
  * Registra tutti i tool MCP.
  *
  * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
@@ -203,15 +298,26 @@ export function registerTools(server, wsManager, caps = 'all') {
     ? ['core', ...Object.keys(TOOL_CAPS)]
     : ['core', ...String(caps).split(',').map((s) => s.trim()).filter((s) => s && s !== 'core')];
 
-  // Filtro capability: i tool opt-in fuori dai gruppi attivi non vengono registrati
-  if (caps !== 'all') {
-    const enabled = new Set(String(caps).split(',').map((s) => s.trim()).filter(Boolean));
+  // Ogni registrazione passa da qui: il filtro capability scarta i tool opt-in
+  // fuori dai gruppi attivi, e le annotations vengono applicate da TOOL_ANNOTATIONS.
+  // Un solo wrapper per entrambe le cose, altrimenti con caps != 'all' le
+  // annotations sparivano insieme al filtro.
+  {
     const target = server;
+    const enabled = caps !== 'all'
+      ? new Set(String(caps).split(',').map((s) => s.trim()).filter(Boolean))
+      : null;
     server = {
       tool(name, desc, schema, handler) {
-        const group = TOOL_TO_CAP.get(name);
-        if (group && !enabled.has(group) && !enabled.has('all')) return;
-        target.tool(name, desc, schema, handler);
+        if (enabled) {
+          const group = TOOL_TO_CAP.get(name);
+          if (group && !enabled.has(group) && !enabled.has('all')) return;
+        }
+        const annotations = TOOL_ANNOTATIONS[name];
+        // Un tool senza voce resta registrato (meglio di un crash all'avvio):
+        // è il test tool-annotations a segnalarlo.
+        if (annotations) target.tool(name, desc, schema, annotations, handler);
+        else target.tool(name, desc, schema, handler);
       },
     };
   }

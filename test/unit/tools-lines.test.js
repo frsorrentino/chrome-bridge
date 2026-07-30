@@ -4,7 +4,7 @@ import { registerTools } from '../../server/tools.js';
 
 function setup(canned = {}) {
   const handlers = new Map();
-  const fakeServer = { tool(name, _d, _s, handler) { handlers.set(name, handler); } };
+  const fakeServer = { tool(name, _d, _s, ...rest) { handlers.set(name, rest[rest.length - 1]); } };
   const fakeWs = {
     isConnected: () => true, mode: 'primary', port: 8765,
     sendCommand: async (type) => {

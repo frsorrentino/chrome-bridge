@@ -29,7 +29,7 @@ test('stub server: serve body/status/content-type con CORS, 404 su id ignoto', a
 test('network_rules action=stub: crea stub e regola redirect verso di esso', async () => {
   const sent = [];
   const handlers = new Map();
-  registerTools({ tool: (n, _d, _s, h) => handlers.set(n, h) }, {
+  registerTools({ tool: (n, _d, _s, ...rest) => handlers.set(n, rest[rest.length - 1]) }, {
     isConnected: () => true, mode: 'p', port: 1,
     sendCommand: async (type, params) => { sent.push({ type, params }); return { rule_id: 9 }; },
   });

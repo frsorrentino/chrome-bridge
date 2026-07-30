@@ -8,8 +8,8 @@ import { registerTools, TOOL_CAPS } from '../../server/tools.js';
 function setup(canned = {}, caps = 'all') {
   const handlers = new Map();
   const fakeServer = {
-    tool(name, _desc, _schema, handler) {
-      handlers.set(name, handler);
+    tool(name, _desc, _schema, ...rest) {
+      handlers.set(name, rest[rest.length - 1]);
     },
   };
   const fakeWs = {
