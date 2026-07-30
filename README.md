@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-128%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-131%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **Chrome Bridge is an MCP server that connects Claude Code to your real, logged-in Chrome browser — measured 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome" extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
@@ -63,7 +63,7 @@ Claude Code calls `navigate` (returning clickable element refs), `accessibility_
 
 ## Token-Efficient Design
 
-- **Opt-in Surface**: 31 core tools cost ≈5.7k tokens of `tools/list`, all 60 cost ≈10.8k; specialized groups (audits, visual, network, storage, dom, files) are opt-in via `--caps`. That core figure was ≈3.8k in 1.8.0 — MCP annotations on every tool and fuller descriptions added ≈1.8k, deliberately: the win here is fewer round trips, not a smaller prefix (Playwright MCP's 23 core tools measured ≈4.6k in July 2026, so on this metric alone it is now the leaner one). Measure it yourself with `npm run measure`.
+- **Opt-in Surface**: 31 core tools cost ≈7.4k tokens of `tools/list`, all 60 cost ≈14.1k; specialized groups (audits, visual, network, storage, dom, files) are opt-in via `--caps`. That core figure was ≈3.8k in 1.8.0 and roughly doubled in 1.10.0: MCP annotations on every tool, rewritten descriptions, and a documented `.describe()` on all 254 parameters (coverage went from 35% to 100%). The trade is deliberate and it is not free — on the form benchmark it adds ≈8% to the cache-read tokens per turn — but the measured advantage was never prefix size, it was round trips: 2.75× fewer turns. Playwright MCP's 23 core tools measured ≈4.6k in July 2026, so on prefix size alone it is the leaner one. Measure ours with `npm run measure`.
 - **Act-from-Result**: Tools attach a capped preview of interactive elements with short refs. Actions only report a `page_changed` delta when the URL or title actually changes.
 - **Optimized Media**: Screenshots are downscaled to ≤1568px. Full-page captures are sliced into readable segments.
 - **Zero-Token Escape Hatches**: The [CLI](#cli) skips MCP schemas entirely, and recorded flows [replay](#launch-mode-headless--ci) without any model in the loop.

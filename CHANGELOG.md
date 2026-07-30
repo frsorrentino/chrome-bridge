@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.10.0 (unreleased)
+
+### Ogni parametro documentato: copertura da 35% a 100%
+L'audit di Glama misura la dimensione `Parameters` come copertura letterale dei
+`.describe()`: su `http_auth`, *"three parameters with 0% description coverage"*,
+voto 1/5. Erano 88 parametri descritti su 254, con 17 tool a copertura zero.
+Ora sono 254 su 254.
+
+Non è prosa aggiunta per far numero: lo schema JSON dichiara la struttura (tipo,
+enum, default) ma non l'intento. `selector` non diceva che `">>>"` perfora lo
+shadow DOM, `tab_id` non diceva cosa succede se lo ometti, `set_storage.action`
+non diceva che `clear` ignora `key` e cancella tutto. Sono le informazioni per
+cui l'agente spendeva una chiamata in più.
+
+`tab_id` e `frame_id` compaiono in 54 e 12 tool: hanno un testo unico condiviso, e
+`test/unit/tool-parameters.test.js` fallisce se divergono — oltre a fallire se un
+parametro qualsiasi non ha descrizione, o se una descrizione supera 130 caratteri
+(la stessa rubrica pesa la concisione).
+
+### Confini fra tool gemelli, dopo una regressione
+La 1.9.0 ha fatto scendere `Disambiguation` da 5/5 a 4/5, e la causa era nostra:
+avevo messo rimandi incrociati ("per le tabelle usa extract_table", "per CLS usa
+web_vitals") che hanno reso visibile una vicinanza fra tool prima non notata.
+Ora ognuno dichiara il proprio confine invece di delegarlo al gemello:
+`screenshot` è il solo viewport, `element_screenshot` il ritaglio più economico,
+`get_performance` copre "quanto è arrivato veloce il documento",  `web_vitals`
+"quanto è stabile e reattivo dopo il load", `extract_table` il markup tabellare,
+`extract` le strutture ripetute non tabellari.
+
+Il rimando da `read_page` a `extract_table` resta: quello previene l'errore da
+50.070 byte contro 236 documentato in `bench/RESULTS.md`, e vale più di un punto
+di rubrica.
+
+### Costo, dichiarato
+Il payload `tools/list` del set core passa da ≈5,7k a ≈7,4k token, ed è quasi il
+doppio dei ≈3,8k della 1.8.0. Sul benchmark `form` sono circa +8% di cache read
+per turno. Il vantaggio misurato non è mai stato la dimensione del prefisso ma il
+numero di turni (2,75×); il README ora riporta entrambi i numeri e dice che sulla
+sola dimensione del prefisso Playwright MCP è più snello.
+
 ## 1.9.0 — 2026-07-30
 
 ### `http_request` — richieste HTTP con i cookie dell'utente
