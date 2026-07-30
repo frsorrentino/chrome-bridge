@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.11.1 — 2026-07-30
+
+Solo testi. Il changelog della 1.11.0 diceva "cinque capacità **prese da**" un
+altro progetto: dichiarava più di quanto fosse successo. Quel che è passato sono
+decisioni di progettazione — nessun codice: il confronto riga per riga del
+renderer markdown dà **zero righe significative identiche** su 40 e 73, contro un
+substrato diverso (API dell'estensione contro CDP). Su tre punti l'implementazione
+fa l'opposto: albero percorso per blocchi invece di selettore piatto, intestazioni
+vere invece di segnaposto, troncamento dichiarato invece che silenzioso.
+
+Il perché tecnico resta dov'era: i tre difetti dei renderer DOM→markdown sono
+ancora fissati come test, e la ragione per cui `save_to` è opt-in per chiamata
+invece che automatico è ancora scritta.
+
+Nessun cambiamento funzionale. L'estensione è identica alla 1.11.0 a meno del
+numero di versione, quindi **non viene ricaricata sul Chrome Web Store**: lì la
+1.11.0 è in review, e sostituirla azzererebbe l'attesa senza cambiare una riga di
+ciò che gira nel browser.
+
 ## 1.11.0 — 2026-07-30
 
 Cinque capacità che mancavano, tutte come **parametri di tool esistenti** e
