@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.frsorrentino/chrome-bridge",
-  "description": "Browser automation via the user's real Chrome over a local WebSocket. 60 token-efficient web-dev tools: DOM inspection, visual regression, a11y/SEO/security audits, network mocking. Works on ChromeOS/Crostini.",
+  "description": "Your real, logged-in Chrome as an MCP server: 60 token-efficient web-dev tools. ChromeOS included.",
   "repository": {
     "url": "https://github.com/frsorrentino/chrome-bridge",
     "source": "github"
