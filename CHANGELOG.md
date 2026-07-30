@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.10.1 — 2026-07-30
+
+### Gli ultimi cinque tool sotto la A
+`type_text`, `wait_for`, `highlight_elements`, `session_fixture`,
+`viewport_resize`. Ogni riscrittura corregge il difetto che l'audit citava, e
+ogni affermazione aggiunta è stata verificata nel sorgente, non dedotta:
+
+- **`wait_for` su timeout non solleva**: restituisce `found: false` con una
+  ragione (`service-worker.js:1453`). Non era scritto da nessuna parte, e un
+  chiamante che ignora il campo procede come se l'attesa fosse riuscita. Ora la
+  descrizione porta anche i default reali: 10s per element e function, 15s per
+  navigation e network_idle.
+- **`type_text` sostituisce, non accoda**, assegna attraverso il setter nativo
+  perché gli input controllati di React registrino il cambio, e poi emette
+  `input` e `change`. `mode=keys` emette invece keydown/input/keyup per
+  carattere: serve ad autocomplete e campi mascherati.
+- **`session_fixture` ha un'azione `list`** che non era mai stata nominata. E
+  `save` sovrascrive senza chiedere, mentre `restore` scrive sopra ciò che c'è
+  invece di azzerare prima.
+- **`viewport_resize` ridimensiona la finestra, non il viewport**: quello
+  renderizzato resta più piccolo dell'altezza della barra del browser. `width` e
+  `height` sovrascrivono ciascuno la propria metà del preset.
+- **Gli overlay di `highlight_elements` sono nodi DOM iniettati**: un reload li
+  perde, e ogni chiamata azzera quelli precedenti invece di accumularli.
+
+`test/unit/tool-descriptions.test.js` verifica che questi cinque fatti restino
+nelle descrizioni: sono i comportamenti che cambiano l'esito di una chiamata.
+
+Costo: il payload `tools/list` del core passa da ≈7,4k a ≈7,6k token.
+
+### Nota su cosa NON è stato inseguito
+`Server Coherence` di Glama è passata da A a C fra due release senza che un
+singolo tool cambiasse nome: `Naming Consistency` da 5/5 ("No mixing of
+conventions") a 2/5 ("Tool names lack a consistent pattern"), `Tool Count` da 3/5
+"justified by the broad scope" a 2/5 "excessively large" con gli stessi 60 tool.
+È un giudizio LLM rigenerato a ogni release, con varianza di tre punti su cinque
+a input costante. Le azioni che chiederebbe — rinominare tool pubblici,
+cancellarne di utili — danneggerebbero un'estensione con utenti installati per un
+numero che si muove da sé. Non è stato inseguito, e non va inseguito.
+
 ## 1.10.0 — 2026-07-30
 
 ### Ogni parametro documentato: copertura da 35% a 100%

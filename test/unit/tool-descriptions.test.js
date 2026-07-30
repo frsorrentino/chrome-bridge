@@ -49,6 +49,28 @@ test('i tool che scrivono dichiarano in prosa cosa toccano', () => {
   }
 });
 
+test('i fatti su cui l\'agente conta sono nella descrizione, non solo nel codice', () => {
+  // Ognuno di questi è stato verificato nel sorgente: sono i comportamenti che
+  // l'audit segnalava come non dichiarati, e che cambiano l'esito di una chiamata.
+  const cases = [
+    // extension/service-worker.js:1453 — su timeout risolve, non solleva
+    ['wait_for', /found/i, 'un timeout restituisce found:false invece di sollevare: se non è scritto, l\'agente lo tratta come successo'],
+    // mode=set assegna tutto il valore e dispatcha input+change
+    ['type_text', /replac|overwrit/i, 'mode=set sostituisce il valore, non lo accoda'],
+    // action=list esiste ma non era citata
+    ['session_fixture', /list/i, 'l\'azione list non era nominata'],
+    // ridimensiona la finestra, non il viewport
+    ['viewport_resize', /window/i, 'window e viewport non coincidono: va detto quale dei due cambia'],
+    // gli overlay sono nodi DOM iniettati
+    ['highlight_elements', /reload|navigat/i, 'gli overlay non sopravvivono a una navigazione'],
+  ];
+  for (const [name, pattern, why] of cases) {
+    const t = TOOLS.find((x) => x.name === name);
+    assert.ok(t, `tool "${name}" non registrato`);
+    assert.match(t.desc, pattern, `${name}: ${why}`);
+  }
+});
+
 test('i tool costosi in token avvertono del costo', () => {
   for (const name of ['read_page', 'full_page_screenshot']) {
     const t = TOOLS.find((x) => x.name === name);

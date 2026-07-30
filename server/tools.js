@@ -586,7 +586,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- type_text ---
   server.tool(
     'type_text',
-    'Type text into an input, by CSS selector or by ref from get_interactives.',
+    'Put text into an input, textarea or contenteditable, by CSS selector or by a ref from get_interactives. '
+      + 'Replaces the whole value rather than appending, and assigns through the native setter so React and '
+      + 'Vue controlled inputs register the change, then fires input and change. mode=keys instead emits '
+      + 'keydown/input/keyup per character, which is what autocomplete and masked fields need — slower, so '
+      + 'reach for it only when mode=set leaves the field empty or the dropdown never opens.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -859,7 +863,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- wait_for ---
   server.tool(
     'wait_for',
-    'Wait for: element (selector in DOM), function (JS expression truthy; needs "Allow user scripts"), navigation (mode=spa for route changes), network_idle.',
+    'Block until a condition holds: element (selector in the DOM), function (JS expression turns truthy; needs '
+      + 'the "Allow user scripts" toggle), navigation (mode=spa for client-side route changes), network_idle. '
+      + 'Polls until timeout — 10s for element and function, 15s for navigation and network_idle — then '
+      + '**returns `found: false` with a reason instead of raising**, so a caller that ignores the result '
+      + 'silently proceeds as if the wait had succeeded. Read-only: waiting changes nothing on the page.',
     {
       condition: z.enum(['element', 'function', 'navigation', 'network_idle']).describe('function needs expression; element needs selector'),
       selector: z.string().optional().describe('condition=element'),
@@ -983,7 +991,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- viewport_resize ---
   server.tool(
     'viewport_resize',
-    'Resize Chrome window to preset (mobile/tablet/desktop) or custom dimensions',
+    'Resize the Chrome **window** to a preset (mobile 375x812, tablet 768x1024, desktop 1440x900) or to explicit '
+      + 'dimensions. The rendered viewport ends up smaller than what you ask for, by the height of the browser '
+      + 'chrome — measure it with execute_js if the exact number matters. width and height each override the '
+      + 'corresponding half of the preset, so preset plus width gives a custom width at the preset height. '
+      + 'A maximized window on ChromeOS ignores the request.',
     {
       preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('375x812, 768x1024, 1440x900'),
       width: z.number().optional().describe('Overrides preset'),
@@ -1072,7 +1084,10 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- highlight_elements ---
   server.tool(
     'highlight_elements',
-    'Add colored overlay on elements matching a CSS selector. remove=true clears all highlights.',
+    'Outline every element matching a selector with a coloured overlay, to see on a screenshot what a selector '
+      + 'actually caught. Each call clears the overlays left by the previous one instead of stacking them, and '
+      + 'remove=true clears without adding. The overlays are injected DOM nodes: a reload or a navigation drops '
+      + 'them, and they sit above the page without altering its layout or its own styles.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Every match is outlined'),
       color: z.string().optional().default('rgba(255,0,0,0.3)').describe('Any CSS color for the overlay label'),
@@ -1740,7 +1755,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- session_fixture ---
   server.tool(
     'session_fixture',
-    'Save/restore localStorage+sessionStorage+cookies as a named fixture (e.g. a logged-in state). Restore requires the tab to be on the origin recorded at save.',
+    'Snapshot localStorage, sessionStorage and cookies of the current origin into a named fixture on the server, '
+      + 'restore one, or list what has been saved. A logged-in state is the usual reason. save overwrites a '
+      + 'fixture of the same name without asking; restore writes entries on top of what is already there '
+      + 'rather than clearing first, and refuses outright when the tab sits on a different origin than the '
+      + 'one recorded — cookies would otherwise attach to the wrong site. name is required except for list.',
     {
       action: z.enum(['save', 'restore', 'list']).describe('save snapshots the current origin; restore writes it back'),
       name: z.string().optional().describe('Required for save/restore'),
