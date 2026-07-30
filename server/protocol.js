@@ -43,6 +43,7 @@ export const MessageType = Object.freeze({
   UPLOAD_FILE:           'upload_file',
   WAIT_FOR_NAVIGATION:   'wait_for_navigation',
   WAIT_FOR_NETWORK_IDLE: 'wait_for_network_idle',
+  WAIT_FOR_TEXT:         'wait_for_text',
   HANDLE_DIALOGS:        'handle_dialogs',
   FIND_TEXT:             'find_text',
   NETWORK_RULES:         'network_rules',
@@ -81,7 +82,7 @@ export const MessageType = Object.freeze({
 });
 
 // Versione
-export const VERSION               = '1.10.1';
+export const VERSION               = '1.11.0';
 
 // Configurazione
 export const DEFAULT_PORT          = 8765;
@@ -127,6 +128,7 @@ export function getTimeout(type) {
   if (type === MessageType.WAIT_FOR_ELEMENT
     || type === MessageType.WAIT_FOR_NAVIGATION
     || type === MessageType.WAIT_FOR_NETWORK_IDLE
+    || type === MessageType.WAIT_FOR_TEXT
     || type === MessageType.UPLOAD_FILE
     || type === MessageType.MANAGE_DOWNLOADS
     || type === MessageType.SAVE_PAGE

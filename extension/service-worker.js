@@ -6,6 +6,7 @@
  */
 
 import './telemetry.js';
+import { buildMarkdown } from './lib/page-markdown.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -423,6 +424,8 @@ async function executeCommand(msg) {
       return await cmdManageDownloads(params);
     case 'save_page':
       return await cmdSavePage(params);
+    case 'wait_for_text':
+      return await cmdWaitForText(params);
     case 'http_request':
       return await cmdHttpRequest(params);
     case 'set_zoom':
@@ -722,13 +725,13 @@ async function cmdExecuteJs({ code, tab_id, frame_id }) {
   }
 }
 
-async function cmdClick({ selector, tab_id, frame_id, force = false }) {
+async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'left', count = 1 }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
-    func: (sel, forceClick) => {
+    func: (sel, forceClick, btn, times) => {
       function deepQuery(sel) {
         if (!sel.includes('>>>')) return document.querySelector(sel);
         const parts = sel.split('>>>').map((s) => s.trim());
@@ -755,15 +758,29 @@ async function cmdClick({ selector, tab_id, frame_id, force = false }) {
           return { clicked: false, occluded: true, occluder: { selector: occluderSel, tag: top.tagName.toLowerCase(), text: (top.textContent || '').trim().substring(0, 80) } };
         }
       }
-      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
-      el.dispatchEvent(new PointerEvent('pointerdown', opts));
-      el.dispatchEvent(new MouseEvent('mousedown', opts));
-      el.dispatchEvent(new PointerEvent('pointerup', opts));
-      el.dispatchEvent(new MouseEvent('mouseup', opts));
-      el.click();
-      return { clicked: true, tagName: el.tagName, text: el.textContent?.substring(0, 100) };
+      // button 2 = destro: il browser non apre il suo menu nativo da un evento
+      // sintetico, ma le pagine che ne implementano uno proprio ascoltano
+      // 'contextmenu', ed è quello il caso d'uso reale.
+      const right = btn === 'right';
+      const clickCount = Math.max(1, Number(times) || 1);
+      const base = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: right ? 2 : 0, buttons: right ? 2 : 1 };
+
+      for (let i = 0; i < clickCount; i++) {
+        const opts = { ...base, detail: i + 1 };
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        if (right) el.dispatchEvent(new MouseEvent('contextmenu', opts));
+        else el.click();
+      }
+      // dblclick non è implicito nei due click: va emesso a parte, ed è quello
+      // che seleziona una parola o apre un editor inline.
+      if (!right && clickCount >= 2) el.dispatchEvent(new MouseEvent('dblclick', { ...base, detail: 2 }));
+
+      return { clicked: true, button: right ? 'right' : 'left', count: clickCount, tagName: el.tagName, text: el.textContent?.substring(0, 100) };
     },
-    args: [selector, force],
+    args: [selector, force, button, count],
     world: 'MAIN',
   });
 
@@ -851,6 +868,18 @@ async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
       world: 'MAIN',
     });
     return results?.[0]?.result ?? '';
+  }
+
+  if (mode === 'markdown') {
+    // buildMarkdown è autocontenuta apposta: chrome.scripting ne serializza il
+    // sorgente e la esegue nella pagina, dove non esiste il modulo.
+    const res = await chrome.scripting.executeScript({
+      target: scriptTarget(tabId, frame_id),
+      func: buildMarkdown,
+      args: [null],
+      world: 'MAIN',
+    });
+    return res?.[0]?.result ?? '';
   }
 
   if (mode === 'accessibility') {
@@ -1639,7 +1668,7 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
 
 // --- viewport_resize ---
 
-async function cmdViewportResize({ preset, width, height, tab_id }) {
+async function cmdViewportResize({ preset, width, height, read_only = false, tab_id }) {
   const tabId = await resolveTabId(tab_id);
   const tab = await chrome.tabs.get(tabId);
 
@@ -1656,10 +1685,13 @@ async function cmdViewportResize({ preset, width, height, tab_id }) {
   if (targetW) updateOpts.width = targetW;
   if (targetH) updateOpts.height = targetH;
 
-  if (Object.keys(updateOpts).length === 0) throw new Error('Provide preset, width, or height');
-
-  await chrome.windows.update(tab.windowId, updateOpts);
-  await new Promise((r) => setTimeout(r, 200));
+  if (!read_only) {
+    if (Object.keys(updateOpts).length === 0) throw new Error('Provide preset, width, or height');
+    await chrome.windows.update(tab.windowId, updateOpts);
+    // La finestra si ridisegna in modo asincrono: senza la pausa si leggono le
+    // dimensioni vecchie e si riporta un risultato falso.
+    await new Promise((r) => setTimeout(r, 200));
+  }
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
@@ -1671,6 +1703,7 @@ async function cmdViewportResize({ preset, width, height, tab_id }) {
     world: 'MAIN',
   });
   const actual = results?.[0]?.result ?? {};
+  if (read_only) return { actual };
   return { requested: { width: targetW, height: targetH, preset: preset || null }, actual };
 }
 
@@ -3506,6 +3539,51 @@ async function cmdHttpRequest({ url, method = 'GET', headers, body, binary = fal
   }
   const text = await res.text();
   return { ...common, body: text, size: text.length };
+}
+
+// --- wait_for_text ---
+
+/**
+ * Attende che un testo compaia. Si poteva già fare con wait_for_function, ma
+ * quella strada richiede il toggle "Allow user scripts" e un'espressione scritta
+ * a mano: questa no.
+ */
+async function cmdWaitForText({ text, selector, timeout = 10000, interval = 200, tab_id, frame_id }) {
+  if (!text) throw new Error('Missing required parameter: text');
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (needle, scopeSel, tout, intv) => new Promise((resolve) => {
+      const started = Date.now();
+      const wanted = String(needle).toLowerCase();
+      const check = () => {
+        const root = scopeSel ? document.querySelector(scopeSel) : document.body;
+        const haystack = (root?.innerText || '').toLowerCase();
+        const at = haystack.indexOf(wanted);
+        if (at !== -1) {
+          resolve({
+            found: true,
+            waited_ms: Date.now() - started,
+            // Contesto attorno alla prima occorrenza: conferma di aver trovato
+            // la cosa giusta senza restituire l'intera pagina.
+            context: (root?.innerText || '').slice(Math.max(0, at - 60), at + wanted.length + 60).trim(),
+          });
+          return;
+        }
+        if (Date.now() - started >= tout) {
+          resolve({ found: false, error: `Text not found within ${tout}ms: ${needle}` });
+          return;
+        }
+        setTimeout(check, intv);
+      };
+      check();
+    }),
+    args: [text, selector || null, timeout, Math.max(50, interval)],
+    world: 'MAIN',
+  });
+
+  return results?.[0]?.result ?? { found: false, error: 'No result' };
 }
 
 async function cmdSavePage({ tab_id }) {

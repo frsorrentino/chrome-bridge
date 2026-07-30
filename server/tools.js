@@ -187,6 +187,17 @@ export const TOOL_CAPS = {
 
 // Parametri ubiqui: un solo testo, così `tab_id` non significa una cosa in un
 // tool e un'altra nel gemello. test/unit/tool-parameters.test.js lo verifica.
+// save_to: il payload va su disco e nel contesto resta solo il percorso più un
+// sommario. L'idea è di superpowers-chrome, che scrive automaticamente a ogni
+// azione; qui è opt-in, perché scrivere file per chi non li leggerà è una tassa.
+const saveToField = (what) => z.string().optional()
+  .describe(`Absolute path: write ${what} there and return the path instead of the content`);
+
+async function savedSummary(path, bytes, extra = {}) {
+  await writeFile(path, bytes);
+  return { content: [{ type: 'text', text: jsonText({ saved: path, bytes: bytes.length, ...extra }) }] };
+}
+
 const selectorField = (extra = '') => z.string()
   .describe(('CSS selector; ">>>" pierces shadow DOM. ' + extra).trim());
 const waitAfter = z.enum(['none', 'navigation', 'networkidle']).optional().default('none')
@@ -509,9 +520,12 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'Downscaled to ≤1568px, so fine print may not survive.',
     {
       tab_id: tabId,
+      save_to: saveToField('the PNG'),
     },
-    async ({ tab_id }) => {
+    async ({ tab_id, save_to }) => {
       const data = await send(MessageType.SCREENSHOT, { tab_id });
+      const b64 = data?.image ?? data?.data;
+      if (save_to && b64) return savedSummary(save_to, Buffer.from(b64, 'base64'), { mimeType: 'image/png' });
       // data.image è base64 PNG
       if (data && data.image) {
         return {
@@ -562,14 +576,16 @@ export function registerTools(server, wsManager, caps = 'all') {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
       force:    z.boolean().optional().default(false).describe('Click even if occluded'),
+      button:   z.enum(['left', 'right']).optional().default('left').describe('right opens the page context menu instead of activating the element'),
+      count:    z.number().optional().default(1).describe('2 emits dblclick after the two clicks, which is what selects a word or opens an editor'),
       wait_after: waitAfter,
       tab_id:   tabId,
       frame_id: frameId,
     },
-    async ({ selector, ref, force, wait_after, tab_id, frame_id }) => {
+    async ({ selector, ref, force, button, count, wait_after, tab_id, frame_id }) => {
       const target = resolveTarget(selector, ref, tab_id);
       const before = await tabSnapshot(tab_id);
-      const data = await send(MessageType.CLICK, { selector: target, force, frame_id, tab_id });
+      const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id);
       const changed = data?.occluded ? null : pageDelta(before, await tabSnapshot(tab_id));
@@ -617,21 +633,26 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- read_page ---
   server.tool(
     'read_page',
-    'Read the page as text (default), raw HTML, or accessibility tree. Read-only. Expensive on large pages: '
+    'Read the page as text (default), markdown, raw HTML, or accessibility tree. Read-only. markdown keeps '
+      + 'headings, links and tables at a fraction of the HTML cost, and is usually the right middle ground. '
+      + 'Expensive on large pages: '
       + 'HTML on a big table costs tens of thousands of tokens for data you then filter anyway — prefer '
       + 'extract_table or extract for tabular and repeated content, and get_interactives to find click targets.',
     {
-      mode:       z.enum(['text', 'html', 'accessibility']).default('text').describe('text strips markup, html keeps it (costly), accessibility returns the a11y tree'),
+      mode:       z.enum(['text', 'markdown', 'html', 'accessibility']).default('text').describe('text strips markup, markdown keeps headings/links/tables far cheaper than html, accessibility returns the a11y tree'),
       tab_id:     tabId,
       frame_id:   frameId,
       max_length: z.number().optional().default(50000).describe('Max output chars'),
+      save_to:    saveToField('the page'),
     },
-    async ({ mode, tab_id, frame_id, max_length }) => {
+    async ({ mode, tab_id, frame_id, max_length, save_to }) => {
       const data = await send(MessageType.READ_PAGE, { mode, tab_id, frame_id });
+      const text = typeof data === 'string' ? data : JSON.stringify(data);
+      if (save_to) return savedSummary(save_to, Buffer.from(text, 'utf8'), { mode: mode ?? 'text' });
       return {
         content: [{
           type: 'text',
-          text: truncateText(typeof data === 'string' ? data : JSON.stringify(data), max_length ?? 50000, 'max_length'),
+          text: truncateText(text, max_length ?? 50000, 'max_length'),
         }],
       };
     }
@@ -869,8 +890,9 @@ export function registerTools(server, wsManager, caps = 'all') {
       + '**returns `found: false` with a reason instead of raising**, so a caller that ignores the result '
       + 'silently proceeds as if the wait had succeeded. Read-only: waiting changes nothing on the page.',
     {
-      condition: z.enum(['element', 'function', 'navigation', 'network_idle']).describe('function needs expression; element needs selector'),
-      selector: z.string().optional().describe('condition=element'),
+      condition: z.enum(['element', 'text', 'function', 'navigation', 'network_idle']).describe('element and text need selector or text; function needs expression'),
+      selector: z.string().optional().describe('condition=element; with condition=text it narrows the search to that subtree'),
+      text: z.string().optional().describe('Literal text to wait for (condition=text), matched case-insensitively'),
       expression: z.string().optional().describe('JS expression (condition=function)'),
       visible: z.boolean().optional().default(false).describe('Element must also be visible'),
       mode: z.enum(['load', 'spa']).optional().default('load').describe('spa = pushState/popstate/hashchange'),
@@ -880,11 +902,15 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: tabId,
       frame_id: frameId,
     },
-    async ({ condition, selector, expression, visible, mode, idle_ms, timeout, interval, tab_id, frame_id }) => {
+    async ({ condition, selector, text, expression, visible, mode, idle_ms, timeout, interval, tab_id, frame_id }) => {
       let data;
       if (condition === 'element') {
         data = await send(MessageType.WAIT_FOR_ELEMENT, {
           selector, timeout: timeout ?? 10000, interval: interval ?? 200, visible: visible ?? false, tab_id, frame_id,
+        });
+      } else if (condition === 'text') {
+        data = await send(MessageType.WAIT_FOR_TEXT, {
+          text, selector, timeout: timeout ?? 10000, interval: interval ?? 200, tab_id, frame_id,
         });
       } else if (condition === 'function') {
         data = await send(MessageType.WAIT_FOR_FUNCTION, {
@@ -997,13 +1023,14 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'corresponding half of the preset, so preset plus width gives a custom width at the preset height. '
       + 'A maximized window on ChromeOS ignores the request.',
     {
+      action: z.enum(['set', 'get']).optional().default('set').describe('get reports the current viewport without resizing anything'),
       preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('375x812, 768x1024, 1440x900'),
       width: z.number().optional().describe('Overrides preset'),
       height: z.number().optional().describe('Overrides preset'),
       tab_id: tabId,
     },
-    async ({ preset, width, height, tab_id }) => {
-      const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, tab_id });
+    async ({ action, preset, width, height, tab_id }) => {
+      const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, read_only: (action ?? 'set') === 'get', tab_id });
       return {
         content: [{
           type: 'text',
@@ -1877,8 +1904,9 @@ export function registerTools(server, wsManager, caps = 'all') {
       format: z.enum(['lines', 'json']).optional().default('lines').describe('lines is compact; json keeps one object per record'),
       tab_id: tabId,
       max_length: z.number().optional().default(20000).describe('Max output chars'),
+      save_to: saveToField('the records as JSON'),
     },
-    async ({ item_selector, fields, max_items, format, tab_id, max_length }) => {
+    async ({ item_selector, fields, max_items, format, tab_id, max_length , save_to }) => {
       max_length = max_length ?? DEFAULT_MAX_OUTPUT;
       const html = await send(MessageType.READ_PAGE, { mode: 'html', tab_id });
       if (typeof html !== 'string') throw new Error('Could not read page HTML');
@@ -1895,6 +1923,7 @@ export function registerTools(server, wsManager, caps = 'all') {
         }
         return row;
       });
+      if (save_to) return savedSummary(save_to, Buffer.from(JSON.stringify({ total: nodes.length, shown: items.length, items }), 'utf8'), { total: nodes.length, shown: items.length });
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: truncateText(JSON.stringify({ total: nodes.length, shown: items.length, items }), max_length, 'max_items or max_length') }] };
       }

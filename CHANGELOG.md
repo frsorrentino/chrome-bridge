@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.11.0 — 2026-07-30
+
+Cinque capacità prese da `obra/superpowers-chrome` dopo averne letto il sorgente.
+Tutte come **parametri di tool esistenti**, nessun tool nuovo: `Tool Count` 2/5 è
+l'unico rilievo Glama stabile su tre misurazioni, e nessuna di queste lo
+giustificava.
+
+### `click` con tasto destro e doppio click
+`grep -c "dblclick\|contextmenu" extension/service-worker.js` restituiva **0**.
+Ora `button: 'right'` emette `contextmenu` — i menu contestuali delle pagine lo
+ascoltano, quello nativo del browser no da un evento sintetico — e `count: 2`
+emette `dblclick` dopo i due click, che è ciò che seleziona una parola o apre un
+editor inline. `dblclick` non è implicito nei due click: va emesso a parte.
+
+### `wait_for` attende un testo
+`condition: 'text'`. Si poteva già fare con `condition: 'function'`, ma quella
+strada richiede il toggle "Allow user scripts" e un'espressione scritta a mano.
+Restituisce anche il contesto attorno alla prima occorrenza, per confermare di
+aver trovato la cosa giusta senza restituire la pagina.
+
+### `viewport_resize` sa leggere
+`action: 'get'` riporta il viewport senza ridimensionare. Toglie la toppa che la
+descrizione del tool stesso ammetteva: *"measure it with execute_js if the exact
+number matters"*.
+
+### `read_page(mode: 'markdown')`
+Struttura preservata a una frazione del costo di `html`. L'idea è loro,
+l'implementazione no — la loro ha tre difetti che qui sono test:
+
+- il selettore piatto include sia `a` sia `li`, quindi `<li><a>x</a></li>` esce
+  **due volte**; qui l'albero è percorso per blocchi;
+- le tabelle sono troncate a 10 righe × 3 colonne con un'intestazione finta
+  `| Table Content |` che butta via gli header veri; qui gli header sono quelli
+  della pagina, il cap è 50 righe e viene **dichiarato**, con il rimando a
+  `extract_table` e al suo filtro server-side;
+- taglio secco a 50.000 caratteri senza dirlo.
+
+Preso invece tale e quale il loro trattamento delle immagini: sommario di quante
+sono ≥100×100, riferimenti inline per quelle ≥50×50 con le dimensioni, icone
+sotto soglia scartate.
+
+### `save_to` su `read_page`, `extract`, `screenshot`
+Il payload va su disco e nel contesto resta il percorso più un sommario. Loro lo
+fanno automaticamente a ogni azione, scrivendo quattro file; qui è opt-in per
+chiamata, perché scrivere file per chi non li leggerà è una tassa, e
+chrome-bridge non controlla la session dir del client.
+
+### Costo
+60 tool, 31 core, invariati. Il payload `tools/list` del core passa da ≈7,6k a
+≈7,9k token. `save_to` e `markdown` servono a restituirne molti di più di quanti
+ne costino, sulle pagine grandi.
+
 ## 1.10.1 — 2026-07-30
 
 ### Gli ultimi cinque tool sotto la A
