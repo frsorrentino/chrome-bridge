@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9.0 (unreleased)
+## 1.9.0 — 2026-07-30
 
 ### `http_request` — richieste HTTP con i cookie dell'utente
 La fetch parte dal service worker dell'estensione con `credentials: 'include'`,
