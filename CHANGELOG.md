@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.10.0 (unreleased)
+## 1.10.0 — 2026-07-30
 
 ### Ogni parametro documentato: copertura da 35% a 100%
 L'audit di Glama misura la dimensione `Parameters` come copertura letterale dei
