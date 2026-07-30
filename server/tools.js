@@ -289,6 +289,7 @@ export const TOOL_ANNOTATIONS = {
   set_zoom: rw({ idempotent: true }),
   viewport_resize: rw({ idempotent: true }),
   create_tab: rw({ open: true }),
+  move_tab: rw({ idempotent: true }),   // rispostare dove è già = stesso esito
   navigate: rw({ idempotent: true, open: true }),
   tab_action: rw({ destructive: true, open: true }),  // close chiude una tab dell'utente
 
@@ -1728,6 +1729,24 @@ export function registerTools(server, wsManager, caps = 'all') {
           ),
         }],
       };
+    }
+  );
+
+  // --- move_tab ---
+  server.tool(
+    'move_tab',
+    'Move an existing tab into another window (chrome.tabs.move), e.g. to consolidate windows that were '
+      + 'each opened separately. Does not create or close anything: the tab keeps its id, its history and its '
+      + 'page state. Both windows must be normal browser windows — Chrome refuses to move a tab into a popup or '
+      + 'an app window, and the refusal is reported verbatim rather than retried.',
+    {
+      tab_id: z.number().describe('Tab to move; get it from get_tabs'),
+      window_id: z.number().describe('Destination window; get_tabs reports windowId for every tab'),
+      index: z.number().optional().default(-1).describe('Position in the destination window; -1 appends at the end'),
+    },
+    async ({ tab_id, window_id, index }) => {
+      const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, index: index ?? -1 });
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 

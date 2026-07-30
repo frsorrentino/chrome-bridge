@@ -27,10 +27,10 @@ function schemas() {
     { isConnected: () => false, mode: 'primary', host: '127.0.0.1', port: 8765, sendCommand: async () => ({}) },
     'all',
   );
-  return out.map(({ name, schema }) => ({
-    name,
-    props: Object.entries(toJsonSchemaCompat(z.object(schema), { strictUnions: true }).properties ?? {}),
-  }));
+  return out.map(({ name, schema }) => {
+    const js = toJsonSchemaCompat(z.object(schema), { strictUnions: true });
+    return { name, props: Object.entries(js.properties ?? {}), required: js.required ?? [] };
+  });
 }
 
 const TOOLS = schemas();
@@ -54,10 +54,26 @@ test('nessuna descrizione di parametro è un tema', () => {
 test('i parametri ubiqui sono descritti allo stesso modo in tutti i tool', () => {
   // Copia-incolla divergente su tab_id/frame_id significa che un tool dice una
   // cosa e il gemello un'altra: l'agente non può fidarsi di nessuno dei due.
+  //
+  // Il confronto vale sulle occorrenze OPZIONALI, che sono quelle che portano il
+  // contratto del target implicito ("se omesso, la tab di sessione"). Dove il
+  // parametro è obbligatorio non c'è nessun default da descrivere e il testo
+  // deve dire altro: move_tab(tab_id) è "quale scheda spostare", non "se omesso".
   for (const param of ['tab_id', 'frame_id']) {
     const texts = new Set(
-      TOOLS.flatMap(({ props }) => props.filter(([k]) => k === param).map(([, v]) => v?.description)),
+      TOOLS.flatMap(({ name, props, required }) => props
+        .filter(([k]) => k === param && !required.includes(k))
+        .map(([, v]) => v?.description)),
     );
-    assert.equal(texts.size, 1, `${param} è descritto in ${texts.size} modi diversi: ${[...texts].join(' /// ')}`);
+    assert.equal(texts.size, 1, `${param} opzionale è descritto in ${texts.size} modi diversi: ${[...texts].join(' /// ')}`);
   }
+});
+
+test('un parametro obbligatorio non promette un comportamento di default', () => {
+  // "omitted = ..." su un parametro che non si può omettere è una bugia che
+  // l'agente scopre solo dopo aver sbagliato la chiamata.
+  const lying = TOOLS.flatMap(({ name, props, required }) => props
+    .filter(([k, v]) => required.includes(k) && /\bomit(ted)?\b/i.test(v?.description ?? ''))
+    .map(([k]) => `${name}.${k}`));
+  assert.deepEqual(lying, [], 'parametri obbligatori che descrivono un default inesistente');
 });

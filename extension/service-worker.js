@@ -386,6 +386,8 @@ async function executeCommand(msg) {
       return await cmdGetFrames(params);
     case 'tab_action':
       return await cmdTabAction(params);
+    case 'move_tab':
+      return await cmdMoveTab(params);
     case 'upload_file':
       return await cmdUploadFile(params);
     case 'wait_for_navigation':
@@ -929,6 +931,39 @@ async function cmdCreateTab({ url, active = true }) {
 }
 
 // --- tab_action ---
+
+// --- move_tab ---
+
+/**
+ * Sposta una scheda in un'altra finestra senza ricrearla: la scheda conserva id,
+ * cronologia e stato della pagina.
+ *
+ * Motivo per cui esiste: sul Terminale ChromeOS garcon apre ogni sessione in una
+ * finestra separata, e consolidarle richiede di spostare schede
+ * `chrome-untrusted://terminal`. Su quello schema `chrome.tabs.create` è vietato;
+ * `move` non ricrea nulla, quindi potrebbe essere permesso. Se Chrome rifiuta, il
+ * messaggio viene propagato **testuale**: è il dato che si sta cercando, e
+ * riscriverlo lo distruggerebbe.
+ */
+async function cmdMoveTab({ tab_id, window_id, index = -1 }) {
+  if (typeof tab_id !== 'number') throw new Error('Missing required parameter: tab_id');
+  if (typeof window_id !== 'number') throw new Error('Missing required parameter: window_id');
+
+  const before = await chrome.tabs.get(tab_id);
+  const moved = await chrome.tabs.move(tab_id, { windowId: window_id, index });
+  const tab = Array.isArray(moved) ? moved[0] : moved;
+
+  return {
+    moved: tab_id,
+    url: before.url,
+    from_window: before.windowId,
+    to_window: tab?.windowId ?? window_id,
+    index: tab?.index ?? index,
+    // Chrome può accettare la chiamata e lasciare la scheda dov'era: senza questo
+    // il chiamante vedrebbe un successo per un'operazione non avvenuta.
+    same_window: before.windowId === (tab?.windowId ?? window_id),
+  };
+}
 
 async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
   if (!action) throw new Error('Missing required parameter: action');

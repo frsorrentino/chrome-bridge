@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.12.0 — 2026-07-30
+
+### `move_tab`: spostare una scheda in un'altra finestra
+`chrome.tabs.move`. Parametri: `tab_id` e `window_id` obbligatori, `index`
+opzionale (default `-1`, in fondo). La scheda non viene ricreata: conserva id,
+cronologia e stato della pagina.
+
+Nasce per consolidare le finestre del Terminale ChromeOS, dove garcon apre ogni
+sessione in una finestra separata. Il caso che resta **da verificare sul campo**
+sono le schede `chrome-untrusted://terminal`: su quello schema
+`chrome.tabs.create` è vietato, mentre `move` non crea nulla e potrebbe quindi
+essere permesso. Se Chrome rifiuta, l'errore arriva al chiamante **testuale** —
+non riscritto, non aggirato: è il dato che si sta cercando, e una parafrasi lo
+distruggerebbe.
+
+Due dettagli che il tool dichiara invece di lasciar scoprire:
+- entrambe le finestre devono essere normali; Chrome rifiuta lo spostamento
+  verso una popup o una finestra di app;
+- la risposta porta `same_window`, perché una chiamata accettata che lascia la
+  scheda dov'era altrimenti passerebbe per un successo.
+
+61 tool, 32 core. Il payload `tools/list` del core passa da ≈7,9k a ≈8,1k token.
+
+### Invariante sui parametri, ristretta dove vale
+`move_tab` è il primo tool con `tab_id` **obbligatorio**: lì non esiste il
+contratto del target implicito, e la descrizione deve dire "quale scheda", non
+"se omesso vale quella di sessione". Il test che pretendeva un testo unico per
+`tab_id` ora confronta solo le occorrenze opzionali, e ne è stato aggiunto uno
+che vieta di promettere un default su un parametro che non si può omettere.
+
 ## 1.11.1 — 2026-07-30
 
 Solo testi. Il changelog della 1.11.0 diceva "cinque capacità **prese da**" un

@@ -40,6 +40,7 @@ export const MessageType = Object.freeze({
   PRESS_KEY:            'press_key',
   GET_FRAMES:           'get_frames',
   TAB_ACTION:           'tab_action',
+  MOVE_TAB:             'move_tab',
   UPLOAD_FILE:           'upload_file',
   WAIT_FOR_NAVIGATION:   'wait_for_navigation',
   WAIT_FOR_NETWORK_IDLE: 'wait_for_network_idle',
@@ -82,7 +83,7 @@ export const MessageType = Object.freeze({
 });
 
 // Versione
-export const VERSION               = '1.11.1';
+export const VERSION               = '1.12.0';
 
 // Configurazione
 export const DEFAULT_PORT          = 8765;

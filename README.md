@@ -1,10 +1,10 @@
 # Chrome Bridge
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-147%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-158%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **Chrome Bridge is an MCP server that connects Claude Code to your real, logged-in Chrome browser — measured 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome" extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
-By using a local WebSocket bridge and a specialized Chrome extension, Chrome Bridge provides 60 web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) and a dedicated headless instance for CI. It is self-hosted, local-only, and requires no paid plan.
+By using a local WebSocket bridge and a specialized Chrome extension, Chrome Bridge provides 61 web-development tools (navigation, DOM inspection, visual regression, audits, network mocking) and a dedicated headless instance for CI. It is self-hosted, local-only, and requires no paid plan.
 
 ## Why Chrome Bridge?
 
@@ -31,12 +31,12 @@ unfavourable ones) and the harness limits are in
 - **Honest caveat:** per *turn*, Chrome Bridge costs slightly more than Claude in Chrome (41,985 vs 36,613 cache-read tokens; $0.0373 vs $0.0337). The win is in the number of turns.
 
 ### 2. Feature Comparison
-Chrome Bridge ships 60 specialized tools (31 core by default) compared to ~20 in Claude in Chrome. It is also the only automation that drives the real host Chrome on ChromeOS/Crostini.
+Chrome Bridge ships 61 specialized tools (32 core by default) compared to ~20 in Claude in Chrome. It is also the only automation that drives the real host Chrome on ChromeOS/Crostini.
 
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **60** (31 core) | ~20 | ~50 | 23 core (71 total) |
+| **Tools** | **61** (32 core) | ~20 | ~50 | 23 core (71 total) |
 | **Requires Paid Plan** | **No** | Yes (Pro+) | No | No |
 | **Network Mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual Regression** | **Yes** (`screenshot_diff`) | No | No | No |
@@ -63,7 +63,7 @@ Claude Code calls `navigate` (returning clickable element refs), `accessibility_
 
 ## Token-Efficient Design
 
-- **Opt-in Surface**: 31 core tools cost ≈7.9k tokens of `tools/list`, all 60 cost ≈14.9k; specialized groups (audits, visual, network, storage, dom, files) are opt-in via `--caps`. That core figure was ≈3.8k in 1.8.0 and roughly doubled in 1.10.0: MCP annotations on every tool, rewritten descriptions, and a documented `.describe()` on all 254 parameters (coverage went from 35% to 100%). The trade is deliberate and it is not free — on the form benchmark it adds ≈8% to the cache-read tokens per turn — but the measured advantage was never prefix size, it was round trips: 2.75× fewer turns. Playwright MCP's 23 core tools measured ≈4.6k in July 2026, so on prefix size alone it is the leaner one. Measure ours with `npm run measure`.
+- **Opt-in Surface**: 32 core tools cost ≈8.1k tokens of `tools/list`, all 61 cost ≈15.1k; specialized groups (audits, visual, network, storage, dom, files) are opt-in via `--caps`. That core figure was ≈3.8k in 1.8.0 and roughly doubled in 1.10.0: MCP annotations on every tool, rewritten descriptions, and a documented `.describe()` on all 254 parameters (coverage went from 35% to 100%). The trade is deliberate and it is not free — on the form benchmark it adds ≈8% to the cache-read tokens per turn — but the measured advantage was never prefix size, it was round trips: 2.75× fewer turns. Playwright MCP's 23 core tools measured ≈4.6k in July 2026, so on prefix size alone it is the leaner one. Measure ours with `npm run measure`.
 - **Act-from-Result**: Tools attach a capped preview of interactive elements with short refs. Actions only report a `page_changed` delta when the URL or title actually changes.
 - **Optimized Media**: Screenshots are downscaled to ≤1568px. Full-page captures are sliced into readable segments.
 - **Payload Escape Hatches**: `save_to` on `read_page`, `extract`, `screenshot` and `http_request` writes the result to a file and returns the path — the bytes never enter the context unless the agent decides to read them. `read_page(mode="markdown")` keeps headings, links and tables at a fraction of the HTML cost. The [CLI](#cli) skips MCP schemas entirely, and recorded flows [replay](#launch-mode-headless--ci) without any model in the loop.
@@ -84,10 +84,10 @@ Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension
 
 The **MCP Server** (Node.js) handles the protocol and tool logic. The **Chrome Extension** (MV3) executes commands via Chrome APIs. User scripts (`execute_js`) run via `chrome.userScripts.execute()`, requiring the "Allow user scripts" toggle in extension settings.
 
-## Tools (60 total)
+## Tools (61 total)
 
-### Core & Navigation (7)
-`get_status`, `get_tabs`, `create_tab`, `navigate`, `tab_action`, `get_frames`, `screenshot`.
+### Core & Navigation (8)
+`get_status`, `get_tabs`, `create_tab`, `navigate`, `tab_action`, `move_tab` (between windows), `get_frames`, `screenshot`.
 
 ### Interaction (11)
 `click`, `type_text`, `fill_form`, `hover`, `press_key`, `scroll`, `drag_and_drop`, `upload_file`, `dismiss_overlays`, `handle_dialogs`, `clipboard`.
@@ -132,7 +132,7 @@ Configure the server via environment variables (or the matching CLI flags):
 - `CHROME_BRIDGE_PORT`: Default `8765`.
 - `CHROME_BRIDGE_HOST` / `--host`: Bind address, default `127.0.0.1`. Set to `0.0.0.0` **only** where the browser lives outside the container (ChromeOS/Crostini port-forward) — and pair it with a token.
 - `CHROME_BRIDGE_TOKEN`: Shared secret required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind is not loopback.
-- `CHROME_BRIDGE_CAPS` / `--caps`: Tool groups to load (`core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, or `all`). `install.sh` registers with `all`; the bare server defaults to `core` (31 tools). `get_status` reports `caps_active` and `caps_available`.
+- `CHROME_BRIDGE_CAPS` / `--caps`: Tool groups to load (`core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, or `all`). `install.sh` registers with `all`; the bare server defaults to `core` (32 tools). `get_status` reports `caps_active` and `caps_available`.
 
 Run `node tools/measure-schema.mjs` to see the exact schema cost of the active set.
 
