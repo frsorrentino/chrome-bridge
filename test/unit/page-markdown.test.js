@@ -1,7 +1,6 @@
 /**
  * read_page(mode='markdown'): struttura preservata a una frazione del costo di
- * html. L'idea viene da superpowers-chrome, l'implementazione no — la loro ha
- * tre difetti che qui sono test:
+ * html. Tre difetti ricorrenti nei renderer DOM→markdown, qui fissati come test:
  *
  * 1. selettore piatto che include sia `a` sia `li`, quindi `<li><a>x</a></li>`
  *    esce due volte (una come voce di lista, una come link);

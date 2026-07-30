@@ -2,10 +2,9 @@
 
 ## 1.11.0 — 2026-07-30
 
-Cinque capacità prese da `obra/superpowers-chrome` dopo averne letto il sorgente.
-Tutte come **parametri di tool esistenti**, nessun tool nuovo: `Tool Count` 2/5 è
-l'unico rilievo Glama stabile su tre misurazioni, e nessuna di queste lo
-giustificava.
+Cinque capacità che mancavano, tutte come **parametri di tool esistenti** e
+nessun tool nuovo: `Tool Count` 2/5 è l'unico rilievo Glama stabile su tre
+misurazioni, e nessuna di queste lo giustificava.
 
 ### `click` con tasto destro e doppio click
 `grep -c "dblclick\|contextmenu" extension/service-worker.js` restituiva **0**.

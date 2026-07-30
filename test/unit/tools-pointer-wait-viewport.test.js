@@ -1,6 +1,6 @@
 /**
- * Tre capacità che superpowers-chrome ha e noi no, aggiunte come parametri di
- * tool esistenti e non come tool nuovi: `Tool Count` è l'unico rilievo Glama
+ * Tre capacità che mancavano, aggiunte come parametri di tool esistenti e non
+ * come tool nuovi: `Tool Count` è l'unico rilievo Glama
  * stabile su tre misurazioni, e queste non giustificano di peggiorarlo.
  *
  * - click: tasto destro (menu contestuali) e doppio click (selezione testo,

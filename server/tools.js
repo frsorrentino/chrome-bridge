@@ -188,8 +188,9 @@ export const TOOL_CAPS = {
 // Parametri ubiqui: un solo testo, così `tab_id` non significa una cosa in un
 // tool e un'altra nel gemello. test/unit/tool-parameters.test.js lo verifica.
 // save_to: il payload va su disco e nel contesto resta solo il percorso più un
-// sommario. L'idea è di superpowers-chrome, che scrive automaticamente a ogni
-// azione; qui è opt-in, perché scrivere file per chi non li leggerà è una tassa.
+// sommario. Deliberatamente opt-in per chiamata e non automatico dopo ogni
+// azione: scrivere file per chi non li leggerà è una tassa, e il server non
+// controlla la directory di lavoro del client.
 const saveToField = (what) => z.string().optional()
   .describe(`Absolute path: write ${what} there and return the path instead of the content`);
 

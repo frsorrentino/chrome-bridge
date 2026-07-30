@@ -1,7 +1,7 @@
 /**
- * L'idea è di superpowers-chrome: dopo ogni azione scrivono la pagina su disco e
- * istruiscono il modello a leggere i file invece di farsi restituire il
- * contenuto. Il payload non attraversa il contesto se non serve.
+ * Il payload va su disco e nel contesto resta il percorso: quel che il modello
+ * non legge non lo paga. Vale sulle pagine grandi, dove il contenuto serve
+ * raramente per intero.
  *
  * Qui è opt-in per chiamata invece che automatico: scrivere quattro file a ogni
  * click è una tassa su chi non li leggerà mai, e chrome-bridge non controlla la
