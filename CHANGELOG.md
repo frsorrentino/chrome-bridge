@@ -2,8 +2,48 @@
 
 ## 1.9.0 (unreleased)
 
-### Annotations MCP su tutti i 59 tool
-Nessun tool le dichiarava. Sono l'unico modo che l'agente ha di sapere cosa fa
+### `http_request` — richieste HTTP con i cookie dell'utente
+La fetch parte dal service worker dell'estensione con `credentials: 'include'`,
+quindi porta la sessione dell'utente: scarica fatture, JSON e export CSV da
+portali autenticati, dove la stessa richiesta fatta dal server Node riceve la
+pagina di login. Con `save_to` i byte vanno su file invece che nel contesto — è
+anche il modo di leggere un PDF, che Chrome apre in un viewer dove nessun content
+script entra (su una tab PDF `read_page` restituisce
+`Cannot access a chrome-extension:// URL of different extension`).
+
+### `navigator.userAgent` emulabile
+`emulate_media` accetta `user_agent` e sovrascrive `navigator.userAgent`,
+`appVersion` e `platform` nel MAIN world. Copre metà del problema per scelta
+dichiarata: l'header della richiesta si cambia già con
+`network_rules(action=modify_header)`, e ora la descrizione lo dice invece di
+lasciar credere all'agente di aver cambiato entrambi. Nessun tool nuovo: stesso
+meccanismo e stesso `reset` delle altre emulazioni.
+
+### Nessun tool nuovo per i cookie: c'erano già
+L'audit Glama segnalava "missing dedicated cookie management". Falso negativo:
+`get_storage` legge i cookie (`type: 'cookies'`, con flag e scadenze) e
+`set_storage` li scrive con path, domain ed expires. Non mancava la funzione,
+mancava nella descrizione — corretto.
+
+### 12 descrizioni riscritte
+Le nove sotto 3.0/5 nell'audit Glama più `get_tabs`, `create_tab` e
+`full_page_screenshot`. `read_page` era "Read the content of a Chrome tab page":
+37 caratteri, mentre le istruzioni del server avvertono che su una tabella grande
+costa decine di migliaia di token — un avviso che l'agente legge una volta
+all'inizio e non nel momento in cui sceglie. Ora ogni descrizione dice cosa
+cambia, cosa non è persistito e quando conviene un altro tool.
+`test/unit/tool-descriptions.test.js` fissa un pavimento di 60 caratteri e
+verifica che i tool distruttivi e quelli costosi lo dichiarino in prosa.
+
+### Conteggio e costo, misurati
+60 tool (31 core). Il payload `tools/list` del set core passa da ≈3,8k a ≈5,7k
+token: ≈784 dalle annotations, il resto dalle descrizioni. È un aumento voluto —
+il vantaggio misurato sta nei turni (2,75×), non nella dimensione del prefisso —
+ma ribalta il confronto sugli schemi con Playwright MCP (≈4,6k a luglio 2026),
+e il README ora lo dice invece di citare il numero vecchio.
+
+### Annotations MCP su tutti i 60 tool
+Nessun tool le dichiarava (erano 59 prima di `http_request`). Sono l'unico modo che l'agente ha di sapere cosa fa
 un tool al mondo *prima* di chiamarlo: senza `readOnlyHint`, `click` e
 `read_page` si equivalgono al momento della scelta. Ora ogni tool dichiara tutti
 e quattro gli hint, da una tabella sola (`TOOL_ANNOTATIONS`) applicata dallo

@@ -58,6 +58,7 @@ export const MessageType = Object.freeze({
   SET_GEOLOCATION:       'set_geolocation',
   MANAGE_DOWNLOADS:      'manage_downloads',
   SAVE_PAGE:             'save_page',
+  HTTP_REQUEST:          'http_request',
   SET_ZOOM:              'set_zoom',
   HTTP_AUTH:             'http_auth',
   GET_RESPONSE_HEADERS:  'get_response_headers',
@@ -129,6 +130,7 @@ export function getTimeout(type) {
     || type === MessageType.UPLOAD_FILE
     || type === MessageType.MANAGE_DOWNLOADS
     || type === MessageType.SAVE_PAGE
+    || type === MessageType.HTTP_REQUEST
     || type === MessageType.WAIT_FOR_FUNCTION
     || type === MessageType.SCROLL_UNTIL) return 60000;
   return COMMAND_TIMEOUT_MS;

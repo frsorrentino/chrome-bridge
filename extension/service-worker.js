@@ -423,6 +423,8 @@ async function executeCommand(msg) {
       return await cmdManageDownloads(params);
     case 'save_page':
       return await cmdSavePage(params);
+    case 'http_request':
+      return await cmdHttpRequest(params);
     case 'set_zoom':
       return await cmdSetZoom(params);
     case 'http_auth':
@@ -2177,12 +2179,12 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
 
 // --- emulate_media ---
 
-async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, reset = false, tab_id }) {
+async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, user_agent = null, reset = false, tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (cs, rm, print, doReset) => {
+    func: (cs, rm, print, ua, doReset) => {
       const STYLE_ID = '__chromeBridge_media';
       const META_ID = '__chromeBridge_colorScheme';
 
@@ -2195,6 +2197,15 @@ async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, 
         if (window.__chromeBridge_origMatchMedia) {
           window.matchMedia = window.__chromeBridge_origMatchMedia;
           delete window.__chromeBridge_origMatchMedia;
+        }
+        // navigator.userAgent è stato ridefinito con un getter: per tornare
+        // all'originale va rimossa la proprietà own, così riemerge quella del
+        // prototipo.
+        if (window.__chromeBridge_uaPatched) {
+          for (const prop of ['userAgent', 'appVersion', 'platform']) {
+            try { delete navigator[prop]; } catch { /* proprietà non configurabile: si prosegue */ }
+          }
+          delete window.__chromeBridge_uaPatched;
         }
         return { reset: true };
       }
@@ -2261,9 +2272,26 @@ async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, 
         meta.remove();
       }
 
+      // navigator.userAgent non è scrivibile: va ridefinita come getter sull'
+      // istanza, che precede quella del prototipo. Vale per il JS della pagina,
+      // non per l'header della richiesta (quello è network_rules).
+      if (ua) {
+        for (const [prop, value] of [
+          ['userAgent', ua],
+          ['appVersion', ua.replace(/^Mozilla\//, '')],
+          ['platform', /iPhone|iPad|Android/i.test(ua) ? 'iPhone' : navigator.platform],
+        ]) {
+          try {
+            Object.defineProperty(navigator, prop, { get: () => value, configurable: true });
+          } catch { /* alcune pagine congelano navigator: si prosegue */ }
+        }
+        window.__chromeBridge_uaPatched = true;
+        overrides.userAgent = ua;
+      }
+
       return { emulated: overrides };
     },
-    args: [colorScheme || null, reducedMotion || null, printMode, reset],
+    args: [colorScheme || null, reducedMotion || null, printMode, user_agent, reset],
     world: 'MAIN',
   });
   return results?.[0]?.result ?? {};
@@ -3439,6 +3467,46 @@ async function cmdManageDownloads({ action, timeout = 30000, limit = 10 }) {
 }
 
 // --- save_page (MHTML via pageCapture) ---
+
+// --- http_request ---
+
+/**
+ * La fetch parte dal service worker, non dal server Node: con host permission
+ * `<all_urls>` e `credentials: 'include'` Chrome allega i cookie di sessione
+ * dell'utente. È l'unica differenza che conta — la stessa URL richiesta da Node
+ * restituisce la pagina di login.
+ */
+async function cmdHttpRequest({ url, method = 'GET', headers, body, binary = false }) {
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    throw new Error(`http_request needs an absolute http(s) URL, got "${url}"`);
+  }
+  const res = await fetch(url, {
+    method,
+    headers: headers && Object.keys(headers).length ? headers : undefined,
+    body: body ?? undefined,
+    credentials: 'include',
+    redirect: 'follow',
+  });
+
+  const outHeaders = {};
+  for (const [k, v] of res.headers.entries()) outHeaders[k] = v;
+  const common = {
+    status: res.status,
+    ok: res.ok,
+    // res.url riflette i redirect seguiti: senza, un 302 verso il login
+    // sembrerebbe una risposta della URL chiesta.
+    url: res.url,
+    content_type: res.headers.get('content-type') || '',
+    headers: outHeaders,
+  };
+
+  if (binary) {
+    const blob = await res.blob();
+    return { ...common, body_b64: await blobToBase64(blob), size: blob.size };
+  }
+  const text = await res.text();
+  return { ...common, body: text, size: text.length };
+}
 
 async function cmdSavePage({ tab_id }) {
   const tabId = await resolveTabId(tab_id);

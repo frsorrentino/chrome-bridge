@@ -3,7 +3,7 @@
   "mcpName": "io.github.frsorrentino/chrome-bridge",
   "version": "1.8.0",
   "type": "module",
-  "description": "MCP server with 59 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
+  "description": "MCP server with 60 tools for browser automation via Chrome extension. Works on ChromeOS/Crostini.",
   "main": "server/index.js",
   "bin": {
     "chrome-bridge-mcp": "server/index.js",

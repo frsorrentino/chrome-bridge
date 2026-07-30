@@ -6,7 +6,7 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
-Bridge your browser to Claude Code: 59 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
+Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
 
 ## Category
 
@@ -26,7 +26,7 @@ Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your 
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 
-59 specialized web-development tools:
+60 specialized web-development tools:
 
 • Navigation & tabs — open, close, navigate, list tabs
 • DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, modify the DOM

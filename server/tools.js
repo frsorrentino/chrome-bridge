@@ -276,6 +276,11 @@ export const TOOL_ANNOTATIONS = {
   // --- codice arbitrario ---
   execute_js: rw({ destructive: true, open: true }),
 
+  // http_request non è read-only: un POST cambia lo stato del server remoto, e
+  // con save_to scrive un file. destructive perché sovrascrive save_to senza
+  // chiedere.
+  http_request: rw({ destructive: true, open: true }),
+
   // --- stato che può essere distrutto o sovrascritto ---
   clipboard: rw({ idempotent: true }),
   read_console: rw({ destructive: true }),                        // clear:true cancella il buffer
@@ -448,7 +453,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- get_tabs ---
   server.tool(
     'get_tabs',
-    'List all open Chrome tabs',
+    'List every open tab with id, url, title and active flag. Read-only. Use it to find a tab_id when the '
+      + 'implicit target (last navigated tab, else the active one) is not the tab you mean.',
     {},
     async () => {
       const data = await send(MessageType.GET_TABS);
@@ -535,7 +541,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- click ---
   server.tool(
     'click',
-    'Click an element by CSS selector or by ref from get_interactives.',
+    'Click an element, by CSS selector or by a ref (n1, n2…) from get_interactives or navigate. Fires a real '
+      + 'pointer sequence, so it can submit, open a dialog or navigate away — use wait_after to let that settle. '
+      + 'Not idempotent, and a click that triggers a native confirm() blocks the bridge: install handle_dialogs first.',
     {
       selector: z.string().optional(),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -591,7 +599,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- read_page ---
   server.tool(
     'read_page',
-    'Read the content of a Chrome tab page',
+    'Read the page as text (default), raw HTML, or accessibility tree. Read-only. Expensive on large pages: '
+      + 'HTML on a big table costs tens of thousands of tokens for data you then filter anyway — prefer '
+      + 'extract_table or extract for tabular and repeated content, and get_interactives to find click targets.',
     {
       mode:       z.enum(['text', 'html', 'accessibility']).default('text'),
       tab_id:     z.number().optional(),
@@ -631,7 +641,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- get_storage ---
   server.tool(
     'get_storage',
-    'Get page storage: localStorage, sessionStorage, and cookies',
+    'Read localStorage, sessionStorage or cookies of the current origin (type=all for every one). Read-only. '
+      + 'Cookies come with domain, path, expiry and the httpOnly/secure flags, so this also answers whether a '
+      + 'session cookie is present — write them back with set_storage, or snapshot a logged-in state with session_fixture.',
     {
       type:   z.enum(['all', 'localStorage', 'sessionStorage', 'cookies']).default('all'),
       tab_id: z.number().optional(),
@@ -650,7 +662,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- get_performance ---
   server.tool(
     'get_performance',
-    'Get page performance metrics: navigation timing, paint metrics, memory, and resource loading',
+    'Navigation timing, paint metrics, JS heap size and per-resource load times, as measured since the current '
+      + 'document loaded. Read-only, no reload triggered — numbers are only meaningful once loading has settled, '
+      + 'so on a page still fetching call wait_for(network_idle) first. For CLS/LCP/INP use web_vitals.',
     {
       tab_id: z.number().optional(),
     },
@@ -690,7 +704,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- modify_dom ---
   server.tool(
     'modify_dom',
-    'Modify DOM elements: setAttribute, removeAttribute, addClass, removeClass, setStyle, setTextContent',
+    'Change an element in the live DOM: setAttribute, removeAttribute, addClass, removeClass, setStyle, '
+      + 'setTextContent. Nothing is persisted — the next reload restores the page as the server sends it. '
+      + 'For styling many elements at once inject_css is one call instead of N.',
     {
       selector: z.string(),
       action: z.enum(['setAttribute', 'removeAttribute', 'addClass', 'removeClass', 'setStyle', 'setTextContent']),
@@ -714,7 +730,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- inject_css ---
   server.tool(
     'inject_css',
-    'Inject CSS rules into a Chrome tab page',
+    'Inject a CSS rule into the page. Stays until the next navigation or reload, and re-injecting the same id '
+      + 'replaces it rather than stacking. Affects only what is rendered — the stylesheet of the site is untouched.',
     {
       css: z.string(),
       tab_id: z.number().optional(),
@@ -806,7 +823,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- create_tab ---
   server.tool(
     'create_tab',
-    'Create a new Chrome tab, optionally navigating to a URL',
+    'Open a new tab, optionally at a URL, and make it the implicit target of later commands in this session. '
+      + 'Each call creates another tab: reuse a tab_id or navigate() to move an existing one instead of piling up tabs.',
     {
       url: z.string().optional().describe('URL to open (default: new tab page)'),
       active: z.boolean().optional().default(true),
@@ -891,7 +909,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- set_storage ---
   server.tool(
     'set_storage',
-    'Write, delete, or clear localStorage, sessionStorage, or cookies',
+    'Write, delete or clear a localStorage/sessionStorage key, or a cookie with its path, domain and expiry. '
+      + 'action=clear wipes every entry of that type for the origin and cannot be undone — on a site the user is '
+      + 'logged into, clearing cookies logs them out. Read the current values first with get_storage.',
     {
       type: z.enum(['localStorage', 'sessionStorage', 'cookie']),
       action: z.enum(['set', 'delete', 'clear']),
@@ -986,7 +1006,10 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- full_page_screenshot ---
   server.tool(
     'full_page_screenshot',
-    'Full-page capture by scrolling: stitched segments of ~2 viewports (≤1568px, top→bottom), or one image per viewport with stitch=false.',
+    'Full-page capture by scrolling: stitched segments of ~2 viewports (≤1568px, top→bottom), or one image per '
+      + 'viewport with stitch=false. Read-only, but expensive: each segment costs ~2.7k image tokens, so only the first '
+      + 'max_segments are returned and the rest need segment_offset. On a long page, reading the text you actually need '
+      + 'is cheaper by an order of magnitude — prefer read_page, extract or find_text unless the layout itself is the question.',
     {
       max_scrolls: z.number().optional().default(20),
       delay: z.number().optional().default(500).describe('ms between captures (min 500, Chrome quota)'),
@@ -1109,7 +1132,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- measure_spacing ---
   server.tool(
     'measure_spacing',
-    'Measure pixel distance, gap, overlap, and margin/padding between two elements',
+    'Measure the gap, overlap and distance in CSS pixels between two elements, with their margins and paddings. '
+      + 'Read-only. Values come from the current layout, so zoom and viewport size change them: set_zoom(1) and a '
+      + 'fixed viewport_resize make results comparable across runs.',
     {
       selector1: z.string(),
       selector2: z.string(),
@@ -1155,16 +1180,20 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- emulate_media ---
   server.tool(
     'emulate_media',
-    'Emulate prefers-color-scheme, prefers-reduced-motion, print mode (matchMedia override + CSS).',
+    'Make the page believe it runs in a different environment, until reset or reload: prefers-color-scheme, '
+      + 'prefers-reduced-motion, print mode (matchMedia override + CSS) and navigator.userAgent/platform. '
+      + 'user_agent only changes what page JS reads — the request header is a separate thing, set it with '
+      + 'network_rules(action=modify_header, header="User-Agent"). Pair with viewport_resize to emulate a device.',
     {
       colorScheme: z.enum(['dark', 'light', 'no-preference']).optional(),
       reducedMotion: z.enum(['reduce', 'no-preference']).optional(),
       printMode: z.boolean().optional().default(false),
+      user_agent: z.string().optional().describe('Overrides navigator.userAgent and appVersion in the page (not the HTTP header)'),
       reset: z.boolean().optional().default(false).describe('Remove all emulations'),
       tab_id: z.number().optional(),
     },
-    async ({ colorScheme, reducedMotion, printMode, reset, tab_id }) => {
-      const data = await send(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, reset, tab_id });
+    async ({ colorScheme, reducedMotion, printMode, user_agent, reset, tab_id }) => {
+      const data = await send(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, user_agent, reset, tab_id });
       return {
         content: [{
           type: 'text',
@@ -1198,7 +1227,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- press_key ---
   server.tool(
     'press_key',
-    'Press a keyboard key with optional modifiers (keydown/keypress/keyup).',
+    'Send a key to the focused element (or to selector, focusing it first) as a real keydown/keypress/keyup '
+      + 'sequence, so framework handlers fire. For typing a value use type_text; this is for Enter, Tab, Escape, '
+      + 'arrows and shortcuts. Not idempotent: two calls send the key twice.',
     {
       key: z.string().describe('e.g. "Enter", "Escape", "Tab", "ArrowDown"'),
       selector: z.string().optional().describe('Target (default: activeElement)'),
@@ -1236,7 +1267,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- tab_action ---
   server.tool(
     'tab_action',
-    'Tab lifecycle actions: close, activate (focus), reload (optional cache bypass), back, forward',
+    'Tab lifecycle: close, activate (focus), reload (optional cache bypass), back, forward. close discards the '
+      + 'tab and anything unsaved in it, and cannot be undone — it may be a tab the user is working in. '
+      + 'reload and navigation drop injected CSS, emulations and page hooks.',
     {
       action: z.enum(['close', 'activate', 'reload', 'back', 'forward']),
       bypass_cache: z.boolean().optional().default(false).describe('reload only'),
@@ -1408,7 +1441,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- web_vitals ---
   server.tool(
     'web_vitals',
-    'Core Web Vitals since page load: CLS, LCP, FCP, TTFB, long tasks, INP approximation.',
+    'Core Web Vitals accumulated since the current document loaded: CLS, LCP, FCP, TTFB, long tasks and an INP '
+      + 'approximation. Read-only. Needs the page instrumentation active from before load, so it reports whether it '
+      + 'was hooked instead of silently returning zeros — navigate() installs it. For timing and resources use get_performance.',
     {
       tab_id: z.number().optional(),
     },
@@ -1571,6 +1606,64 @@ export function registerTools(server, wsManager, caps = 'all') {
       const data = await send(MessageType.SAVE_PAGE, { tab_id });
       await writeFile(output_path, Buffer.from(data.mhtml_b64, 'base64'));
       return { content: [{ type: 'text', text: jsonText({ saved: output_path, size: data.size }) }] };
+    }
+  );
+
+  // --- http_request ---
+  server.tool(
+    'http_request',
+    'HTTP request sent from the browser, so it carries the session cookies of the logged-in user: '
+      + 'fetches URLs a plain server-side request would get a login page for (invoices, authenticated JSON, CSV exports). '
+      + 'Text bodies are returned inline (capped by max_length); with save_to the bytes are written to that path instead, '
+      + 'which is how you read a PDF — Chrome renders PDFs in a viewer no content script can reach, so read_page returns nothing on a PDF tab.',
+    {
+      url: z.string().describe('Absolute URL. Cookies are sent for its origin'),
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).optional().default('GET'),
+      headers: z.record(z.string(), z.string()).optional().describe('Extra request headers'),
+      body: z.string().optional().describe('Request body (POST/PUT/PATCH)'),
+      save_to: z.string().optional().describe('Absolute path: write the response bytes here instead of returning them (PDF, images, archives)'),
+      max_length: z.number().optional().default(DEFAULT_MAX_OUTPUT).describe('Max chars of body returned inline'),
+    },
+    async ({ url, method, headers, body, save_to, max_length }) => {
+      const data = await send(MessageType.HTTP_REQUEST, { url, method, headers, body, binary: Boolean(save_to) });
+
+      if (save_to) {
+        // Il base64 non deve mai raggiungere il modello: un PDF di 300 kB sono
+        // ~100k token di rumore per un contenuto che va letto da file.
+        await writeFile(save_to, Buffer.from(data.body_b64 ?? '', 'base64'));
+        return {
+          content: [{
+            type: 'text',
+            text: jsonText({
+              saved: save_to,
+              status: data.status,
+              ok: data.ok,
+              content_type: data.content_type,
+              size: data.size,
+              url: data.url,
+            }),
+          }],
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: truncateText(
+            jsonText({
+              status: data.status,
+              ok: data.ok,
+              content_type: data.content_type,
+              size: data.size,
+              url: data.url,
+              headers: data.headers,
+              body: data.body,
+            }, max_length ?? DEFAULT_MAX_OUTPUT, 'max_length'),
+            max_length ?? DEFAULT_MAX_OUTPUT,
+            'max_length',
+          ),
+        }],
+      };
     }
   );
 
