@@ -7,6 +7,7 @@
 
 import './telemetry.js';
 import { buildMarkdown } from './lib/page-markdown.js';
+import { computeTiles } from './lib/tile-layout.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -388,6 +389,8 @@ async function executeCommand(msg) {
       return await cmdTabAction(params);
     case 'move_tab':
       return await cmdMoveTab(params);
+    case 'tile_windows':
+      return await cmdTileWindows(params);
     case 'upload_file':
       return await cmdUploadFile(params);
     case 'wait_for_navigation':
@@ -945,6 +948,109 @@ async function cmdCreateTab({ url, active = true }) {
  * messaggio viene propagato **testuale**: è il dato che si sta cercando, e
  * riscriverlo lo distruggerebbe.
  */
+// --- tile_windows ---
+
+/**
+ * Affianca le finestre di Chrome su un monitor, dividendone l'area utile in
+ * parti uguali che non lasciano spazi.
+ *
+ * L'area del monitor si legge da `screen.availLeft/availTop/availWidth/
+ * availHeight` eseguito in una scheda di una finestra che ci sta sopra. La via
+ * "giusta" sarebbe chrome.system.display, ma richiede un permesso install-time:
+ * su un'estensione già pubblicata significa una nuova revisione e il possibile
+ * ri-consenso degli utenti, per un dato che il DOM offre gratis.
+ *
+ * Il prezzo di questa scelta: serve almeno una scheda scriptabile fra le
+ * finestre bersaglio. Una finestra con sole schede chrome:// o
+ * chrome-untrusted:// non può fornire l'area, e il tool lo dice invece di
+ * ripiegare su misure inventate.
+ */
+async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid', padding = 0, include_types }) {
+  const types = include_types?.length ? include_types : ['normal'];
+  const all = await chrome.windows.getAll({ populate: true });
+
+  let targets = all.filter((w) => types.includes(w.type));
+  if (window_ids?.length) targets = all.filter((w) => window_ids.includes(w.id));
+  if (!targets.length) throw new Error(`Nessuna finestra da affiancare (tipi: ${types.join(', ')})`);
+
+  // Il monitor è quello della finestra di riferimento: su più schermi non
+  // esiste "lo schermo" senza dire quale.
+  const reference = reference_window_id
+    ? targets.find((w) => w.id === reference_window_id) ?? all.find((w) => w.id === reference_window_id)
+    : targets.find((w) => w.focused) ?? targets[0];
+  if (!reference) throw new Error(`Finestra di riferimento ${reference_window_id} non trovata`);
+
+  // Prima scheda scriptabile fra le finestre bersaglio, partendo dalla
+  // riferimento: le pagine interne di Chrome non accettano injection.
+  const candidates = [reference, ...targets.filter((w) => w.id !== reference.id)]
+    .flatMap((w) => (w.tabs || []).map((t) => ({ windowId: w.id, tabId: t.id, url: t.url || '' })))
+    .filter((t) => /^(https?|file):/i.test(t.url));
+
+  let area = null;
+  const failures = [];
+  for (const cand of candidates) {
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: cand.tabId },
+        func: () => ({
+          left: screen.availLeft ?? 0,
+          top: screen.availTop ?? 0,
+          width: screen.availWidth,
+          height: screen.availHeight,
+        }),
+        world: 'MAIN',
+      });
+      if (res?.result?.width) { area = res.result; break; }
+    } catch (e) {
+      failures.push(`${cand.url.slice(0, 40)}: ${e.message}`);
+    }
+  }
+  if (!area) {
+    throw new Error(
+      'Impossibile leggere l\'area del monitor: nessuna scheda scriptabile fra le finestre bersaglio '
+      + '(le pagine chrome:// e chrome-untrusted:// non lo permettono). '
+      + `Apri una pagina http(s) in una di esse e riprova.${failures.length ? ' Tentativi: ' + failures.join(' | ') : ''}`,
+    );
+  }
+
+  const tiles = computeTiles({ count: targets.length, area, layout, padding });
+  const results = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const w = targets[i];
+    const tile = tiles[i];
+    try {
+      // Una finestra massimizzata accetta i bounds e li ignora: va riportata a
+      // 'normal' prima, o la chiamata riesce senza che nulla si muova.
+      if (w.state !== 'normal') {
+        await chrome.windows.update(w.id, { state: 'normal' });
+      }
+      const updated = await chrome.windows.update(w.id, tile);
+      const actual = { left: updated.left, top: updated.top, width: updated.width, height: updated.height };
+      results.push({
+        window_id: w.id,
+        type: w.type,
+        requested: tile,
+        actual,
+        // Il window manager può rifiutare in silenzio: senza il confronto, una
+        // finestra rimasta ferma passerebbe per affiancata.
+        applied: actual.left === tile.left && actual.top === tile.top
+          && actual.width === tile.width && actual.height === tile.height,
+      });
+    } catch (e) {
+      results.push({ window_id: w.id, type: w.type, requested: tile, error: e.message });
+    }
+  }
+
+  return {
+    monitor: area,
+    layout,
+    windows: results.length,
+    applied: results.filter((r) => r.applied).length,
+    results,
+  };
+}
+
 async function cmdMoveTab({ tab_id, window_id, index = -1 }) {
   if (typeof tab_id !== 'number') throw new Error('Missing required parameter: tab_id');
   if (typeof window_id !== 'number') throw new Error('Missing required parameter: window_id');

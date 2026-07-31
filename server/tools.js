@@ -290,6 +290,7 @@ export const TOOL_ANNOTATIONS = {
   viewport_resize: rw({ idempotent: true }),
   create_tab: rw({ open: true }),
   move_tab: rw({ idempotent: true }),   // rispostare dove è già = stesso esito
+  tile_windows: rw({ idempotent: true }),
   navigate: rw({ idempotent: true, open: true }),
   tab_action: rw({ destructive: true, open: true }),  // close chiude una tab dell'utente
 
@@ -1746,6 +1747,29 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ tab_id, window_id, index }) => {
       const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, index: index ?? -1 });
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- tile_windows ---
+  server.tool(
+    'tile_windows',
+    'Tile Chrome windows over one monitor, splitting its usable area into equal parts that leave no gap. '
+      + 'Only Chrome windows: an extension cannot touch other applications. The monitor is chosen by pointing at '
+      + 'a window already on it, since the work area is read from a page there — so at least one target window '
+      + 'needs a scriptable tab (a chrome:// or chrome-untrusted:// tab cannot provide it). Maximized windows are '
+      + 'restored first, because a maximized window accepts bounds and ignores them.',
+    {
+      window_ids: z.array(z.number()).optional().describe('Windows to tile; omitted = every normal window on the reference monitor'),
+      reference_window_id: z.number().optional().describe('Window whose monitor is used; omitted = the focused one'),
+      layout: z.enum(['grid', 'columns', 'rows']).optional().default('grid').describe('columns splits left to right, rows top to bottom, grid keeps tiles as square as it can'),
+      padding: z.number().optional().default(0).describe('Px of empty margin kept inside the work area'),
+      include_types: z.array(z.enum(['normal', 'popup', 'app'])).optional().describe('Window types to include; omitted = normal only'),
+    },
+    async ({ window_ids, reference_window_id, layout, padding, include_types }) => {
+      const data = await send(MessageType.TILE_WINDOWS, {
+        window_ids, reference_window_id, layout: layout ?? 'grid', padding: padding ?? 0, include_types,
+      });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );

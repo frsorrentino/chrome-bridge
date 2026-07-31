@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.13.0 (unreleased)
+
+### `tile_windows`: affiancare le finestre su un monitor
+Divide l'area utile di uno schermo in parti uguali che non lasciano spazi vuoti.
+`layout` fra `grid`, `columns` e `rows`, `padding` opzionale, e la selezione
+delle finestre per id o per tipo.
+
+**Solo finestre di Chrome**: un'estensione non può toccare le altre
+applicazioni, e su ChromeOS non esiste un'API che glielo permetta.
+
+Su più monitor "lo schermo" non esiste senza dire quale, quindi il monitor si
+sceglie indicando una finestra che ci sta sopra (`reference_window_id`, altrimenti
+quella con il focus).
+
+Due scelte non ovvie:
+
+- **Nessun permesso nuovo.** La via canonica sarebbe `chrome.system.display`, ma
+  è un permesso install-time: su un'estensione già pubblicata significa una nuova
+  revisione e il possibile ri-consenso degli utenti installati, per un dato che
+  il DOM offre gratis. L'area si legge da `screen.availLeft/availTop/availWidth/
+  availHeight` eseguito in una scheda della finestra di riferimento. Il prezzo è
+  dichiarato: serve almeno una scheda `http(s)` o `file:` fra le finestre
+  bersaglio — le pagine `chrome://` e `chrome-untrusted://` non accettano
+  injection — e in mancanza il tool lo dice invece di inventare misure.
+- **Il resto della divisione intera viene distribuito, non buttato.** Tre finestre
+  su 1000px fanno 333 e avanza 1: scartarlo lascerebbe una striscia di scrivania
+  scoperta, cioè esattamente ciò che un affiancamento dovrebbe eliminare. Il resto
+  va un pixel per volta sulle prime tessere, quindi le larghezze differiscono al
+  massimo di 1px e lo spazio resta pieno. La geometria è una funzione pura in
+  `extension/lib/tile-layout.js` con otto test, inclusi sovrapposizioni e
+  copertura totale.
+
+Come per `move_tab`, la risposta confronta richiesto e ottenuto (`applied`): il
+window manager può accettare una richiesta e ignorarla, e una finestra rimasta
+ferma altrimenti passerebbe per affiancata. Le finestre massimizzate vengono
+riportate a `normal` prima, perché in quello stato i bounds vengono accettati e
+non applicati.
+
+62 tool, 33 core. Il payload `tools/list` del core passa da ≈8,1k a ≈8,5k token.
+
 ## 1.12.0 — 2026-07-30
 
 ### Pubblicazione sullo store automatizzata
