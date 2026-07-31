@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.13.0 (unreleased)
+## 1.13.0 — 2026-07-31
 
 ### `tile_windows`: affiancare le finestre su un monitor
 Divide l'area utile di uno schermo in parti uguali che non lasciano spazi vuoti.
