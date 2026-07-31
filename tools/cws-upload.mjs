@@ -87,6 +87,24 @@ export function interpretUpload(body) {
   return { ok: false, state: state ?? 'UNKNOWN', reasons };
 }
 
+/**
+ * Distingue un'attesa da un guasto.
+ *
+ * Se un ritentativo periodico tratta "c'è una versione in revisione" come
+ * errore, ogni giro produce una notifica rossa per una situazione normale — e in
+ * due giorni nessuno guarda più le notifiche, incluse quelle vere.
+ */
+export function classifyFailure(reasons = []) {
+  const text = reasons.join(' ').toLowerCase();
+  const waiting = [
+    'in pending review',
+    'is in review',
+    'ready to publish',
+    'version number is the same as the published one',
+  ];
+  return waiting.some((w) => text.includes(w)) ? 'locked' : 'error';
+}
+
 export function interpretPublish(body) {
   const status = body?.status || [];
   const ok = status.includes('OK') || status.includes('PUBLISHED_WITH_FRICTION_WARNING');
@@ -207,7 +225,13 @@ async function main() {
   const upBody = await up.json();
   const upRes = interpretUpload(upBody);
   console.log(`upload ${zip} (${size} B): ${upRes.ok ? 'SUCCESS' : `FALLITO [${upRes.state}] ${upRes.reasons.join(' | ')}`}`);
-  if (!upRes.ok) process.exit(1);
+  if (!upRes.ok) {
+    // 2 = si riproverà, 1 = serve una persona. Il ritentativo periodico
+    // distingue i due casi da qui.
+    const kind = classifyFailure(upRes.reasons);
+    console.log(`esito: ${kind === 'locked' ? 'ATTESA (si ritenta più tardi)' : 'ERRORE (serve intervento)'}`);
+    process.exit(kind === 'locked' ? 2 : 1);
+  }
 
   if (!argv.includes('--publish')) {
     console.log('bozza caricata; ripassa con --publish per mandarla in review');

@@ -1,0 +1,99 @@
+# Ritenta la pubblicazione finché lo store non accetta l'ultima versione taggata.
+#
+# Serve perché il caricamento fallisce quando una versione precedente è ancora in
+# revisione, e una revisione può durare giorni: senza questo, la pubblicazione
+# tornerebbe a dipendere da qualcuno che se ne ricorda — che è il problema che
+# publish-extension.yml era nato per togliere.
+name: retry-store-publish
+
+on:
+  schedule:
+    # Ogni sei ore. Una revisione dura ore o giorni: più fitto sarebbe rumore,
+    # più rado allungherebbe l'attesa senza motivo.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retry:
+    if: github.repository == 'frsorrentino/chrome-bridge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ultimo tag di versione
+        id: tag
+        run: |
+          TAG="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          if [ -z "$TAG" ]; then echo "::error::nessun tag v* nel repo"; exit 1; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "ultimo tag: $TAG"
+
+      - name: Lo store è già a questa versione?
+        id: check
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
+        run: |
+          set -o pipefail
+          STATUS="$(node tools/cws-upload.mjs --status)" || { echo "$STATUS"; echo "::error::credenziali non valide"; exit 1; }
+          echo "$STATUS"
+          CRX="$(echo "$STATUS" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).crxVersion || ''")"
+          if [ "$CRX" = "${{ steps.tag.outputs.version }}" ]; then
+            echo "lo store ha già ${{ steps.tag.outputs.version }}: niente da fare"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "store a '$CRX', tag a '${{ steps.tag.outputs.version }}': si tenta"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout del tag
+        if: steps.check.outputs.done == 'false'
+        run: git checkout --detach "${{ steps.tag.outputs.tag }}"
+
+      - name: Test
+        if: steps.check.outputs.done == 'false'
+        run: npm test
+
+      - name: Costruisci lo zip
+        if: steps.check.outputs.done == 'false'
+        id: package
+        run: |
+          bash scripts/package-extension.sh
+          echo "zip=dist/chrome-bridge-extension-${{ steps.tag.outputs.version }}.zip" >> "$GITHUB_OUTPUT"
+
+      # cws-upload esce 2 quando il rifiuto è un'attesa (versione precedente in
+      # revisione, o già pubblicata) e 1 quando serve una persona. Solo il
+      # secondo caso deve far diventare rosso il job: un'attesa notificata ogni
+      # sei ore diventa rumore, e il rumore nasconde gli errori veri.
+      - name: Carica e pubblica
+        if: steps.check.outputs.done == 'false'
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
+        run: |
+          set +e
+          node tools/cws-upload.mjs "${{ steps.package.outputs.zip }}" --publish
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "::notice::${{ steps.tag.outputs.version }} caricata e pubblicata" ;;
+            2) echo "::notice::ancora bloccata, si ritenta al prossimo giro" ;;
+            *) echo "::error::pubblicazione fallita per un motivo che richiede intervento"; exit 1 ;;
+          esac
