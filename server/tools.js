@@ -1666,9 +1666,12 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- manage_downloads ---
   server.tool(
     'manage_downloads',
-    'List downloads or wait for one to complete. Files land in the browser Downloads folder, not on the server.',
+    'List downloads, start one, or wait for the newest to finish. Files land in the browser Downloads folder, '
+      + 'not on the server. action=download reports the download\'s real state rather than just an id: with '
+      + 'Chrome set to ask where to save each file, saveAs:false is overridden and it comes back as '
+      + 'waiting_for_user — every byte fetched, no destination chosen, and nothing will move until someone picks one.',
     {
-      action: z.enum(['list', 'wait_for_complete', 'download']).describe('download starts one with the browser cookie jar; wait_for_complete blocks until the newest finishes'),
+      action: z.enum(['list', 'wait_for_complete', 'download']).describe('download fetches with the browser cookie jar and reports the real state; wait_for_complete blocks until the newest finishes'),
       url: z.string().optional().describe('What to download (action=download); sent with the session cookies of its origin'),
       filename: z.string().optional().describe('Relative path inside the Downloads folder (action=download)'),
       timeout: z.number().optional().default(30000).describe('Max ms (wait_for_complete)'),

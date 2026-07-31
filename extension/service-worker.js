@@ -8,6 +8,7 @@
 import './telemetry.js';
 import { buildMarkdown } from './lib/page-markdown.js';
 import { computeTiles } from './lib/tile-layout.js';
+import { classifyDownload } from './lib/download-state.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -3703,7 +3704,13 @@ async function cmdManageDownloads({ action, url, filename, timeout = 30000, limi
     const opts = { url, saveAs: false };
     if (filename) opts.filename = filename;
     const id = await chrome.downloads.download(opts);
-    return { started: true, id, url };
+    // Non basta l'id: su ChromeOS l'impostazione «Chiedi dove salvare ogni file»
+    // scavalca saveAs:false e apre il selettore, quindi il download resta fermo
+    // ad aspettare una persona. Una breve occhiata allo stato reale distingue
+    // "partito" da "in attesa di te".
+    await new Promise((r) => setTimeout(r, 600));
+    const [item] = await chrome.downloads.search({ id });
+    return { id, url, ...classifyDownload(item) };
   }
 
   if (action === 'list') {
