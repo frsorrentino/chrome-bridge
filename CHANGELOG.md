@@ -2,6 +2,19 @@
 
 ## 1.12.0 — 2026-07-30
 
+### Pubblicazione sullo store automatizzata
+`.github/workflows/publish-extension.yml`: a ogni tag `v*` gira la suite,
+verifica che il manifest dica la stessa versione del tag, costruisce lo zip e
+chiama `tools/cws-upload.mjs --publish` con le credenziali dai secret del repo.
+Motivo: la pubblicazione manuale è stata dimenticata per quattro versioni — lo
+store è rimasto alla 1.7.0 mentre il repo arrivava alla 1.12.0. Un compito che si
+ricorda è un compito che prima o poi si scorda.
+
+`cws-upload.mjs` ha ora anche `--status` (stato della bozza sullo store) e
+`--publish-only`, che serve a distinguere due situazioni che l'API confonde in un
+solo messaggio: "in revisione" (si aspetta) e "pronta da pubblicare" (manca solo
+la chiamata).
+
 ### `move_tab`: spostare una scheda in un'altra finestra
 `chrome.tabs.move`. Parametri: `tab_id` e `window_id` obbligatori, `index`
 opzionale (default `-1`, in fondo). La scheda non viene ricreata: conserva id,

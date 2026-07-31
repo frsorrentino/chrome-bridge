@@ -13,6 +13,7 @@
  * Uso:
  *   node tools/cws-upload.mjs dist/chrome-bridge-extension-1.11.0.zip           # carica come bozza
  *   node tools/cws-upload.mjs dist/....zip --publish                            # carica e pubblica
+ *   node tools/cws-upload.mjs --status                                         # stato della bozza sullo store
  *   node tools/cws-upload.mjs --auth [porta]                                    # URL di consenso + cattura del codice sul loopback
  *   node tools/cws-upload.mjs --exchange <code> [--redirect <uri>]              # code → refresh token
  */
@@ -158,6 +159,36 @@ async function main() {
     const rIdx = argv.indexOf('--redirect');
     const redirect = rIdx !== -1 ? argv[rIdx + 1] : 'http://localhost:8899';
     await saveRefreshToken(cfg, await exchange(cfg, code, redirect));
+    return;
+  }
+
+  if (argv.includes('--publish-only')) {
+    // Serve a distinguere due stati che l'API confonde in un solo messaggio di
+    // errore: "in revisione" (non si può fare nulla, si aspetta) e "pronta da
+    // pubblicare" (la revisione è passata e manca solo questa chiamata).
+    requireFields(cfg, ['client_id', 'client_secret', 'refresh_token', 'item_id']);
+    const token = await accessToken(cfg);
+    const res = await fetch(`https://www.googleapis.com/chromewebstore/v1.1/items/${cfg.item_id}/publish`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'x-goog-api-version': '2', 'Content-Length': '0' },
+    });
+    const body = await res.json();
+    console.log(JSON.stringify({ http: res.status, ...body }, null, 2));
+    return;
+  }
+
+  if (argv.includes('--status')) {
+    requireFields(cfg, ['client_id', 'client_secret', 'refresh_token', 'item_id']);
+    const token = await accessToken(cfg);
+    const res = await fetch(
+      `https://www.googleapis.com/chromewebstore/v1.1/items/${cfg.item_id}?projection=DRAFT`,
+      { headers: { Authorization: `Bearer ${token}`, 'x-goog-api-version': '2' } },
+    );
+    const body = await res.json();
+    // uploadState dice se la bozza esiste e in che stato è; crxVersion dice quale
+    // versione è nel cassetto, che è l'unico modo di distinguere "in revisione"
+    // da "mai caricata" senza guardare la vetrina.
+    console.log(JSON.stringify({ http: res.status, ...body }, null, 2));
     return;
   }
 

@@ -1,0 +1,83 @@
+# Pubblica l'estensione sul Chrome Web Store a ogni tag di versione.
+#
+# Esiste perché la pubblicazione manuale è stata dimenticata per quattro
+# versioni: lo store è rimasto alla 1.7.0 mentre il repo era alla 1.12.0. Un
+# compito che si ricorda è un compito che prima o poi si scorda.
+name: publish-extension
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da pubblicare (es. v1.12.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # Sui fork i secret non esistono: senza questa guardia il job fallirebbe a
+    # ogni tag altrui, con un errore che non dice nulla a nessuno.
+    if: github.repository == 'frsorrentino/chrome-bridge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # Cancello di qualità: un pacchetto che non passa i test non arriva agli
+      # utenti dello store, dove un rollback costa un'altra revisione.
+      - name: Test
+        run: npm test
+
+      # Il tag e il manifest devono dire la stessa cosa. Se divergono, lo store
+      # riceverebbe un artefatto che non corrisponde alla release: meglio
+      # fermarsi qui che scoprirlo dopo l'approvazione.
+      - name: Il manifest corrisponde al tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_VERSION="${TAG#v}"
+          MANIFEST_VERSION="$(node -p "require('./extension/manifest.json').version")"
+          echo "tag=$TAG_VERSION manifest=$MANIFEST_VERSION"
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::il tag dice $TAG_VERSION, il manifest $MANIFEST_VERSION"
+            exit 1
+          fi
+
+      - name: Costruisci lo zip
+        id: package
+        run: |
+          bash scripts/package-extension.sh
+          VERSION="$(node -p "require('./extension/manifest.json').version")"
+          echo "zip=dist/chrome-bridge-extension-$VERSION.zip" >> "$GITHUB_OUTPUT"
+
+      # cws-upload legge le credenziali da CWS_* quando il file locale non c'è.
+      # In caso di fallimento stampa il motivo testuale di Google: il più comune
+      # è "You may not edit or publish an item that is in review", cioè una
+      # versione precedente è ancora in revisione e va aspettata.
+      - name: Carica e pubblica sullo store
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
+        run: node tools/cws-upload.mjs "${{ steps.package.outputs.zip }}" --publish
+
+      - name: Stato dell'item dopo il caricamento
+        if: always()
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
+        run: node tools/cws-upload.mjs --status
