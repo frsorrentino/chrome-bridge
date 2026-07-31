@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Difetto aperto, riproducibile, senza rimedio deciso
+
+`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
+finestra con dentro sessioni terminale vive:
+
+    -> Command tab_action timed out after 30000ms
+    -> la scheda NON viene chiusa
+
+Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
+sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
+aspettarla — **non verificato**: al momento della scoperta nessuno poteva
+guardare lo schermo, e non si progetta un rimedio partendo da una causa non
+osservata.
+
+La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
+quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
+esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
+uno che rifiuta subito.
+
 ## 1.15.1 — 2026-07-31
 
 Nata dal collaudo dal vivo della 1.15.0 su ChromeOS: due bugie del reporting
