@@ -56,6 +56,23 @@ jobs:
             exit 1
           fi
 
+      # I tre workflow partono insieme sullo stesso tag, ma il registry valida
+      # che il package npm esista già: al primo tag reale ha perso la corsa con
+      # publish-npm ed è fallito con "version was not found. Wait and retry".
+      # Qui si aspetta che npm esponga la versione, fino a 5 minuti.
+      - name: Attendi che npm esponga la versione
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          WANT="${TAG#v}"
+          for i in $(seq 1 20); do
+            GOT="$(npm view chrome-bridge-mcp@"$WANT" version 2>/dev/null || true)"
+            if [ "$GOT" = "$WANT" ]; then echo "npm ha $WANT"; exit 0; fi
+            echo "tentativo $i: npm non ha ancora $WANT"
+            sleep 15
+          done
+          echo "::error::dopo 5 minuti npm non espone $WANT — publish-npm è fallito?"
+          exit 1
+
       - name: Login OIDC e validazione
         run: |
           ./mcp-publisher login github-oidc
