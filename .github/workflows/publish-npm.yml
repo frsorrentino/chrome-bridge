@@ -1,0 +1,78 @@
+# Pubblica il pacchetto su npm a ogni tag di versione.
+#
+# È l'ultimo canale rimasto manuale: store e registry si allineano da soli.
+#
+# Qui serve un token nei secret perché npm non ha un equivalente dell'OIDC
+# GitHub usato per il registry — o meglio, ce l'ha (trusted publishing), ma
+# richiede di dichiarare questo repo e questo file come publisher fidato dalla
+# pagina del pacchetto su npmjs.com. Quando quella configurazione sarà fatta,
+# qui basta togliere NODE_AUTH_TOKEN e aggiungere `id-token: write`: il segreto
+# sparisce e non c'è più nulla da ruotare.
+name: publish-npm
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da pubblicare (es. v1.13.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'frsorrentino/chrome-bridge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      # Una versione pubblicata su npm non si può sovrascrivere né correggere:
+      # i test girano prima, non dopo.
+      - name: Test
+        run: npm test
+
+      - name: package.json corrisponde al tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_VERSION="${TAG#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG_VERSION package.json=$PKG"
+          if [ "$TAG_VERSION" != "$PKG" ]; then
+            echo "::error::package.json dice $PKG, il tag $TAG_VERSION"
+            exit 1
+          fi
+
+      # Ripubblicare una versione già su npm non è un guasto: capita rilanciando
+      # il workflow, e npm risponde con un 403 che dice esattamente questo.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set +e
+          OUT="$(npm publish 2>&1)"
+          CODE=$?
+          set -e
+          echo "$OUT"
+          if [ $CODE -eq 0 ]; then
+            echo "::notice::pubblicata su npm"
+            exit 0
+          fi
+          if echo "$OUT" | grep -qiE "cannot publish over|previously published|EPUBLISHCONFLICT"; then
+            echo "::notice::versione già su npm: niente da fare"
+            exit 0
+          fi
+          echo "::error::pubblicazione su npm fallita"
+          exit 1
