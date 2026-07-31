@@ -941,7 +941,24 @@ async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
 
 // --- create_tab ---
 
-async function cmdCreateTab({ url, active = true }) {
+async function cmdCreateTab({ url, active = true, new_window = false, left, top, width, height }) {
+  if (new_window) {
+    // windows.create con i bounds apre direttamente sul monitor scelto: left è
+    // la coordinata sulla scrivania virtuale, quindi è ciò che sceglie lo schermo.
+    const winOpts = { focused: active !== false };
+    if (url) winOpts.url = url;
+    for (const [k, v] of [['left', left], ['top', top], ['width', width], ['height', height]]) {
+      if (typeof v === 'number') winOpts[k] = v;
+    }
+    const win = await chrome.windows.create(winOpts);
+    const tab = (win.tabs || [])[0];
+    if (url && tab) {
+      await waitForComplete(tab.id);
+      const updated = await chrome.tabs.get(tab.id);
+      return { id: updated.id, url: updated.url, title: updated.title, window_id: win.id };
+    }
+    return { id: tab?.id, url: tab?.url || 'chrome://newtab', title: tab?.title || '', window_id: win.id };
+  }
   const opts = { active };
   if (url) opts.url = url;
   const tab = await chrome.tabs.create(opts);
@@ -1075,11 +1092,30 @@ async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid'
   };
 }
 
-async function cmdMoveTab({ tab_id, window_id, index = -1 }) {
+async function cmdMoveTab({ tab_id, window_id, new_window = false, left, top, width, height, index = -1 }) {
   if (typeof tab_id !== 'number') throw new Error('Missing required parameter: tab_id');
-  if (typeof window_id !== 'number') throw new Error('Missing required parameter: window_id');
+  if (typeof window_id !== 'number' && !new_window) throw new Error('Provide window_id or new_window: true');
 
   const before = await chrome.tabs.get(tab_id);
+
+  if (new_window) {
+    // tabs.move vuole una finestra che esiste già; per estrarre in una finestra
+    // nuova (e posizionata) l'unica via è windows.create({tabId}).
+    const winOpts = { tabId: tab_id };
+    for (const [k, v] of [['left', left], ['top', top], ['width', width], ['height', height]]) {
+      if (typeof v === 'number') winOpts[k] = v;
+    }
+    const win = await chrome.windows.create(winOpts);
+    return {
+      moved: tab_id,
+      url: before.url,
+      from_window: before.windowId,
+      to_window: win.id,
+      new_window: true,
+      index: 0,
+      same_window: before.windowId === win.id,
+    };
+  }
   const moved = await chrome.tabs.move(tab_id, { windowId: window_id, index });
   const tab = Array.isArray(moved) ? moved[0] : moved;
 
@@ -1102,6 +1138,21 @@ async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
   if (action === 'close') {
     await chrome.tabs.remove(tabId);
     return { action, closed: tabId };
+  }
+  if (action === 'discard') {
+    // La scheda resta nella barra e si ricarica al focus: il processo muore, la
+    // RAM torna. La tmux session dietro un terminale non c'entra: vive nel
+    // container, non nel renderer.
+    const t = await chrome.tabs.discard(tabId);
+    return { action, tabId: t?.id ?? tabId, discarded: true };
+  }
+  if (action === 'mute' || action === 'unmute') {
+    await chrome.tabs.update(tabId, { muted: action === 'mute' });
+    return { action, tabId, muted: action === 'mute' };
+  }
+  if (action === 'duplicate') {
+    const d = await chrome.tabs.duplicate(tabId);
+    return { action, source: tabId, duplicated: d.id, window_id: d.windowId };
   }
   if (action === 'activate') {
     const tab = await chrome.tabs.get(tabId);
@@ -3626,8 +3677,18 @@ async function cmdSetGeolocation({ latitude, longitude, accuracy = 10, reset = f
 
 // --- manage_downloads ---
 
-async function cmdManageDownloads({ action, timeout = 30000, limit = 10 }) {
+async function cmdManageDownloads({ action, url, filename, timeout = 30000, limit = 10 }) {
   if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'download') {
+    if (!url) throw new Error('action=download requires url');
+    // Parte dal browser, quindi con i cookie di sessione dell'origine: un file
+    // dietro login si scarica senza far passare i byte dal bridge.
+    const opts = { url, saveAs: false };
+    if (filename) opts.filename = filename;
+    const id = await chrome.downloads.download(opts);
+    return { started: true, id, url };
+  }
 
   if (action === 'list') {
     const items = await chrome.downloads.search({ orderBy: ['-startTime'], limit });

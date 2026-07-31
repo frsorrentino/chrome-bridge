@@ -1,12 +1,12 @@
 # Chrome Bridge
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-174%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-187%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **An MCP server that gives Claude Code your real, logged-in Chrome — measured
 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome"
 extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
-62 web-development tools (navigation, DOM inspection, visual regression, audits,
+63 web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for CI.
 Self-hosted, local-only.
 
@@ -43,7 +43,7 @@ Chrome Bridge → Details (on Chrome 135-137, enable Developer Mode instead).
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **62** (33 core) | ~20 | ~50 | 23 core (71 total) |
+| **Tools** | **63** (34 core) | ~20 | ~50 | 23 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
@@ -87,7 +87,7 @@ user-script toggle isn't available.
 
 ## Tools
 
-62 in total, in seven groups. Only `core` (33 tools) loads by default; the rest
+63 in total, in seven groups. Only `core` (34 tools) loads by default; the rest
 are opt-in via `--caps`.
 
 | Group | N | What's in it |
@@ -153,7 +153,7 @@ paste into a chat.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 62 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 63 tools, by group
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [bench/RESULTS.md](bench/RESULTS.md) — raw runs and inclusion rule
 - [CHANGELOG.md](CHANGELOG.md)

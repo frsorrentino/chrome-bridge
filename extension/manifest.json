@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Chrome Bridge for Claude Code",
-  "version": "1.14.0",
-  "description": "Bridge your browser to Claude Code: 62 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.",
+  "version": "1.15.0",
+  "description": "Bridge your browser to Claude Code: 63 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.",
   "homepage_url": "https://github.com/frsorrentino/chrome-bridge",
   "minimum_chrome_version": "135",
   "permissions": [

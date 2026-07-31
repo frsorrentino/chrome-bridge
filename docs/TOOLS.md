@@ -1,7 +1,7 @@
 # Tool reference
 
-All 62 tools, by capability group. The group name is the value to pass to
-`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (33 tools);
+All 63 tools, by capability group. The group name is the value to pass to
+`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
 Check what is active in your session with `get_status` → `caps_active` /
@@ -11,6 +11,7 @@ Check what is active in your session with `get_status` → `caps_active` /
 
 `get_status`, `get_tabs`, `create_tab`, `navigate`, `tab_action`,
 `move_tab` (between windows), `tile_windows` (split one monitor evenly),
+`window_layout` (save/restore arrangements by name),
 `get_frames`, `screenshot`.
 
 `navigate` returns clickable element refs (`n1`, `n2`, …) with the page, so the

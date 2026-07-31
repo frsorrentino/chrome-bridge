@@ -7,7 +7,7 @@
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import { runAssert } from './assertions.js';
@@ -19,6 +19,9 @@ import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
+// Sovrascrivibile nei test: i layout sono un file solo, non una directory.
+const LAYOUTS_FILE = process.env.CHROME_BRIDGE_LAYOUTS_FILE
+  || join(homedir(), '.config', 'chrome-bridge', 'layouts.json');
 const RECORDINGS_DIR = process.env.CHROME_BRIDGE_RECORD_DIR || join(homedir(), '.config', 'chrome-bridge', 'recordings');
 
 // Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
@@ -291,6 +294,7 @@ export const TOOL_ANNOTATIONS = {
   create_tab: rw({ open: true }),
   move_tab: rw({ idempotent: true }),   // rispostare dove è già = stesso esito
   tile_windows: rw({ idempotent: true }),
+  window_layout: rw({ destructive: true, idempotent: true }),  // save sovrascrive l'omonimo, restore sposta finestre
   navigate: rw({ idempotent: true, open: true }),
   tab_action: rw({ destructive: true, open: true }),  // close chiude una tab dell'utente
 
@@ -876,9 +880,14 @@ export function registerTools(server, wsManager, caps = 'all') {
     {
       url: z.string().optional().describe('URL to open (default: new tab page)'),
       active: z.boolean().optional().default(true).describe('false opens the tab in the background, leaving the current one focused'),
+      new_window: z.boolean().optional().default(false).describe('Open in a fresh window instead of a tab; with left/top it lands on the chosen monitor'),
+      left: z.number().optional().describe('Window x on the virtual desktop (new_window)'),
+      top: z.number().optional().describe('Window y (new_window)'),
+      width: z.number().optional().describe('Window width px (new_window)'),
+      height: z.number().optional().describe('Window height px (new_window)'),
     },
-    async ({ url, active }) => {
-      const data = await send(MessageType.CREATE_TAB, { url, active });
+    async ({ url, active, new_window, left, top, width, height }) => {
+      const data = await send(MessageType.CREATE_TAB, { url, active, new_window: new_window === true || undefined, left, top, width, height });
       if (data?.id != null) sessionTabId = data.id;
       return {
         content: [{
@@ -1342,7 +1351,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'tab and anything unsaved in it, and cannot be undone — it may be a tab the user is working in. '
       + 'reload and navigation drop injected CSS, emulations and page hooks.',
     {
-      action: z.enum(['close', 'activate', 'reload', 'back', 'forward']).describe('close cannot be undone; reload drops injected CSS and page hooks'),
+      action: z.enum(['close', 'activate', 'reload', 'back', 'forward', 'discard', 'mute', 'unmute', 'duplicate']).describe('close cannot be undone; discard frees memory, the tab reloads on focus; reload drops injected CSS and hooks'),
       bypass_cache: z.boolean().optional().default(false).describe('reload only'),
       tab_id: tabId,
     },
@@ -1659,12 +1668,15 @@ export function registerTools(server, wsManager, caps = 'all') {
     'manage_downloads',
     'List downloads or wait for one to complete. Files land in the browser Downloads folder, not on the server.',
     {
-      action: z.enum(['list', 'wait_for_complete']).describe('wait_for_complete blocks until the newest download finishes or times out'),
+      action: z.enum(['list', 'wait_for_complete', 'download']).describe('download starts one with the browser cookie jar; wait_for_complete blocks until the newest finishes'),
+      url: z.string().optional().describe('What to download (action=download); sent with the session cookies of its origin'),
+      filename: z.string().optional().describe('Relative path inside the Downloads folder (action=download)'),
       timeout: z.number().optional().default(30000).describe('Max ms (wait_for_complete)'),
       limit: z.number().optional().default(10).describe('Max download entries returned, newest first'),
     },
-    async ({ action, timeout, limit }) => {
-      const data = await send(MessageType.MANAGE_DOWNLOADS, { action, timeout, limit });
+    async ({ action, url, filename, timeout, limit }) => {
+      if (action === 'download' && !url) throw new Error('action=download requires url');
+      const data = await send(MessageType.MANAGE_DOWNLOADS, { action, url, filename, timeout, limit });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1751,11 +1763,19 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'an app window, and the refusal is reported verbatim rather than retried.',
     {
       tab_id: z.number().describe('Tab to move; get it from get_tabs'),
-      window_id: z.number().describe('Destination window; get_tabs reports windowId for every tab'),
+      window_id: z.number().optional().describe('Destination window; get_tabs reports windowId for every tab'),
+      new_window: z.boolean().optional().default(false).describe('Extract the tab into a fresh window instead — tabs.move needs an existing window, this does not'),
+      left: z.number().optional().describe('New window x (new_window)'),
+      top: z.number().optional().describe('New window y (new_window)'),
+      width: z.number().optional().describe('New window width px (new_window)'),
+      height: z.number().optional().describe('New window height px (new_window)'),
       index: z.number().optional().default(-1).describe('Position in the destination window; -1 appends at the end'),
     },
-    async ({ tab_id, window_id, index }) => {
-      const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, index: index ?? -1 });
+    async ({ tab_id, window_id, new_window, left, top, width, height, index }) => {
+      if (window_id == null && new_window !== true) {
+        throw new Error('Provide window_id (an existing window) or new_window: true');
+      }
+      const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, new_window: new_window === true || undefined, left, top, width, height, index: index ?? -1 });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1783,6 +1803,133 @@ export function registerTools(server, wsManager, caps = 'all') {
         window_ids, reference_window_id, layout: layout ?? 'grid', padding: padding ?? 0, include_types, area,
       });
       return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- window_layout ---
+  server.tool(
+    'window_layout',
+    'Save the current window arrangement under a name, restore one, list or delete saved ones. save overwrites '
+      + 'a same-named layout without asking. Window ids do not survive a browser restart, so restore recognises '
+      + 'windows by the overlap of their tab URLs (same type required) and repositions the best match — windows '
+      + 'it cannot recognise are reported, not guessed. Needs extension >= 1.14.0 for window geometry.',
+    {
+      action: z.enum(['save', 'restore', 'list', 'delete']).describe('save snapshots every window; restore repositions the recognised ones'),
+      name: z.string().optional().describe('Layout name, required except for list'),
+    },
+    async ({ action, name }) => {
+      const readLayouts = async () => {
+        try { return JSON.parse(await readFile(LAYOUTS_FILE, 'utf8')); } catch { return {}; }
+      };
+
+      if (action === 'list') {
+        const all = await readLayouts();
+        const rows = Object.entries(all).map(([n, l]) => ({ name: n, windows: l.windows.length, savedAt: l.savedAt }));
+        return { content: [{ type: 'text', text: jsonText({ layouts: rows }) }] };
+      }
+
+      if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
+
+      if (action === 'delete') {
+        const all = await readLayouts();
+        const existed = Boolean(all[name]);
+        delete all[name];
+        await mkdir(dirname(LAYOUTS_FILE), { recursive: true });
+        await writeFile(LAYOUTS_FILE, JSON.stringify(all, null, 2));
+        return { content: [{ type: 'text', text: jsonText({ deleted: name, existed }) }] };
+      }
+
+      // save e restore hanno bisogno della fotografia corrente
+      const snap = await send(MessageType.GET_TABS, { include_windows: true });
+      if (Array.isArray(snap) || !snap?.windows) {
+        // Un'estensione < 1.14.0 risponde con il solo array di schede: meglio
+        // dirlo che fallire su una proprietà mancante.
+        throw new Error('window_layout needs extension >= 1.14.0: get_tabs returned no window geometry');
+      }
+      const urlsByWindow = new Map();
+      for (const t of snap.tabs || []) {
+        if (!urlsByWindow.has(t.windowId)) urlsByWindow.set(t.windowId, []);
+        urlsByWindow.get(t.windowId).push(t.url || '');
+      }
+
+      if (action === 'save') {
+        const all = await readLayouts();
+        all[name] = {
+          savedAt: new Date().toISOString(),
+          windows: snap.windows.map((w) => ({
+            type: w.type,
+            state: w.state,
+            left: w.left, top: w.top, width: w.width, height: w.height,
+            tabs: urlsByWindow.get(w.id) || [],
+          })),
+        };
+        await mkdir(dirname(LAYOUTS_FILE), { recursive: true });
+        await writeFile(LAYOUTS_FILE, JSON.stringify(all, null, 2));
+        return { content: [{ type: 'text', text: jsonText({ saved: name, windows: all[name].windows.length }) }] };
+      }
+
+      // restore
+      const all = await readLayouts();
+      const layout = all[name];
+      if (!layout) {
+        throw new Error(`Layout "${name}" not found — saved: ${Object.keys(all).join(', ') || 'none'}`);
+      }
+
+      // Matching: sovrapposizione degli URL (Jaccard), a parità di tipo. Greedy
+      // sulla coppia migliore. Gli id non entrano mai: non sopravvivono al
+      // riavvio del browser.
+      const current = snap.windows.map((w) => ({ ...w, urls: new Set(urlsByWindow.get(w.id) || []) }));
+      const pairs = [];
+      layout.windows.forEach((savedWin, si) => {
+        current.forEach((cur, ci) => {
+          if (savedWin.type !== cur.type) return;
+          const savedUrls = new Set(savedWin.tabs);
+          let shared = 0;
+          for (const u of savedUrls) if (cur.urls.has(u)) shared += 1;
+          const union = new Set([...savedUrls, ...cur.urls]).size || 1;
+          const score = shared / union;
+          if (score > 0) pairs.push({ si, ci, score });
+        });
+      });
+      pairs.sort((a, b) => b.score - a.score);
+
+      const usedSaved = new Set();
+      const usedCurrent = new Set();
+      const results = [];
+      for (const { si, ci, score } of pairs) {
+        if (usedSaved.has(si) || usedCurrent.has(ci)) continue;
+        usedSaved.add(si); usedCurrent.add(ci);
+        const savedWin = layout.windows[si];
+        const cur = current[ci];
+        const anyTab = (snap.tabs || []).find((t) => t.windowId === cur.id);
+        if (!anyTab) { results.push({ window_id: cur.id, error: 'no tab to address the window with' }); continue; }
+        // Una finestra da massimizzare riceve SOLO lo stato: i bounds verrebbero
+        // accettati e ignorati, e il confronto richiesto/ottenuto mentirebbe.
+        const params = savedWin.state === 'normal'
+          ? { tab_id: anyTab.id, left: savedWin.left, top: savedWin.top, width: savedWin.width, height: savedWin.height, state: 'normal' }
+          : { tab_id: anyTab.id, state: savedWin.state };
+        try {
+          const r = await send(MessageType.VIEWPORT_RESIZE, params);
+          results.push({ window_id: cur.id, score: Number(score.toFixed(2)), requested: params, window: r?.window ?? r?.actual ?? null });
+        } catch (e) {
+          results.push({ window_id: cur.id, score: Number(score.toFixed(2)), error: e.message });
+        }
+      }
+
+      const unmatchedSaved = layout.windows.filter((_, i) => !usedSaved.has(i)).length;
+      const unmatchedCurrent = current.filter((_, i) => !usedCurrent.has(i)).map((w) => w.id);
+      return {
+        content: [{
+          type: 'text',
+          text: jsonText({
+            restored: name,
+            matched: results.length,
+            unmatched_saved: unmatchedSaved,
+            unmatched_current: unmatchedCurrent,
+            results,
+          }),
+        }],
+      };
     }
   );
 

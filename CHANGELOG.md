@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.15.0 — 2026-07-31
+
+Il progetto multiscreen chiuso end-to-end: la geometria della 1.14.0 diventa
+azioni. Un tool nuovo (63, core 34) e quattro capacità come parametri di tool
+esistenti — tutte scelte per NON toccare i permessi del manifest, quindi nessun
+rischio di revisione lunga sullo store.
+
+### `window_layout`: disposizioni con un nome
+`save` fotografa ogni finestra (tipo, stato, bounds, URL delle schede),
+`restore` le rimette a posto, `list` e `delete` amministrano. "layout lavoro" =
+terminale sul monitor 1, browser affiancati sul 2, un comando.
+
+Tutto lato server, componendo `get_tabs(include_windows)` e `viewport_resize`:
+nessun comando nuovo verso l'estensione. Le scelte non ovvie:
+
+- **Gli id delle finestre non sopravvivono al riavvio del browser**: il
+  ripristino riconosce le finestre dalla sovrapposizione degli URL delle loro
+  schede (Jaccard, a parità di tipo), mai dagli id. Le finestre non
+  riconosciute vengono **riportate**, non indovinate.
+- **Una finestra da massimizzare riceve solo lo stato**: i bounds verrebbero
+  accettati e ignorati, e il confronto richiesto/ottenuto mentirebbe.
+- Contro un'estensione < 1.14.0 (che non riporta le finestre) l'errore dice che
+  serve l'aggiornamento, invece di fallire su una proprietà mancante — il
+  version skew dichiarato che `docs/ANALISI-2026-07-25.md` raccomandava.
+- `save` sovrascrive l'omonimo senza chiedere, come `session_fixture`.
+
+### Corsia A: parametri, zero permessi nuovi
+- **`create_tab(new_window, left, top, width, height)`** — apre direttamente sul
+  monitor scelto: `left` sulla scrivania virtuale è ciò che sceglie lo schermo.
+  Prima: aprire e poi spostare, due mosse.
+- **`move_tab(new_window, left, top, width, height)`** — estrae una scheda in
+  una finestra nuova posizionata via `chrome.windows.create({tabId})`:
+  `tabs.move` vuole una finestra che esiste già, questo no. `window_id` diventa
+  opzionale; senza né `window_id` né `new_window` l'errore arriva prima del
+  round trip.
+- **`tab_action: discard | mute | unmute | duplicate`** — `discard` congela una
+  tab pesante (WhatsApp/Telegram Web) liberando la RAM: resta nella barra e si
+  ricarica al focus. La tmux session dietro un terminale non c'entra: vive nel
+  container, non nel renderer.
+- **`manage_downloads action=download`** — il permesso `downloads` c'era già e
+  veniva usato solo per leggere. Scarica col cookie jar del browser: un file
+  dietro login arriva nei Download senza far passare i byte dal bridge.
+
+Verifica: 187 test unit (174 + 13). La prova dal vivo su ChromeOS resta legata
+all'arrivo della versione via store o all'estensione unpacked.
+
+Payload `tools/list` core: da ≈8,6k a ≈9,1k token.
+
 ## 1.14.0 — 2026-07-31
 
 Il necessario per posizionare le finestre su più monitor. Nessun tool nuovo:

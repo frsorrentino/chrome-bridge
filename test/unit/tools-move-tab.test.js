@@ -41,13 +41,13 @@ test('move_tab è registrato nel set core', () => {
   assert.ok(core.has('move_tab'), 'spostare una scheda non è una funzione di nicchia');
 });
 
-test('tab_id e window_id sono obbligatori nello schema', () => {
+test('tab_id è obbligatorio; window_id è opzionale perché new_window è l\'alternativa', () => {
   const { handlers } = build({});
   const { schema } = handlers.get('move_tab');
   assert.ok(schema.tab_id, 'manca tab_id');
   assert.ok(schema.window_id, 'manca window_id');
   assert.equal(schema.tab_id.isOptional?.() ?? false, false, 'tab_id deve essere obbligatorio');
-  assert.equal(schema.window_id.isOptional?.() ?? false, false, 'window_id deve essere obbligatorio');
+  assert.equal(schema.window_id.isOptional?.(), true, 'window_id deve essere opzionale: con new_window non serve');
 });
 
 test('inoltra tab_id, window_id e index all\'estensione', async () => {
