@@ -1,0 +1,82 @@
+# Allinea il registry MCP ufficiale a ogni tag di versione.
+#
+# Usa OIDC invece di un token conservato: GitHub emette una credenziale effimera
+# valida solo per questa esecuzione, e il registry verifica da sé che provenga da
+# frsorrentino/chrome-bridge. Un PAT nei secret avrebbe funzionato uguale, ma
+# sarebbe un token del proprio account GitHub depositato in un servizio terzo,
+# da ruotare a mano e valido finché non lo si revoca.
+name: publish-registry
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da pubblicare (es. v1.13.0)'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write   # senza questo l'OIDC non viene emesso
+
+jobs:
+  publish:
+    if: github.repository == 'frsorrentino/chrome-bridge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Il nome dell'asset non si costruisce da `uname -m`: i runner sono x86_64
+      # ma l'asset si chiama linux_amd64, e sulla macchina di sviluppo aarch64
+      # corrisponde a linux_arm64. Un nome derivato scarica una pagina d'errore
+      # che tar non sa aprire.
+      - name: Scarica mcp-publisher
+        run: |
+          gh release download --repo modelcontextprotocol/registry \
+            --pattern 'mcp-publisher_linux_amd64.tar.gz' --clobber
+          tar xzf mcp-publisher_linux_amd64.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # server.json porta la versione due volte (server e package npm): se
+      # divergono dal tag, il registry pubblicherebbe un numero che non
+      # corrisponde a nulla di scaricabile.
+      - name: server.json corrisponde al tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_VERSION="${TAG#v}"
+          SRV="$(node -p "require('./server.json').version")"
+          PKG="$(node -p "require('./server.json').packages[0].version")"
+          echo "tag=$TAG_VERSION server.json=$SRV package=$PKG"
+          if [ "$TAG_VERSION" != "$SRV" ] || [ "$TAG_VERSION" != "$PKG" ]; then
+            echo "::error::server.json dice $SRV/$PKG, il tag $TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Login OIDC e validazione
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher validate
+
+      # Ripubblicare un tag già pubblicato non è un errore: capita rilanciando il
+      # workflow. Il registry lo rifiuta, e qui va letto come "già allineato".
+      - name: Publish
+        run: |
+          set +e
+          OUT="$(./mcp-publisher publish 2>&1)"
+          CODE=$?
+          set -e
+          echo "$OUT"
+          if [ $CODE -eq 0 ]; then
+            echo "::notice::registry allineato a ${{ github.event.inputs.tag || github.ref_name }}"
+            exit 0
+          fi
+          if echo "$OUT" | grep -qiE "already exists|already published|duplicate"; then
+            echo "::notice::versione già presente nel registry: niente da fare"
+            exit 0
+          fi
+          echo "::error::pubblicazione sul registry fallita"
+          exit 1
