@@ -71,7 +71,20 @@ jobs:
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
           CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
           CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
-        run: node tools/cws-upload.mjs "${{ steps.package.outputs.zip }}" --publish
+        run: |
+          set +e
+          node tools/cws-upload.mjs "${{ steps.package.outputs.zip }}" --publish
+          CODE=$?
+          set -e
+          # 2 = lo store ha rifiutato per un'attesa (una versione precedente è in
+          # revisione): non è un guasto, e retry-store-publish ci riprova ogni sei
+          # ore finché passa. Farlo diventare rosso qui insegnerebbe a ignorare i
+          # rossi.
+          case "$CODE" in
+            0) echo "::notice::pubblicata" ;;
+            2) echo "::notice::store occupato da una versione in revisione; ci pensa retry-store-publish" ;;
+            *) echo "::error::pubblicazione fallita per un motivo che richiede intervento"; exit 1 ;;
+          esac
 
       - name: Stato dell'item dopo il caricamento
         if: always()
