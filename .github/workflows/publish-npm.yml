@@ -40,11 +40,15 @@ jobs:
       - run: npm ci
 
       # Il trusted publishing esiste da npm 11.5.1: Node 20 ne porta una 10.x,
-      # che ignora l'OIDC e fallirebbe chiedendo un token. La versione viene
-      # stampata perché il giorno che questo si rompe, è la prima cosa da vedere.
+      # che ignora l'OIDC e fallirebbe chiedendo un token.
+      #
+      # La major è fissata e non si usa `latest`: npm 12 pretende un Node più
+      # recente di quello del runner e si è già rotto così una volta, con
+      # "Unsupported engine". La versione viene stampata perché il giorno che
+      # questo si rompe di nuovo, è la prima cosa da guardare.
       - name: npm abbastanza recente per l'OIDC
         run: |
-          npm install -g npm@latest
+          npm install -g 'npm@^11'
           npm --version
 
       # Una versione pubblicata su npm non si può sovrascrivere né correggere:
