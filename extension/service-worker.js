@@ -1910,7 +1910,7 @@ async function cmdViewportResize({ preset, width, height, left, top, state, read
     if (Object.keys(updateOpts).length === 0) {
       if (state) {
         const w = await chrome.windows.get(tab.windowId);
-        return { requested: { state }, actual: { left: w.left, top: w.top, width: w.width, height: w.height, state: w.state } };
+        return { requested: { state }, window: { left: w.left, top: w.top, width: w.width, height: w.height, state: w.state } };
       }
       throw new Error('Provide preset, width, height, left, top or state');
     }
@@ -1920,24 +1920,40 @@ async function cmdViewportResize({ preset, width, height, left, top, state, read
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => ({
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      devicePixelRatio: window.devicePixelRatio,
-    }),
-    world: 'MAIN',
-  });
-  const actual = results?.[0]?.result ?? {};
-  if (read_only) return { actual };
-  const win = await chrome.windows.get(tab.windowId);
+  // La misura del viewport passa da un'injection, e `chrome://` e
+  // `chrome-untrusted://` la rifiutano: le finestre del Terminale e di
+  // media-app sono esattamente quelle. Prima questo errore veniva propagato e
+  // il tool falliva DOPO aver spostato la finestra — l'azione riuscita
+  // riportata come guasto, che è il modo di far ritentare chi chiama qualcosa
+  // che è già successo. La geometria della finestra non richiede injection:
+  // arriva da chrome.windows.get e c'è sempre.
+  let actual = {};
+  let viewport_error = null;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      }),
+      world: 'MAIN',
+    });
+    actual = results?.[0]?.result ?? {};
+  } catch (e) {
+    viewport_error = e.message;
+  }
+  const winNow = await chrome.windows.get(tab.windowId);
+  const geometry = { left: winNow.left, top: winNow.top, width: winNow.width, height: winNow.height, state: winNow.state };
+  if (read_only) return { actual, window: geometry, viewport_error };
+  const win = winNow;
   return {
     requested: { width: targetW, height: targetH, preset: preset || null, left, top, state },
     actual,
+    viewport_error,
     // Il window manager può accettare e ignorare: senza il confronto una
     // finestra rimasta ferma passerebbe per spostata.
-    window: { left: win.left, top: win.top, width: win.width, height: win.height, state: win.state },
+    window: geometry,
   };
 }
 

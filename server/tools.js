@@ -1757,10 +1757,12 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- move_tab ---
   server.tool(
     'move_tab',
-    'Move an existing tab into another window (chrome.tabs.move), e.g. to consolidate windows that were '
-      + 'each opened separately. Does not create or close anything: the tab keeps its id, its history and its '
-      + 'page state. Both windows must be normal browser windows — Chrome refuses to move a tab into a popup or '
-      + 'an app window, and the refusal is reported verbatim rather than retried.',
+    'Move an existing tab into another window (chrome.tabs.move). Nothing is created or closed: the tab keeps '
+      + 'its id, history and page state, and this works even on chrome-untrusted:// tabs where creating one is '
+      + 'forbidden — verified on a ChromeOS Terminal tab. The **destination** must be a normal window: moving out '
+      + 'of an app or popup window is fine, moving into one is refused with "Tabs can only be moved to and from '
+      + 'normal windows". So a ChromeOS Terminal session can be pulled out to its own window (new_window, then '
+      + 'position it with viewport_resize) but cannot be merged back into the Terminal window.',
     {
       tab_id: z.number().describe('Tab to move; get it from get_tabs'),
       window_id: z.number().optional().describe('Destination window; get_tabs reports windowId for every tab'),
