@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.15.1 — 2026-07-31
+
+Nata dal collaudo dal vivo della 1.15.0 su ChromeOS: due bugie del reporting
+corrette e la finestra che mancava.
+
+- **`move_tab(window_type: "popup")`** — con `new_window` estrae la scheda in una
+  finestra popup: niente barra schede, niente omnibox, l'aspetto di una finestra
+  terminale. Esiste perché le schede del Terminale ChromeOS staccate finivano in
+  finestre browser e l'alternativa vera non c'è: `windows.create` conosce solo
+  `normal` e `popup`, le finestre app sono della SWA. Il risultato riporta il
+  `window_type` letto da Chrome, non quello richiesto: un declassamento si vede.
+  Verificato dal vivo su ChromeOS: tre sessioni terminale in tre popup affiancati
+  a terzi esatti del monitor.
+- Documentato in `tab_action` quanto verificato dal vivo su ChromeOS: `duplicate`
+  funziona dove `create_tab` è vietato (`chrome-untrusted://`) e il duplicato
+  nasce **nella finestra della tab sorgente, anche se è una finestra app** — è
+  l'unico modo di aprire una nuova sessione Terminal dentro la finestra
+  Terminal, visto che `tabs.move` verso una finestra app è rifiutato. Documentato
+  anche che `discard` sostituisce l'id della tab: il risultato porta quello
+  nuovo, gli id salvati diventano stantii.
+- **`viewport_resize` non spaccia più per fallita una mossa riuscita** (commit
+  `e0b15ff`): spostava la finestra con `chrome.windows.update` e poi misurava il
+  viewport iniettando uno script — che `chrome://` e `chrome-untrusted://`
+  rifiutano. La geometria ora viene da `chrome.windows.get` (sempre disponibile)
+  e la misura in pagina è best effort: se manca, `viewport_error` dice perché.
+  Ne beneficia `window_layout restore`, che falliva su ogni finestra terminale
+  salvata come `normal` — esattamente il caso multi-monitor.
+- **`manage_downloads action=download` non scambia più un download avviato per
+  uno finito** (commit `88ece65`): con "chiedi dove salvare" attivo Chrome tiene
+  il file picker aperto e l'API risponde `in_progress` con `filename` vuoto e
+  tutti i byte già ricevuti. `classifyDownload` riconosce quella firma come
+  `waiting_for_user` col motivo, e il tool ora interroga lo stato reale invece
+  di restituire un id e chiamarlo successo.
+
 ## 1.15.0 — 2026-07-31
 
 Il progetto multiscreen chiuso end-to-end: la geometria della 1.14.0 diventa

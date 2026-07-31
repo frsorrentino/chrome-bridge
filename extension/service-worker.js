@@ -1093,7 +1093,7 @@ async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid'
   };
 }
 
-async function cmdMoveTab({ tab_id, window_id, new_window = false, left, top, width, height, index = -1 }) {
+async function cmdMoveTab({ tab_id, window_id, new_window = false, window_type, left, top, width, height, index = -1 }) {
   if (typeof tab_id !== 'number') throw new Error('Missing required parameter: tab_id');
   if (typeof window_id !== 'number' && !new_window) throw new Error('Provide window_id or new_window: true');
 
@@ -1101,8 +1101,11 @@ async function cmdMoveTab({ tab_id, window_id, new_window = false, left, top, wi
 
   if (new_window) {
     // tabs.move vuole una finestra che esiste già; per estrarre in una finestra
-    // nuova (e posizionata) l'unica via è windows.create({tabId}).
+    // nuova (e posizionata) l'unica via è windows.create({tabId}). windows.create
+    // conosce solo normal e popup: le finestre app sono della SWA, non nostre —
+    // popup è il massimo di "finestra terminale" ottenibile da un'estensione.
     const winOpts = { tabId: tab_id };
+    if (window_type === 'popup') winOpts.type = 'popup';
     for (const [k, v] of [['left', left], ['top', top], ['width', width], ['height', height]]) {
       if (typeof v === 'number') winOpts[k] = v;
     }
@@ -1112,6 +1115,9 @@ async function cmdMoveTab({ tab_id, window_id, new_window = false, left, top, wi
       url: before.url,
       from_window: before.windowId,
       to_window: win.id,
+      // Il tipo lo dice Chrome, non la richiesta: se popup viene declassato a
+      // normal il chiamante deve vederlo da qui.
+      window_type: win.type,
       new_window: true,
       index: 0,
       same_window: before.windowId === win.id,

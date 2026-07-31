@@ -67,6 +67,15 @@ test('senza index la scheda va in fondo (-1)', async () => {
   assert.equal(sent.find((m) => m.type === MessageType.MOVE_TAB).params.index, -1);
 });
 
+test('window_type popup viene inoltrato: è la finestra senza barre per le tab da terminale', async () => {
+  const { handlers, sent } = build({ moved: 42, window_type: 'popup' });
+  await handlers.get('move_tab').handler({ tab_id: 42, new_window: true, window_type: 'popup' });
+
+  const msg = sent.find((m) => m.type === MessageType.MOVE_TAB);
+  assert.equal(msg.params.window_type, 'popup');
+  assert.equal(msg.params.new_window, true);
+});
+
 test('un rifiuto di Chrome arriva al chiamante testuale, non riscritto', async () => {
   // È il caso chrome-untrusted://terminal: vogliamo il messaggio esatto di
   // Chrome, non una nostra parafrasi.

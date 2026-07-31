@@ -1349,7 +1349,10 @@ export function registerTools(server, wsManager, caps = 'all') {
     'tab_action',
     'Tab lifecycle: close, activate (focus), reload (optional cache bypass), back, forward. close discards the '
       + 'tab and anything unsaved in it, and cannot be undone — it may be a tab the user is working in. '
-      + 'reload and navigation drop injected CSS, emulations and page hooks.',
+      + 'reload and navigation drop injected CSS, emulations and page hooks. duplicate works where create_tab is '
+      + 'forbidden (chrome-untrusted://, verified on a ChromeOS Terminal tab) and lands in the source tab\'s own '
+      + 'window, app windows included — the only way to open a new Terminal session inside the Terminal window. '
+      + 'discard replaces the tab id: the result carries the new one, saved ids go stale.',
     {
       action: z.enum(['close', 'activate', 'reload', 'back', 'forward', 'discard', 'mute', 'unmute', 'duplicate']).describe('close cannot be undone; discard frees memory, the tab reloads on focus; reload drops injected CSS and hooks'),
       bypass_cache: z.boolean().optional().default(false).describe('reload only'),
@@ -1765,22 +1768,25 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'forbidden — verified on a ChromeOS Terminal tab. The **destination** must be a normal window: moving out '
       + 'of an app or popup window is fine, moving into one is refused with "Tabs can only be moved to and from '
       + 'normal windows". So a ChromeOS Terminal session can be pulled out to its own window (new_window, then '
-      + 'position it with viewport_resize) but cannot be merged back into the Terminal window.',
+      + 'position it with viewport_resize) but cannot be merged back into the Terminal window — the closest look '
+      + 'is window_type popup: no tab strip, no omnibox, visually a terminal window. An extension cannot create '
+      + 'app windows: normal and popup are all Chrome offers.',
     {
       tab_id: z.number().describe('Tab to move; get it from get_tabs'),
       window_id: z.number().optional().describe('Destination window; get_tabs reports windowId for every tab'),
       new_window: z.boolean().optional().default(false).describe('Extract the tab into a fresh window instead — tabs.move needs an existing window, this does not'),
+      window_type: z.enum(['normal', 'popup']).optional().default('normal').describe('new_window only: popup has no tab strip and no omnibox — the terminal-window look for detached chrome-untrusted://terminal tabs'),
       left: z.number().optional().describe('New window x (new_window)'),
       top: z.number().optional().describe('New window y (new_window)'),
       width: z.number().optional().describe('New window width px (new_window)'),
       height: z.number().optional().describe('New window height px (new_window)'),
       index: z.number().optional().default(-1).describe('Position in the destination window; -1 appends at the end'),
     },
-    async ({ tab_id, window_id, new_window, left, top, width, height, index }) => {
+    async ({ tab_id, window_id, new_window, window_type, left, top, width, height, index }) => {
       if (window_id == null && new_window !== true) {
         throw new Error('Provide window_id (an existing window) or new_window: true');
       }
-      const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, new_window: new_window === true || undefined, left, top, width, height, index: index ?? -1 });
+      const data = await send(MessageType.MOVE_TAB, { tab_id, window_id, new_window: new_window === true || undefined, window_type, left, top, width, height, index: index ?? -1 });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
