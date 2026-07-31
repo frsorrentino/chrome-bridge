@@ -480,10 +480,15 @@ export function registerTools(server, wsManager, caps = 'all') {
   server.tool(
     'get_tabs',
     'List every open tab with id, url, title and active flag. Read-only. Use it to find a tab_id when the '
-      + 'implicit target (last navigated tab, else the active one) is not the tab you mean.',
-    {},
-    async () => {
-      const data = await send(MessageType.GET_TABS);
+      + 'implicit target (last navigated tab, else the active one) is not the tab you mean. '
+      + 'include_windows adds the windows themselves with their position, size, state and type — what you need '
+      + 'before moving or tiling anything, and the only way to tell which monitor a window is on.',
+    {
+      include_windows: z.boolean().optional().default(false)
+        .describe('Also return the windows with bounds, state, type and tab count'),
+    },
+    async ({ include_windows }) => {
+      const data = await send(MessageType.GET_TABS, { include_windows: include_windows === true });
       return {
         content: [{
           type: 'text',
@@ -1028,12 +1033,16 @@ export function registerTools(server, wsManager, caps = 'all') {
     {
       action: z.enum(['set', 'get']).optional().default('set').describe('get reports the current viewport without resizing anything'),
       preset: z.enum(['mobile', 'tablet', 'desktop']).optional().describe('375x812, 768x1024, 1440x900'),
+      left: z.number().optional().describe('Window x on the virtual desktop; on multi-monitor this is what picks the screen'),
+      top: z.number().optional().describe('Window y on the virtual desktop'),
+      state: z.enum(['normal', 'maximized', 'fullscreen', 'minimized']).optional()
+        .describe('Applied before bounds: a maximized window accepts left/top/width/height and ignores them'),
       width: z.number().optional().describe('Overrides preset'),
       height: z.number().optional().describe('Overrides preset'),
       tab_id: tabId,
     },
-    async ({ action, preset, width, height, tab_id }) => {
-      const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, read_only: (action ?? 'set') === 'get', tab_id });
+    async ({ action, preset, width, height, left, top, state, tab_id }) => {
+      const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, left, top, state, read_only: (action ?? 'set') === 'get', tab_id });
       return {
         content: [{
           type: 'text',
@@ -1765,10 +1774,13 @@ export function registerTools(server, wsManager, caps = 'all') {
       layout: z.enum(['grid', 'columns', 'rows']).optional().default('grid').describe('columns splits left to right, rows top to bottom, grid keeps tiles as square as it can'),
       padding: z.number().optional().default(0).describe('Px of empty margin kept inside the work area'),
       include_types: z.array(z.enum(['normal', 'popup', 'app'])).optional().describe('Window types to include; omitted = normal only'),
+      area: z.object({
+        left: z.number(), top: z.number(), width: z.number(), height: z.number(),
+      }).optional().describe('Monitor area to fill, when no target window has a scriptable tab to read it from'),
     },
-    async ({ window_ids, reference_window_id, layout, padding, include_types }) => {
+    async ({ window_ids, reference_window_id, layout, padding, include_types, area }) => {
       const data = await send(MessageType.TILE_WINDOWS, {
-        window_ids, reference_window_id, layout: layout ?? 'grid', padding: padding ?? 0, include_types,
+        window_ids, reference_window_id, layout: layout ?? 'grid', padding: padding ?? 0, include_types, area,
       });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }

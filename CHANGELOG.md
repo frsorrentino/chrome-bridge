@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.14.0 — 2026-07-31
+
+Il necessario per posizionare le finestre su più monitor. Nessun tool nuovo:
+tre parametri su tool esistenti, 62 tool (33 core) invariati.
+
+La scoperta che ha orientato il taglio: le sessioni del Terminale ChromeOS
+risultano **già consolidate** in una finestra sola (verificato dal vivo: una
+finestra, cinque schede-sessione). Il pezzo mancante non era spostare le schede
+— è `move_tab`, che resta per le finestre nuove che garcon apre — ma sapere
+**dove stanno le finestre** e metterle dove servono.
+
+### `get_tabs(include_windows: true)`
+Prima riportava solo le schede: per decidere dove mettere una finestra si poteva
+solo indovinare. Ora aggiunge le finestre con posizione, dimensioni, `state`,
+`type`, conteggio schede e un flag **`scriptable`** — dice se la finestra ha
+almeno una scheda `http(s)`/`file:`, cioè se `tile_windows` può leggerci l'area
+del monitor o serve passargliela. Su una scrivania multi-schermo `left` è ciò
+che identifica il monitor.
+
+### `viewport_resize(left, top, state)`
+Sapeva ridimensionare, non collocare: su un monitor solo basta, su tre no.
+`state` viene applicato **prima** dei bounds — una finestra massimizzata li
+accetta e li ignora — e la risposta riporta la geometria reale della finestra
+dopo la chiamata, perché il window manager può accettare e non applicare.
+
+### `tile_windows(area)`
+L'affiancamento leggeva l'area del monitor da una scheda scriptabile, e le
+finestre del Terminale hanno solo schede `chrome-untrusted://`: il caso per cui
+il tool era nato restava senza risposta. Con `area` esplicita
+(`{left, top, width, height}`) la lettura viene saltata del tutto.
+
+Verifica: 174 test unit. La prova dal vivo su ChromeOS resta da fare: il browser
+esegue la 1.11.0 dello store, che non ha nulla di tutto questo — serve
+l'estensione unpacked o l'arrivo di questa versione via store.
+
+Payload `tools/list` core: da ≈8,5k a ≈8,6k token.
+
 ## 1.13.0 — 2026-07-31
 
 ### `tile_windows`: affiancare le finestre su un monitor

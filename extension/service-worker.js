@@ -322,7 +322,7 @@ async function executeCommand(msg) {
 
   switch (type) {
     case 'get_tabs':
-      return await cmdGetTabs();
+      return await cmdGetTabs(params);
     case 'navigate':
       return await cmdNavigate(params);
     case 'screenshot':
@@ -649,15 +649,36 @@ async function bitmapToBase64Capped(bitmap, maxSide = MAX_IMAGE_SIDE) {
 
 // --- Implementazione comandi ---
 
-async function cmdGetTabs() {
+async function cmdGetTabs({ include_windows = false } = {}) {
   const tabs = await chrome.tabs.query({});
-  return tabs.map((t) => ({
+  const list = tabs.map((t) => ({
     id: t.id,
     url: t.url,
     title: t.title,
     active: t.active,
     windowId: t.windowId,
   }));
+  if (!include_windows) return list;
+
+  // Senza geometria e stato non si può decidere dove mettere una finestra: si
+  // può solo indovinare. `left` in particolare è ciò che identifica il monitor
+  // su una scrivania virtuale multi-schermo.
+  const windows = (await chrome.windows.getAll({ populate: true })).map((w) => ({
+    id: w.id,
+    type: w.type,
+    state: w.state,
+    focused: w.focused,
+    left: w.left,
+    top: w.top,
+    width: w.width,
+    height: w.height,
+    tabs: (w.tabs || []).length,
+    // Una finestra le cui schede sono tutte chrome:// o chrome-untrusted:// non
+    // può fornire l'area del monitor a tile_windows: meglio saperlo prima di
+    // provarci.
+    scriptable: (w.tabs || []).some((t) => /^(https?|file):/i.test(t.url || '')),
+  }));
+  return { tabs: list, windows };
 }
 
 async function cmdNavigate({ url, tab_id }) {
@@ -965,7 +986,7 @@ async function cmdCreateTab({ url, active = true }) {
  * chrome-untrusted:// non può fornire l'area, e il tool lo dice invece di
  * ripiegare su misure inventate.
  */
-async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid', padding = 0, include_types }) {
+async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid', padding = 0, include_types, area: explicitArea }) {
   const types = include_types?.length ? include_types : ['normal'];
   const all = await chrome.windows.getAll({ populate: true });
 
@@ -986,9 +1007,12 @@ async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid'
     .flatMap((w) => (w.tabs || []).map((t) => ({ windowId: w.id, tabId: t.id, url: t.url || '' })))
     .filter((t) => /^(https?|file):/i.test(t.url));
 
-  let area = null;
+  // Un'area esplicita salta la lettura da una scheda: è l'unica strada quando
+  // le finestre bersaglio hanno solo pagine interne di Chrome, come quelle del
+  // Terminale ChromeOS.
+  let area = explicitArea ?? null;
   const failures = [];
-  for (const cand of candidates) {
+  for (const cand of (area ? [] : candidates)) {
     try {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: cand.tabId },
@@ -1809,7 +1833,7 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
 
 // --- viewport_resize ---
 
-async function cmdViewportResize({ preset, width, height, read_only = false, tab_id }) {
+async function cmdViewportResize({ preset, width, height, left, top, state, read_only = false, tab_id }) {
   const tabId = await resolveTabId(tab_id);
   const tab = await chrome.tabs.get(tabId);
 
@@ -1825,9 +1849,20 @@ async function cmdViewportResize({ preset, width, height, read_only = false, tab
   const updateOpts = {};
   if (targetW) updateOpts.width = targetW;
   if (targetH) updateOpts.height = targetH;
+  if (typeof left === 'number') updateOpts.left = left;
+  if (typeof top === 'number') updateOpts.top = top;
 
   if (!read_only) {
-    if (Object.keys(updateOpts).length === 0) throw new Error('Provide preset, width, or height');
+    // Lo stato va cambiato PRIMA dei bounds: una finestra massimizzata li
+    // accetta e li ignora, e la chiamata riuscirebbe senza spostare nulla.
+    if (state) await chrome.windows.update(tab.windowId, { state });
+    if (Object.keys(updateOpts).length === 0) {
+      if (state) {
+        const w = await chrome.windows.get(tab.windowId);
+        return { requested: { state }, actual: { left: w.left, top: w.top, width: w.width, height: w.height, state: w.state } };
+      }
+      throw new Error('Provide preset, width, height, left, top or state');
+    }
     await chrome.windows.update(tab.windowId, updateOpts);
     // La finestra si ridisegna in modo asincrono: senza la pausa si leggono le
     // dimensioni vecchie e si riporta un risultato falso.
@@ -1845,7 +1880,14 @@ async function cmdViewportResize({ preset, width, height, read_only = false, tab
   });
   const actual = results?.[0]?.result ?? {};
   if (read_only) return { actual };
-  return { requested: { width: targetW, height: targetH, preset: preset || null }, actual };
+  const win = await chrome.windows.get(tab.windowId);
+  return {
+    requested: { width: targetW, height: targetH, preset: preset || null, left, top, state },
+    actual,
+    // Il window manager può accettare e ignorare: senza il confronto una
+    // finestra rimasta ferma passerebbe per spostata.
+    window: { left: win.left, top: win.top, width: win.width, height: win.height, state: win.state },
+  };
 }
 
 // --- full_page_screenshot ---

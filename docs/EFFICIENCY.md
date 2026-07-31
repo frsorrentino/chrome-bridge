@@ -36,7 +36,7 @@ the number of turns, not in the size of each one.
 
 ## The schema cost, and why it grew
 
-33 core tools cost ≈8.5k tokens of `tools/list`; all 62 cost ≈15.5k. Specialized
+33 core tools cost ≈8.6k tokens of `tools/list`; all 62 cost ≈15.7k. Specialized
 groups (`audits`, `visual`, `network`, `storage`, `dom`, `files`) are opt-in via
 `--caps`.
 
