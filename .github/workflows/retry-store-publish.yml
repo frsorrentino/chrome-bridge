@@ -61,6 +61,14 @@ jobs:
             echo "done=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Il pacchetto deve venire dal tag, ma gli strumenti no: il tag è per
+      # definizione più vecchio di qualunque correzione allo strumento, e alla
+      # prima prova ha fatto girare una cws-upload priva del classificatore
+      # attesa/errore, trasformando un'attesa normale in un job rosso.
+      - name: Metti da parte gli strumenti correnti
+        if: steps.check.outputs.done == 'false'
+        run: cp -r tools "$RUNNER_TEMP/tools-main"
+
       - name: Checkout del tag
         if: steps.check.outputs.done == 'false'
         run: git checkout --detach "${{ steps.tag.outputs.tag }}"
@@ -89,7 +97,7 @@ jobs:
           CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
         run: |
           set +e
-          node tools/cws-upload.mjs "${{ steps.package.outputs.zip }}" --publish
+          node "$RUNNER_TEMP/tools-main/cws-upload.mjs" "${{ steps.package.outputs.zip }}" --publish
           CODE=$?
           set -e
           case "$CODE" in
