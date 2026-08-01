@@ -257,7 +257,7 @@ export const TOOL_ANNOTATIONS = {
   get_storage: ro(),
   get_tabs: ro(),
   list_event_listeners: ro(),
-  manage_downloads: ro(),
+  manage_downloads: rw({ open: true }),  // action=download scrive un file sul disco e va in rete
   measure_spacing: ro(),
   monitor_network: ro(true),
   monitor_websocket: ro(true),
@@ -274,7 +274,7 @@ export const TOOL_ANNOTATIONS = {
   // --- interazione con la pagina ---
   click: rw({ open: true }),          // un click può navigare
   drag_and_drop: rw(),
-  fill_form: rw({ idempotent: true }),
+  fill_form: rw(),  // con submit_selector INVIA: ritentare invia due volte
   hover: rw({ idempotent: true }),
   press_key: rw(),
   scroll: rw(),
@@ -1005,7 +1005,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- fill_form ---
   server.tool(
     'fill_form',
-    'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea.',
+    'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea. '
+    + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly.',
     {
       fields: z.array(z.object({
         selector: z.string(),
@@ -1637,7 +1638,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- clipboard ---
   server.tool(
     'clipboard',
-    'Read or write the system clipboard (text). Activates the tab first.',
+    'Read or write the system clipboard (text). Activates the tab first. '
+    + 'write overwrites whatever the user had copied, which is not recoverable.',
     {
       action: z.enum(['read', 'write']).describe('write takes text; read returns the current clipboard contents'),
       text: z.string().optional().describe('For write'),
