@@ -10,6 +10,8 @@ extension on a form-filling task, with ~3× the toolset and no paid plan.**
 network mocking) over a local WebSocket bridge, plus a headless instance for CI.
 Self-hosted, local-only.
 
+![The same form filled in 6 turns instead of 16.5 — 2.75× fewer turns, 2.28× lower cost](assets/readme/card1-race.png)
+
 ## Quickstart
 
 **Requires** Node.js 18+ and Chrome 135+.
@@ -60,9 +62,13 @@ The full benchmark — method, every raw run including the unfavourable ones, an
 what the harness can't measure — is in
 [docs/EFFICIENCY.md](docs/EFFICIENCY.md).
 
+![Claude checks its own work: console errors, pixel diffs, network mocking and audits](assets/readme/card5-devloop.png)
+
 ## Using it
 
 Beyond the MCP tools, two lanes keep work away from the model entirely.
+
+![Some jobs never touch the model: the CLI lane runs the same tools at zero tokens](assets/readme/card3-lane.png)
 
 **CLI** — batch operations, piped through `grep` or `jq` before anything reaches
 the context:
@@ -90,6 +96,8 @@ user-script toggle isn't available.
 63 in total, in seven groups. Only `core` (34 tools) loads by default; the rest
 are opt-in via `--caps`.
 
+![63 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
+
 | Group | N | What's in it |
 |---|---|---|
 | Core & Navigation | 9 | tabs, windows, `navigate`, `screenshot`, `tile_windows` |
@@ -103,6 +111,8 @@ are opt-in via `--caps`.
 Every tool, with the notes that matter: [docs/TOOLS.md](docs/TOOLS.md).
 
 ## How it works
+
+![It drives the Chrome you are logged into, over a local WebSocket bridge](assets/readme/card2-bridge.png)
 
 ```
 Claude Code  <--stdio-->  MCP Server  <--WebSocket :8765-->  Chrome Extension

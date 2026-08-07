@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1626"/>
+      <stop offset="1" stop-color="#10233c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg3)"/>
+
+  <!-- titolo -->
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">Some jobs never touch the model at all.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">The same 63 tools also run from your shell — filter with grep before anything costs a token.</text>
+
+  <!-- nodo di partenza -->
+  <circle cx="150" cy="330" r="46" fill="#1d4ed8"/>
+  <text x="150" y="322" fill="#ffffff" font-size="21" font-weight="700" text-anchor="middle">your</text>
+  <text x="150" y="348" fill="#ffffff" font-size="21" font-weight="700" text-anchor="middle">task</text>
+
+  <!-- corsia alta: passa dal modello -->
+  <path d="M 196 312 Q 320 240 450 240" stroke="#5a6b80" stroke-width="6" fill="none"/>
+  <rect x="450" y="205" width="220" height="70" rx="14" fill="#16283f" stroke="#5a6b80" stroke-width="2"/>
+  <text x="560" y="238" fill="#e6edf3" font-size="22" font-weight="700" text-anchor="middle">the model</text>
+  <text x="560" y="263" fill="#8b98a9" font-size="18" text-anchor="middle">reads every byte</text>
+  <path d="M 670 240 Q 800 240 924 312" stroke="#5a6b80" stroke-width="6" fill="none"/>
+  <circle cx="740" cy="200" r="16" fill="#ffd28a"/>
+  <circle cx="782" cy="188" r="12" fill="#ffd28a" opacity="0.8"/>
+  <circle cx="816" cy="204" r="9" fill="#ffd28a" opacity="0.6"/>
+  <text x="852" y="200" fill="#ffd28a" font-size="20" font-weight="700">tokens spent</text>
+
+  <!-- corsia bassa: CLI diretta -->
+  <path d="M 196 348 Q 320 420 560 420 Q 800 420 924 348" stroke="#7ee2a0" stroke-width="8" fill="none"/>
+  <rect x="440" y="392" width="240" height="56" rx="28" fill="#0d1117" stroke="#7ee2a0" stroke-width="2"/>
+  <text x="560" y="428" fill="#7ee2a0" font-size="24" font-weight="700" text-anchor="middle">CLI lane · 0 tokens</text>
+
+  <!-- nodo risultato -->
+  <circle cx="970" cy="330" r="46" fill="#7ee2a0"/>
+  <text x="970" y="322" fill="#0b1626" font-size="21" font-weight="800" text-anchor="middle">the</text>
+  <text x="970" y="348" fill="#0b1626" font-size="21" font-weight="800" text-anchor="middle">result</text>
+
+  <!-- snippet -->
+  <rect x="70" y="500" width="1060" height="60" rx="14" fill="#0d1117" stroke="#24405e" stroke-width="2"/>
+  <text x="100" y="538" fill="#7ee2a0" font-size="23" font-family="ui-monospace,Menlo,monospace">$ chrome-bridge read_console --level error | head -20</text>
+
+  <text x="70" y="600" fill="#9db7d8" font-size="24">Record a session once, replay it in CI — smoke tests with no model in the loop.</text>
+</svg>

@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg5" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1626"/>
+      <stop offset="1" stop-color="#10233c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg5)"/>
+
+  <!-- titolo -->
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">Claude checks its own work.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">Console, network, pixels and audits — the loop web developers live in, automated.</text>
+
+  <!-- linee di collegamento -->
+  <g stroke="#24405e" stroke-width="3">
+    <line x1="370" y1="285" x2="450" y2="310"/>
+    <line x1="370" y1="450" x2="450" y2="400"/>
+    <line x1="830" y1="285" x2="750" y2="310"/>
+    <line x1="830" y1="450" x2="750" y2="400"/>
+  </g>
+
+  <!-- finestra browser centrale -->
+  <rect x="450" y="215" width="300" height="270" rx="16" fill="#0d1117" stroke="#24405e" stroke-width="2"/>
+  <rect x="450" y="215" width="300" height="40" rx="16" fill="#16283f"/>
+  <rect x="450" y="240" width="300" height="15" fill="#16283f"/>
+  <circle cx="474" cy="235" r="6" fill="#ff7b6b"/>
+  <circle cx="496" cy="235" r="6" fill="#ffd28a"/>
+  <circle cx="518" cy="235" r="6" fill="#7ee2a0"/>
+  <!-- contenuto pagina -->
+  <rect x="480" y="280" width="240" height="18" rx="6" fill="#24405e"/>
+  <rect x="480" y="312" width="180" height="12" rx="5" fill="#1a3050"/>
+  <rect x="480" y="334" width="210" height="12" rx="5" fill="#1a3050"/>
+  <rect x="480" y="366" width="110" height="60" rx="8" fill="#1a3050"/>
+  <!-- regione diff evidenziata -->
+  <rect x="610" y="366" width="110" height="60" rx="8" fill="#1a3050" stroke="#f472b6" stroke-width="3" stroke-dasharray="8 6"/>
+  <rect x="622" y="444" width="86" height="24" rx="12" fill="#f472b6"/>
+  <text x="665" y="461" fill="#0b1626" font-size="15" font-weight="800" text-anchor="middle">changed</text>
+
+  <!-- chip console (alto sx) -->
+  <rect x="70" y="215" width="300" height="110" rx="14" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+  <text x="94" y="250" fill="#4fd1f9" font-size="20" font-weight="700">read_console</text>
+  <text x="94" y="282" fill="#ff7b6b" font-size="18" font-family="ui-monospace,Menlo,monospace">TypeError: cart is undefined</text>
+  <text x="94" y="308" fill="#8b98a9" font-size="17">caught right after the edit</text>
+
+  <!-- chip mocking (basso sx) -->
+  <rect x="70" y="390" width="300" height="110" rx="14" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+  <text x="94" y="425" fill="#4fd1f9" font-size="20" font-weight="700">network mocking</text>
+  <text x="94" y="455" fill="#e6edf3" font-size="18">stub the API, build the UI</text>
+  <text x="94" y="480" fill="#8b98a9" font-size="17">before the backend exists</text>
+
+  <!-- chip diff (alto dx) -->
+  <rect x="830" y="215" width="300" height="110" rx="14" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+  <text x="854" y="250" fill="#4fd1f9" font-size="20" font-weight="700">screenshot_diff</text>
+  <text x="854" y="282" fill="#e6edf3" font-size="18">pixel-compares every change</text>
+  <text x="854" y="308" fill="#8b98a9" font-size="17">the 3px shift you would miss</text>
+
+  <!-- chip audit (basso dx) -->
+  <rect x="830" y="390" width="300" height="110" rx="14" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+  <text x="854" y="425" fill="#4fd1f9" font-size="20" font-weight="700">audits</text>
+  <g stroke="#7ee2a0" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="856,448 862,455 874,441"/>
+    <polyline points="856,478 862,485 874,471"/>
+    <polyline points="1006,448 1012,455 1024,441"/>
+  </g>
+  <text x="888" y="456" fill="#e6edf3" font-size="18">accessibility</text>
+  <text x="888" y="486" fill="#e6edf3" font-size="18">SEO tags</text>
+  <text x="1038" y="456" fill="#e6edf3" font-size="18">headers</text>
+
+  <!-- tagline -->
+  <rect x="70" y="530" width="700" height="60" rx="30" fill="#1d4ed8"/>
+  <text x="420" y="569" fill="#ffffff" font-size="26" font-weight="700" text-anchor="middle">Fix, verify, ship — without leaving the conversation.</text>
+</svg>

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1626"/>
+      <stop offset="1" stop-color="#10233c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg2)"/>
+
+  <!-- titolo -->
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">It drives the Chrome you are logged into.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">No robot browser, no empty profile — your real tabs, sessions and extensions.</text>
+
+  <!-- terminale Claude Code -->
+  <rect x="70" y="240" width="320" height="230" rx="16" fill="#0d1117" stroke="#24405e" stroke-width="2"/>
+  <rect x="70" y="240" width="320" height="44" rx="16" fill="#16283f"/>
+  <rect x="70" y="268" width="320" height="16" fill="#16283f"/>
+  <text x="230" y="270" fill="#e6edf3" font-size="22" font-weight="700" text-anchor="middle">Claude Code</text>
+  <g font-family="ui-monospace,Menlo,monospace" font-size="20">
+    <text x="95" y="325" fill="#7ee2a0">&gt; open the store admin</text>
+    <text x="95" y="360" fill="#7ee2a0">&gt; fill the form</text>
+    <text x="95" y="395" fill="#7ee2a0">&gt; screenshot the result</text>
+    <text x="95" y="435" fill="#5a6b80">working in your browser...</text>
+  </g>
+
+  <!-- ponte -->
+  <rect x="400" y="348" width="390" height="14" rx="7" fill="#38bdf8"/>
+  <rect x="470" y="300" width="10" height="62" fill="#38bdf8"/>
+  <rect x="710" y="300" width="10" height="62" fill="#38bdf8"/>
+  <path d="M 410 350 Q 472 288 535 350" stroke="#38bdf8" stroke-width="4" fill="none"/>
+  <path d="M 535 350 Q 597 288 660 350" stroke="#38bdf8" stroke-width="4" fill="none"/>
+  <path d="M 660 350 Q 722 288 785 350" stroke="#38bdf8" stroke-width="4" fill="none"/>
+  <text x="595" y="400" fill="#9db7d8" font-size="21" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">local WebSocket · 127.0.0.1</text>
+
+  <!-- finestra Chrome -->
+  <rect x="800" y="230" width="330" height="250" rx="16" fill="#0d1117" stroke="#24405e" stroke-width="2"/>
+  <rect x="800" y="230" width="330" height="44" rx="16" fill="#16283f"/>
+  <rect x="800" y="258" width="330" height="16" fill="#16283f"/>
+  <circle cx="826" cy="252" r="7" fill="#ff7b6b"/>
+  <circle cx="850" cy="252" r="7" fill="#ffd28a"/>
+  <circle cx="874" cy="252" r="7" fill="#7ee2a0"/>
+  <!-- tab -->
+  <rect x="900" y="240" width="90" height="26" rx="8" fill="#24405e"/>
+  <rect x="998" y="240" width="90" height="26" rx="8" fill="#1a3050"/>
+  <!-- avatar loggato -->
+  <circle cx="895" cy="370" r="38" fill="#1d4ed8"/>
+  <circle cx="895" cy="356" r="14" fill="#cfe6ff"/>
+  <path d="M 869 392 Q 895 366 921 392 L 921 400 Q 895 414 869 400 Z" fill="#cfe6ff"/>
+  <circle cx="922" cy="396" r="12" fill="#7ee2a0"/>
+  <text x="960" y="362" fill="#e6edf3" font-size="22" font-weight="700">you,</text>
+  <text x="960" y="390" fill="#e6edf3" font-size="22" font-weight="700">logged in</text>
+  <text x="830" y="446" fill="#5a6b80" font-size="19">cookies · sessions · extensions</text>
+
+  <!-- tagline -->
+  <text x="70" y="545" fill="#ffffff" font-size="28" font-weight="700">Works on ChromeOS too — the real host browser.</text>
+  <text x="70" y="583" fill="#9db7d8" font-size="26">Self-hosted, local-only, no paid plan.</text>
+</svg>

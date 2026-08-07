@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1626"/>
+      <stop offset="1" stop-color="#10233c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg4)"/>
+
+  <!-- titolo -->
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">63 tools. One browser.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">From clicking a button to auditing a whole page — seven groups, all local.</text>
+
+  <!-- griglia gruppi: riga 1 -->
+  <g>
+    <rect x="70" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="95" y="270" fill="#38bdf8" font-size="46" font-weight="800">9</text>
+    <text x="95" y="305" fill="#e6edf3" font-size="21" font-weight="700">Navigation</text>
+    <text x="95" y="328" fill="#8b98a9" font-size="17">tabs, windows, screenshots</text>
+
+    <rect x="340" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="365" y="270" fill="#38bdf8" font-size="46" font-weight="800">11</text>
+    <text x="365" y="305" fill="#e6edf3" font-size="21" font-weight="700">Interaction</text>
+    <text x="365" y="328" fill="#8b98a9" font-size="17">click, forms, upload, dialogs</text>
+
+    <rect x="610" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="635" y="270" fill="#38bdf8" font-size="46" font-weight="800">11</text>
+    <text x="635" y="305" fill="#e6edf3" font-size="21" font-weight="700">DOM &amp; Inspection</text>
+    <text x="635" y="328" fill="#8b98a9" font-size="17">read, extract, query, watch</text>
+
+    <rect x="880" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="905" y="270" fill="#38bdf8" font-size="46" font-weight="800">9</text>
+    <text x="905" y="305" fill="#e6edf3" font-size="21" font-weight="700">Debug &amp; Network</text>
+    <text x="905" y="328" fill="#8b98a9" font-size="17">console, mocking, Web Vitals</text>
+  </g>
+
+  <!-- griglia gruppi: riga 2 -->
+  <g>
+    <rect x="70" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="95" y="420" fill="#38bdf8" font-size="46" font-weight="800">7</text>
+    <text x="95" y="455" fill="#e6edf3" font-size="21" font-weight="700">Visual &amp; Responsive</text>
+    <text x="95" y="478" fill="#8b98a9" font-size="17">pixel diff, viewport, zoom</text>
+
+    <rect x="340" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="365" y="420" fill="#38bdf8" font-size="46" font-weight="800">6</text>
+    <text x="365" y="455" fill="#e6edf3" font-size="21" font-weight="700">Audits</text>
+    <text x="365" y="478" fill="#8b98a9" font-size="17">a11y, SEO, security, links</text>
+
+    <rect x="610" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="635" y="420" fill="#38bdf8" font-size="46" font-weight="800">9</text>
+    <text x="635" y="455" fill="#e6edf3" font-size="21" font-weight="700">State &amp; Files</text>
+    <text x="635" y="478" fill="#8b98a9" font-size="17">storage, fixtures, recording</text>
+
+    <rect x="880" y="360" width="250" height="130" rx="16" fill="#1d4ed8"/>
+    <text x="905" y="420" fill="#ffffff" font-size="30" font-weight="800">Lean context</text>
+    <text x="905" y="452" fill="#cfe6ff" font-size="19">only 34 load by default,</text>
+    <text x="905" y="476" fill="#cfe6ff" font-size="19">the rest are opt-in</text>
+  </g>
+
+  <!-- tagline -->
+  <text x="70" y="565" fill="#ffffff" font-size="28" font-weight="700">Headless mode included — <tspan fill="#9db7d8" font-weight="400">the same tools drive a browser in CI, no screen attached.</tspan></text>
+</svg>
