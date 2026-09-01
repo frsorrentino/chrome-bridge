@@ -66,6 +66,14 @@ what the harness can't measure — is in
 
 ## Using it
 
+The **skill** in [`skills/chrome-bridge/SKILL.md`](skills/chrome-bridge/SKILL.md)
+is what makes the tools discoverable: recipes with the phrase that triggers
+each one ("verify the email arrives", "test the checkout with a test card",
+"which plugin slows the page", "what fires before consent"), the tool sequence,
+and the zero-token CLI commands the model would otherwise never see.
+`install.sh` copies it to `~/.claude/skills/chrome-bridge`; do the same by
+hand for other clients.
+
 Beyond the MCP tools, two lanes keep work away from the model entirely.
 
 ![Some jobs never touch the model: the CLI lane runs the same tools at zero tokens](assets/readme/card3-lane.png)

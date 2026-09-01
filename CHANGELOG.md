@@ -43,6 +43,17 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
   vede un'immagine ridotta a ≤1568 px e non ha modo di mappare quello che vede
   sulle coordinate che `region` si aspetta. Un'estensione non aggiornata non la
   manda e il risultato resta la sola immagine.
+- **Skill con le ricette** (`skills/chrome-bridge/SKILL.md`, copiata da
+  `install.sh` in `~/.claude/skills/`): il contenitore che mancava. Venti
+  ricette — form fino alla mail nella webmail loggata, checkout con carta di
+  prova nell'iframe, errore solo da loggati, plugin che rallenta, pixel/GTM,
+  cookie e consenso, redirect di migrazione, PageSpeed dalla pagina di Google,
+  log dell'hosting, pannello sconosciuto, Gutenberg — ognuna con la **frase
+  che la innesca** (in inglese e in italiano), la sequenza di tool e cosa
+  riferire; la corsia CLI a zero token con la frase per ogni comando; la lista
+  di ciò che è fuori portata (altri browser, debugger, certificati, CAPTCHA).
+  Un test (`test/unit/skill.test.js`) verifica che ogni `tool({param})` citato
+  esista davvero: al primo giro ha trovato sette parametri inventati.
 - **Istruzioni del server**: detto che `navigate` restituisce già i refs (un
   `get_interactives` subito dopo è un turno buttato), e che per leggere un
   dettaglio si ritaglia e ingrandisce invece di rifare lo screenshot intero,

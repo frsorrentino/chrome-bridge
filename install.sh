@@ -22,6 +22,17 @@ cd "$SCRIPT_DIR"
 npm install --silent
 echo "[OK] Dependencies installed"
 
+# The skill tells the model WHEN to use the tools and the zero-token CLI:
+# without it the recipes ("verify the email arrives", "test the checkout")
+# exist only in this repo, where no model reads them.
+SKILL_DST="$HOME/.claude/skills/chrome-bridge"
+if [ -d "$SCRIPT_DIR/skills/chrome-bridge" ]; then
+  mkdir -p "$(dirname "$SKILL_DST")"
+  rm -rf "$SKILL_DST" && cp -r "$SCRIPT_DIR/skills/chrome-bridge" "$SKILL_DST" \
+    && echo "[OK] Skill installed in $SKILL_DST" \
+    || echo "[SKIP] Could not install the skill (copy it by hand: skills/chrome-bridge)"
+fi
+
 # 3. Register MCP server in Claude Code
 echo ""
 if command -v claude &>/dev/null; then
@@ -29,7 +40,7 @@ if command -v claude &>/dev/null; then
   # -e CHROME_BRIDGE_CAPS=all: senza questo il default e caps=core (30 tool su 59)
   # e chi installa non ha extract_table/audits, che i doc promettono.
   claude mcp add --scope user chrome-bridge -e CHROME_BRIDGE_CAPS=all -- node "$SERVER_ENTRY" 2>/dev/null && \
-    echo "[OK] MCP server registered (scope: user, all 59 tools)" || \
+    echo "[OK] MCP server registered (scope: user, all tools)" || \
     echo "[SKIP] MCP server already registered or claude command failed"
 else
   echo "[SKIP] 'claude' CLI not found. Register manually:"

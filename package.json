@@ -42,6 +42,7 @@
   "files": [
     "server/",
     "tools/",
+    "skills/",
     "extension/",
     "install.sh",
     "README.md"
