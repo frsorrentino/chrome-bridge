@@ -713,14 +713,16 @@ async function cmdNavigate({ url, tab_id }) {
 async function cmdScreenshot({ tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
-  const dataUrl = await withTabVisible(tabId, async (tab) => {
+  const { dataUrl, viewport } = await withTabVisible(tabId, async (tab) => {
     // Piccolo delay per dare tempo al rendering
     await new Promise((r) => setTimeout(r, 200));
-    return captureVisible(tab.windowId);
+    // tab.width/height sono il viewport in CSS px, senza script: è il sistema
+    // di riferimento di element_screenshot.region.
+    return { dataUrl: await captureVisible(tab.windowId), viewport: { width: tab.width, height: tab.height } };
   });
 
   const bitmap = await dataUrlToBitmap(dataUrl);
-  return { image: await bitmapToBase64Capped(bitmap) };
+  return { image: await bitmapToBase64Capped(bitmap), viewport };
 }
 
 async function cmdExecuteJs({ code, tab_id, frame_id }) {
@@ -2062,44 +2064,61 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
 
 // --- element_screenshot ---
 
-async function cmdElementScreenshot({ selector, tab_id }) {
-  if (!selector) throw new Error('Missing required parameter: selector');
+// Il box si indica per selettore (scrollato in vista) o per regione in CSS px
+// del viewport corrente — lo stesso sistema dei rect di get_interactives e
+// query_dom. `scale` ingrandisce il ritaglio: più pixel per il modello sulla
+// zona che gli interessa, invece di un altro screenshot intero.
+async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
+  if (!selector && !region) throw new Error('Missing required parameter: selector or region');
   const tabId = await resolveTabId(tab_id);
+  const zoom = Math.min(4, Math.max(1, Number(scale) || 1));
 
-  const { rect, dataUrl } = await withTabVisible(tabId, async (tab) => {
-    const res = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (sel) => {
-        const el = document.querySelector(sel);
-        if (!el) throw new Error(`Element not found: ${sel}`);
-        el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
-        const r = el.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
-      },
-      args: [selector],
-      world: 'MAIN',
-    });
-    const rect = res?.[0]?.result;
-    if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
-
-    // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
-    await new Promise((r) => setTimeout(r, 300));
+  const { rect, dataUrl, tabWidth } = await withTabVisible(tabId, async (tab) => {
+    let rect;
+    if (selector) {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) throw new Error(`Element not found: ${sel}`);
+          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+        },
+        args: [selector],
+        world: 'MAIN',
+      });
+      rect = res?.[0]?.result;
+      if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
+      // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
+      await new Promise((r) => setTimeout(r, 300));
+    } else {
+      const { x, y, width, height } = region;
+      if (!(width > 0) || !(height > 0)) throw new Error('region needs positive width and height');
+      // Niente script: il dpr si ricava dal rapporto cattura/viewport, così la
+      // regione funziona anche su chrome:// dove executeScript è rifiutato.
+      rect = { x: Number(x) || 0, y: Number(y) || 0, width, height, dpr: null };
+    }
     const dataUrl = await captureVisible(tab.windowId);
-    return { rect, dataUrl };
+    return { rect, dataUrl, tabWidth: tab.width };
   });
   const bitmap = await dataUrlToBitmap(dataUrl);
-  const { dpr } = rect;
+  const dpr = rect.dpr || (tabWidth ? bitmap.width / tabWidth : 1);
   const sx = Math.max(0, Math.round(rect.x * dpr));
   const sy = Math.max(0, Math.round(rect.y * dpr));
   const sw = Math.min(Math.round(rect.width * dpr), bitmap.width - sx);
   const sh = Math.min(Math.round(rect.height * dpr), bitmap.height - sy);
-  if (sw <= 0 || sh <= 0) throw new Error('Element is outside the visible viewport');
-  const outScale = Math.min(1, MAX_IMAGE_SIDE / Math.max(sw, sh));
+  if (sw <= 0 || sh <= 0) throw new Error(`${selector ? 'Element' : 'Region'} is outside the visible viewport`);
+  // scale moltiplica, il cap a MAX_IMAGE_SIDE resta: oltre, i pixel non
+  // arrivano comunque al modello.
+  const outScale = Math.min(zoom, MAX_IMAGE_SIDE / Math.max(sw, sh));
   const dw = Math.max(1, Math.round(sw * outScale));
   const dh = Math.max(1, Math.round(sh * outScale));
   const canvas = new OffscreenCanvas(dw, dh);
-  canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
-  return { image: await canvasToBase64(canvas), width: sw, height: sh };
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
+  return { image: await canvasToBase64(canvas), width: dw, height: dh, scale: Number(outScale.toFixed(2)) };
 }
 
 // --- highlight_elements ---

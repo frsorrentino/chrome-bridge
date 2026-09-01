@@ -529,7 +529,7 @@ export function registerTools(server, wsManager, caps = 'all') {
     'screenshot',
     'Screenshot of the visible viewport only (PNG), at the current scroll position. Read-only. '
       + 'Activates the tab in the background without stealing window focus, then restores the previous tab. '
-      + 'Downscaled to ≤1568px, so fine print may not survive.',
+      + 'Downscaled to ≤1568px: for fine print, element_screenshot with scale.',
     {
       tab_id: tabId,
       save_to: saveToField('the PNG'),
@@ -538,15 +538,16 @@ export function registerTools(server, wsManager, caps = 'all') {
       const data = await send(MessageType.SCREENSHOT, { tab_id });
       const b64 = data?.image ?? data?.data;
       if (save_to && b64) return savedSummary(save_to, Buffer.from(b64, 'base64'), { mimeType: 'image/png' });
-      // data.image è base64 PNG
+      // data.image è base64 PNG. data.viewport (CSS px) è il sistema di
+      // riferimento di element_screenshot.region: senza, il modello non sa
+      // mappare ciò che vede sull'immagine ridotta a ≤1568px.
       if (data && data.image) {
-        return {
-          content: [{
-            type: 'image',
-            data: data.image,
-            mimeType: 'image/png',
-          }],
-        };
+        const content = [];
+        if (data.viewport?.width) {
+          content.push({ type: 'text', text: `viewport ${data.viewport.width}×${data.viewport.height} CSS px` });
+        }
+        content.push({ type: 'image', data: data.image, mimeType: 'image/png' });
+        return { content };
       }
       return {
         content: [{
@@ -1037,7 +1038,7 @@ export function registerTools(server, wsManager, caps = 'all') {
     'viewport_resize',
     'Resize the Chrome **window** to a preset (mobile 375x812, tablet 768x1024, desktop 1440x900) or to explicit '
       + 'dimensions. The rendered viewport ends up smaller than what you ask for, by the height of the browser '
-      + 'chrome — measure it with execute_js if the exact number matters. width and height each override the '
+      + 'chrome — action=get reports the real one. width and height each override the '
       + 'corresponding half of the preset, so preset plus width gives a custom width at the preset height. '
       + 'A maximized window on ChromeOS ignores the request.',
     {
@@ -1065,15 +1066,19 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- element_screenshot ---
   server.tool(
     'element_screenshot',
-    'Screenshot cropped to one element (PNG), scrolled into view first. Read-only. '
-      + 'The cheapest image in the set, because it carries only the box you asked for: '
-      + 'a component, a chart, a table cell.',
+    'Screenshot cropped to one element or to a viewport region (PNG), optionally enlarged. Read-only. '
+      + 'The cheapest image in the set, because it carries only the box you asked for — and with scale the way '
+      + 'to read fine print: crop the box, zoom it, verify.',
     {
-      selector: z.string().describe('CSS selector; ">>>" pierces shadow DOM. The element is scrolled into view first'),
+      selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. The element is scrolled into view first'),
+      region: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).optional()
+        .describe('Box in CSS px of the current viewport (the rect frame of get_interactives/query_dom), instead of selector'),
+      scale: z.number().min(1).max(4).optional().default(1).describe('Enlargement of the crop, 1-4; output still capped at 1568px'),
       tab_id: tabId,
     },
-    async ({ selector, tab_id }) => {
-      const data = await send(MessageType.ELEMENT_SCREENSHOT, { selector, tab_id });
+    async ({ selector, region, scale, tab_id }) => {
+      if (!selector && !region) throw new Error('Provide selector or region');
+      const data = await send(MessageType.ELEMENT_SCREENSHOT, { selector, region, scale, tab_id });
       if (data && data.image) {
         return { content: [{ type: 'image', data: data.image, mimeType: 'image/png' }] };
       }
@@ -1765,14 +1770,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- move_tab ---
   server.tool(
     'move_tab',
-    'Move an existing tab into another window (chrome.tabs.move). Nothing is created or closed: the tab keeps '
-      + 'its id, history and page state, and this works even on chrome-untrusted:// tabs where creating one is '
-      + 'forbidden — verified on a ChromeOS Terminal tab. The **destination** must be a normal window: moving out '
-      + 'of an app or popup window is fine, moving into one is refused with "Tabs can only be moved to and from '
-      + 'normal windows". So a ChromeOS Terminal session can be pulled out to its own window (new_window, then '
-      + 'position it with viewport_resize) but cannot be merged back into the Terminal window — the closest look '
-      + 'is window_type popup: no tab strip, no omnibox, visually a terminal window. An extension cannot create '
-      + 'app windows: normal and popup are all Chrome offers.',
+    'Move an existing tab into another window (chrome.tabs.move): the tab keeps its id, history and page state, '
+      + 'and it works on chrome-untrusted:// tabs where creating one is forbidden. The **destination** must be a '
+      + 'normal window: moving out of an app or popup window is fine, moving into one is refused. A ChromeOS '
+      + 'Terminal tab can be pulled out (new_window, window_type popup for the terminal look) but never merged '
+      + 'back into the Terminal window: an extension cannot create app windows.',
     {
       tab_id: z.number().describe('Tab to move; get it from get_tabs'),
       window_id: z.number().optional().describe('Destination window; get_tabs reports windowId for every tab'),

@@ -21,6 +21,37 @@ quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
 esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
 uno che rifiuta subito.
 
+## 1.16.0 — 2026-09-01
+
+Un solo concetto in più, nessun tool in più: il ritaglio si ingrandisce. La
+raccomandazione corrente per la visione dei modelli è un tool che prende un
+bounding box e restituisce quella regione ritagliata e ingrandita — sposta il
+calcolo sui token immagine invece che sullo sforzo di ragionamento. Il server
+resta agnostico sul modello: sono migliorie che aiutano qualunque client.
+
+- **`element_screenshot` accetta `region` e `scale`.** Il box si indica per
+  `selector` (come prima, scrollato in vista) oppure per `region`
+  `{x, y, width, height}` in CSS px del viewport corrente — lo stesso sistema
+  dei rect di `get_interactives` e `query_dom`. `scale` (1-4, default 1)
+  ingrandisce il ritaglio lato estensione; il tetto di 1568 px sul lato lungo
+  resta, oltre i pixel non arrivano comunque al modello. È finito su
+  `element_screenshot` e non su `screenshot` perché quello era già il tool di
+  ritaglio: selettore e regione sono due modi di dire lo stesso box. In
+  modalità `region` non viene iniettato alcuno script — il dpr si ricava dal
+  rapporto cattura/viewport — quindi funziona anche su `chrome://`.
+- **`screenshot` premette una riga `viewport W×H CSS px`.** Senza, il modello
+  vede un'immagine ridotta a ≤1568 px e non ha modo di mappare quello che vede
+  sulle coordinate che `region` si aspetta. Un'estensione non aggiornata non la
+  manda e il risultato resta la sola immagine.
+- **Istruzioni del server**: detto che `navigate` restituisce già i refs (un
+  `get_interactives` subito dopo è un turno buttato), e che per leggere un
+  dettaglio si ritaglia e ingrandisce invece di rifare lo screenshot intero,
+  mentre per verificare un esito `assert`/`wait_for` fanno polling da soli.
+- Costo dello schema: `npm run measure` 57 362 → 57 529 B (+167 B, ~+42
+  token) con i due parametri nuovi già compensati accorciando `move_tab` e
+  il rimando a `execute_js` in `viewport_resize` che l'`action=get` aveva
+  reso una toppa.
+
 ## 1.15.1 — 2026-07-31
 
 Nata dal collaudo dal vivo della 1.15.0 su ChromeOS: due bugie del reporting

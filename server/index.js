@@ -48,12 +48,13 @@ async function main() {
     instructions: [
       'Selector parameters on DOM tools support shadow-DOM piercing with ">>>" (e.g. "my-app >>> button.save").',
       'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
-      'Prefer get_interactives over read_page(html) to discover targets; its refs (n1, n2…) work as the ref param of click/type_text/hover.',
+      'Prefer get_interactives over read_page(html) to discover targets; its refs (n1, n2…) work as the ref param of click/type_text/hover, and navigate already returns them — no get_interactives needed after it.',
       // Il costo dominante sono i TURNI, non i byte: un turno vale ~15-30 volte
       // un KB di output risparmiato. Queste due clausole si pagano una volta
       // qui e valgono più di qualunque ottimizzazione di schema.
       'For more than one field use fill_form once (with submit_selector to submit in the same call) instead of repeated type_text: one turn instead of N.',
       'For tables use extract_table (server-side where/columns filtering) or extract, never read_page: read_page on a big table costs tens of thousands of tokens for data you filter anyway.',
+      'To read detail in a screenshot, crop and zoom with element_screenshot (selector or region, scale) instead of taking another full one; to check an outcome, assert or wait_for poll for you — one call, no screenshot.',
     ].join(' '),
   });
 

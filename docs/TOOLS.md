@@ -51,8 +51,9 @@ never enter the context unless the agent decides to read them.
 `element_screenshot`, `full_page_screenshot`, `screenshot_diff`,
 `viewport_resize`, `set_zoom`, `emulate_media`, `set_geolocation`.
 
-Screenshots are downscaled to ≤1568px; full-page captures are sliced into
-readable segments. `screenshot_diff` compares the current page against a named
+Screenshots are downscaled to ≤1568px; to read fine print, `element_screenshot`
+crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
+with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
 baseline.
 
 ## Audits (6) — group `audits`
