@@ -1,6 +1,6 @@
 # Tool reference
 
-All 63 tools, by capability group. The group name is the value to pass to
+All 58 tools, by capability group. The group name is the value to pass to
 `--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
@@ -29,7 +29,7 @@ benchmark form, at the same byte count.
 ## DOM & Inspection (11) — group `dom`
 
 `read_page`, `extract`, `get_page_info`, `query_dom`, `modify_dom`, `find_text`,
-`get_interactives`, `inject_css`, `highlight_elements`, `watch_dom`,
+`get_interactives`, `inject_css`, `watch_dom`,
 `measure_spacing`.
 
 `read_page(mode="markdown")` keeps headings, links and tables at a fraction of
@@ -39,17 +39,16 @@ never enter the context unless the agent decides to read them.
 
 ## Debugging & Network (9) — group `network`
 
-`execute_js`, `read_console`, `monitor_network`, `monitor_websocket`,
+`execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
 `network_rules` (block / redirect / stub / headers),
-`http_request` (sent with the user's session cookies), `get_performance`,
-`web_vitals`, `list_event_listeners`.
+`http_request` (sent with the user's session cookies), `web_vitals`.
 
 `execute_js` needs **Allow user scripts** enabled in the extension details.
 
 ## Visual & Responsive (7) — group `visual`
 
 `element_screenshot`, `full_page_screenshot`, `screenshot_diff`,
-`viewport_resize`, `set_zoom`, `emulate_media`, `set_geolocation`.
+`viewport_resize` (presets, explicit size, zoom), `emulate_media`, `set_geolocation`.
 
 Screenshots are downscaled to ≤1568px; to read fine print, `element_screenshot`
 crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
@@ -75,7 +74,7 @@ the basis for CI smoke tests.
 
 ## Stateful tools
 
-`read_console`, `monitor_network`, `monitor_websocket` and `watch_dom` keep
+`read_console`, `monitor_network` and `watch_dom` keep
 state in the extension's service worker. That worker restarts on its own: when
 it does, the network log, diff baselines and HTTP auth are reset and the
 monitoring call has to be re-issued.

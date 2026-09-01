@@ -58,6 +58,15 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
   `get_interactives` subito dopo è un turno buttato), e che per leggere un
   dettaglio si ritaglia e ingrandisce invece di rifare lo screenshot intero,
   mentre per verificare un esito `assert`/`wait_for` fanno polling da soli.
+- **Cinque tool tolti dallo schema MCP, 63 → 58**: `set_zoom` (diventa il
+  parametro `zoom` di `viewport_resize`), `monitor_websocket` (diventa
+  `monitor_network source=websocket`), `get_performance` (doppione di
+  `web_vitals`), `list_event_listeners` (patch del prototipo, avvelenabile
+  dalla pagina) e `highlight_elements` come tool del modello. Nell'unico log
+  d'uso esistente avevano zero chiamate; ogni tool nello schema costa a ogni
+  sessione di ogni utente. I comandi dell'estensione restano e la **CLI li
+  accetta ancora con i nomi vecchi** (`chrome-bridge set_zoom --factor 1.5`).
+  Schema: −3 102 B.
 - Costo dello schema: `npm run measure` 57 362 → 57 529 B (+167 B, ~+42
   token) con i due parametri nuovi già compensati accorciando `move_tab` e
   il rimando a `execute_js` in `viewport_resize` che l'`action=get` aveva

@@ -62,7 +62,6 @@ test('i fatti su cui l\'agente conta sono nella descrizione, non solo nel codice
     // ridimensiona la finestra, non il viewport
     ['viewport_resize', /window/i, 'window e viewport non coincidono: va detto quale dei due cambia'],
     // gli overlay sono nodi DOM iniettati
-    ['highlight_elements', /reload|navigat/i, 'gli overlay non sopravvivono a una navigazione'],
   ];
   for (const [name, pattern, why] of cases) {
     const t = TOOLS.find((x) => x.name === name);

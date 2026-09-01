@@ -180,11 +180,11 @@ async function applyWaitAfter(send, wait_after, tab_id) {
  * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
  */
 export const TOOL_CAPS = {
-  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'get_performance'],
-  visual: ['screenshot_diff', 'highlight_elements', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize', 'set_zoom'],
-  network: ['network_rules', 'monitor_websocket', 'http_auth', 'set_geolocation'],
+  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals'],
+  visual: ['screenshot_diff', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
+  network: ['network_rules', 'http_auth', 'set_geolocation'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
-  dom: ['modify_dom', 'watch_dom', 'list_event_listeners', 'drag_and_drop'],
+  dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
   files: ['save_page', 'manage_downloads', 'extract_table', 'session_record'],
 };
 
@@ -252,15 +252,12 @@ export const TOOL_ANNOTATIONS = {
   get_frames: ro(),
   get_interactives: ro(),
   get_page_info: ro(),
-  get_performance: ro(),
   get_status: ro(),
   get_storage: ro(),
   get_tabs: ro(),
-  list_event_listeners: ro(),
   manage_downloads: rw({ open: true }),  // action=download scrive un file sul disco e va in rete
   measure_spacing: ro(),
   monitor_network: ro(true),
-  monitor_websocket: ro(true),
   query_dom: ro(),
   read_page: ro(),
   screenshot: ro(),
@@ -285,11 +282,9 @@ export const TOOL_ANNOTATIONS = {
   dismiss_overlays: rw({ idempotent: true }),
   emulate_media: rw({ idempotent: true }),
   handle_dialogs: rw({ idempotent: true }),
-  highlight_elements: rw({ idempotent: true }),
   inject_css: rw({ idempotent: true }),
   modify_dom: rw({ idempotent: true }),
   screenshot_diff: rw({ idempotent: true }),
-  set_zoom: rw({ idempotent: true }),
   viewport_resize: rw({ idempotent: true }),
   create_tab: rw({ open: true }),
   move_tab: rw({ idempotent: true }),   // rispostare dove è già = stesso esito
@@ -711,27 +706,6 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
-  // --- get_performance ---
-  server.tool(
-    'get_performance',
-    'Navigation timing, paint metrics, JS heap size and per-resource load times, as measured since the current '
-      + 'document loaded. Read-only, no reload triggered — numbers are only meaningful once loading has settled, '
-      + 'so on a page still fetching wait for network idle first. Covers how fast the document arrived, '
-      + 'not the layout-shift and interaction metrics that accumulate afterwards.',
-    {
-      tab_id: tabId,
-    },
-    async ({ tab_id }) => {
-      const data = await send(MessageType.GET_PERFORMANCE, { tab_id });
-      return {
-        content: [{
-          type: 'text',
-          text: jsonText(data),
-        }],
-      };
-    }
-  );
-
   // --- query_dom ---
   server.tool(
     'query_dom',
@@ -838,10 +812,10 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- monitor_network ---
   server.tool(
     'monitor_network',
-    'Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets. format=har exports HAR 1.2.',
+    'Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets; source=websocket: connections and messages. format=har exports HAR 1.2.',
     {
       clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
-      source: z.enum(['page', 'browser']).optional().default('page').describe('page sees XHR/fetch only; browser also sees static assets'),
+      source: z.enum(['page', 'browser', 'websocket']).optional().default('page').describe('page: XHR/fetch only; browser: static assets too; websocket: connections and message previews'),
       format: z.enum(['lines', 'json', 'har']).optional().default('lines').describe('har exports HAR 1.2 for external tooling'),
       limit: z.number().optional().default(100).describe('Most recent; buffer 1000'),
       tab_id: tabId,
@@ -849,6 +823,10 @@ export function registerTools(server, wsManager, caps = 'all') {
     async ({ clear, source, format, limit, tab_id }) => {
       // limit va all'estensione (taglia in pagina, clear solo del restituito);
       // lo slice qui resta come fallback per estensioni non ancora aggiornate.
+      if (source === 'websocket') {
+        const ws = await send(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
+        return { content: [{ type: 'text', text: jsonText(ws) }] };
+      }
       const data = await send(MessageType.MONITOR_NETWORK, { clear, source, limit, tab_id });
       const { requests, count, note, ...rest } = data ?? {};
       const all = requests ?? [];
@@ -1050,10 +1028,13 @@ export function registerTools(server, wsManager, caps = 'all') {
         .describe('Applied before bounds: a maximized window accepts left/top/width/height and ignores them'),
       width: z.number().optional().describe('Overrides preset'),
       height: z.number().optional().describe('Overrides preset'),
+      zoom: z.number().optional().describe('Page zoom for this origin, 1 = 100%; applied after the resize'),
       tab_id: tabId,
     },
-    async ({ action, preset, width, height, left, top, state, tab_id }) => {
+    async ({ action, preset, width, height, left, top, state, tab_id , zoom}) => {
       const data = await send(MessageType.VIEWPORT_RESIZE, { preset, width, height, left, top, state, read_only: (action ?? 'set') === 'get', tab_id });
+      // set_zoom era un tool a sé, a zero usi: lo zoom è una dimensione del viewport come le altre
+      if (zoom != null) data.zoom = await send(MessageType.SET_ZOOM, { factor: zoom, reset: zoom === 1, tab_id });
       return {
         content: [{
           type: 'text',
@@ -1135,32 +1116,6 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
-  // --- highlight_elements ---
-  server.tool(
-    'highlight_elements',
-    'Outline every element matching a selector with a coloured overlay, to see on a screenshot what a selector '
-      + 'actually caught. Each call clears the overlays left by the previous one instead of stacking them, and '
-      + 'remove=true clears without adding. The overlays are injected DOM nodes: a reload or a navigation drops '
-      + 'them, and they sit above the page without altering its layout or its own styles.',
-    {
-      selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Every match is outlined'),
-      color: z.string().optional().default('rgba(255,0,0,0.3)').describe('Any CSS color for the overlay label'),
-      border: z.string().optional().default('2px solid red').describe('CSS border shorthand, e.g. "2px solid red"'),
-      label: z.boolean().optional().default(false).describe('Show tag.class (WxH) label'),
-      remove: z.boolean().optional().default(false).describe('Remove previously injected highlights instead of adding'),
-      tab_id: tabId,
-    },
-    async ({ selector, color, border, label, remove, tab_id }) => {
-      const data = await send(MessageType.HIGHLIGHT_ELEMENTS, { selector, color, border, label, remove, tab_id });
-      return {
-        content: [{
-          type: 'text',
-          text: jsonText(data),
-        }],
-      };
-    }
-  );
-
   // --- accessibility_audit ---
   server.tool(
     'accessibility_audit',
@@ -1219,7 +1174,7 @@ export function registerTools(server, wsManager, caps = 'all') {
   server.tool(
     'measure_spacing',
     'Measure the gap, overlap and distance in CSS pixels between two elements, with their margins and paddings. '
-      + 'Read-only. Values come from the current layout, so zoom and viewport size change them: set_zoom(1) and a '
+      + 'Read-only. Values come from the current layout, so zoom and viewport size change them: viewport_resize({zoom:1}) and a '
       + 'fixed viewport_resize make results comparable across runs.',
     {
       selector1: z.string().describe('First element; distances are measured from its box'),
@@ -1539,35 +1494,6 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ tab_id }) => {
       const data = await send(MessageType.WEB_VITALS, { tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
-    }
-  );
-
-  // --- list_event_listeners ---
-  server.tool(
-    'list_event_listeners',
-    'List addEventListener registrations since page load: counts by type + recent entries.',
-    {
-      type: z.string().optional().describe('e.g. "click"'),
-      limit: z.number().optional().default(100).describe('Max listeners returned, from the top of the match list'),
-      tab_id: tabId,
-    },
-    async ({ type, limit, tab_id }) => {
-      const data = await send(MessageType.LIST_EVENT_LISTENERS, { type, limit, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
-    }
-  );
-
-  // --- monitor_websocket ---
-  server.tool(
-    'monitor_websocket',
-    'Monitor WebSocket connections/messages (500-char previews). Hook installs on first call; earlier connections are missed.',
-    {
-      clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
-      tab_id: tabId,
-    },
-    async ({ clear, tab_id }) => {
-      const data = await send(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -1945,21 +1871,6 @@ export function registerTools(server, wsManager, caps = 'all') {
           }),
         }],
       };
-    }
-  );
-
-  // --- set_zoom ---
-  server.tool(
-    'set_zoom',
-    'Get or set tab zoom (0.25–5). No factor = read current; reset restores default.',
-    {
-      factor: z.number().optional().describe('1 = 100%'),
-      reset: z.boolean().optional().default(false).describe('Restore the default zoom for this origin'),
-      tab_id: tabId,
-    },
-    async ({ factor, reset, tab_id }) => {
-      const data = await send(MessageType.SET_ZOOM, { factor, reset, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 

@@ -52,8 +52,8 @@ const MUTATING = [
 const READ_ONLY = [
   'read_page', 'get_tabs', 'query_dom', 'screenshot', 'get_page_info',
   'seo_audit', 'accessibility_audit', 'extract_table', 'find_text',
-  'web_vitals', 'get_performance', 'get_interactives', 'get_frames',
-  'get_status', 'get_storage', 'security_headers', 'list_event_listeners',
+  'web_vitals', 'get_interactives', 'get_frames',
+  'get_status', 'get_storage', 'security_headers',
   'unused_css', 'measure_spacing', 'element_screenshot', 'full_page_screenshot',
 ];
 

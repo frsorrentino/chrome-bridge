@@ -32,14 +32,14 @@ function textOf(result) {
 
 // --- capability opt-in ---
 
-test('caps=all registra tutti i 63 tool', () => {
-  assert.equal(setup().size, 63);
+test('caps=all registra tutti i 58 tool', () => {
+  assert.equal(setup().size, 58);
 });
 
 test('caps=core registra solo il set core (34 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
-  assert.equal(handlers.size, 63 - optInCount);
+  assert.equal(handlers.size, 58 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
   assert.ok(!handlers.has('accessibility_audit'));
@@ -64,7 +64,7 @@ test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', 
   const client = new Client({ name: 'c', version: '0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 63);
+  assert.equal(tools.length, 58);
   await client.close();
 });
 
