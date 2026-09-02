@@ -51,6 +51,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "node-html-parser": "^9.0.0",
     "ws": "^8.18.0"

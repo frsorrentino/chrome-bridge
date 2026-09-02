@@ -67,8 +67,10 @@ async function main() {
   // lasciava Chromium e il profilo temporaneo orfani a ogni segnale ricevuto
   // durante l'avvio (osservate 3 directory residue, una da 122 MB).
   let browser = null;
+  const session = { tools: null };
   const shutdown = async () => {
     console.error('[chrome-bridge] Shutting down...');
+    try { await Promise.race([session.tools?.closeEmptyOwnedTabs(), new Promise((r) => setTimeout(r, 2000))]); } catch {}
     try { if (browser) await browser.stop(); } catch {}
     try { await wsManager.stop(); } catch {}
     try { await mcpServer.close(); } catch {}
@@ -92,7 +94,7 @@ async function main() {
   }
 
   // 3. Registra i tool MCP (filtrati per capability)
-  registerTools(mcpServer, wsManager, parseCaps());
+  session.tools = registerTools(mcpServer, wsManager, parseCaps());
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();

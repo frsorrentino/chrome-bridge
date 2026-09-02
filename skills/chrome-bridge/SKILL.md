@@ -65,6 +65,17 @@ carta di prova».
    back office (`navigate` + `find_text` of the order number).
 Report: order number, total, payment status, emails sent (recipe above).
 
+### Local dev server: overlays, HMR, readable stack traces
+Triggers: "why is the page blank on localhost", "Vite shows an error", "where
+does this error come from in the source", «l'errore in console non dice il file».
+`get_page_info()` reports `dev.server` (vite, webpack-dev-server, next, nuxt)
+and `dev.overlay` with the compiler's message when an error overlay is open —
+read that before treating the page as valid. `read_console({level:'error', sourcemap:true})`
+appends `src/file.ts:line:col (function)` to `bundle.js:1:284913` frames by
+fetching the source maps through the browser (localhost and logged-in hosts
+alike). On HMR-heavy pages, `monitor_network` shows the dev WebSocket too:
+filter it out mentally.
+
 ### Error that appears only when logged in
 Triggers: "it works as anonymous, breaks as admin", «l'errore compare solo da
 loggato».
@@ -255,6 +266,16 @@ too): `screenshot_diff({action:'compare_urls', url_a:'https://prod', url_b:'http
 → changed-pixel %, the diff image, and the text lines only in A / only in B —
 often enough to decide without looking at pixels. Baselines live in the
 extension's memory until it restarts.
+
+## Several sessions on one browser
+
+Each Claude session runs its own bridge process (the first is primary, the
+others relay). Tabs created with `create_tab` belong to that session:
+`get_tabs` marks them `mine`, `get_status` lists `owned_tabs`,
+`tab_action({action:'close_session'})` closes only those, and empty ones are
+closed when the session ends. The user's own tabs are never touched. Refs and
+the implicit tab are per session too. Prefer `create_tab` over acting on the
+user's active tab when two sessions may be working at once.
 
 ## CLI lane (zero tokens)
 

@@ -21,6 +21,7 @@ import { groupResources, resourceLines } from './resources.js';
 import { cacheVerdict, cacheLines } from './cache-check.js';
 import { runAudit, summarizeAudit, auditReport, AUDIT_KINDS, DEFAULT_KINDS } from './audit.js';
 import { toPlaywrightTest } from './playwright-export.js';
+import { createResolver } from './sourcemaps.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
@@ -367,6 +368,11 @@ export function registerTools(server, wsManager, caps = 'all') {
   // l'utente usa Chrome durante l'automazione (il comando colpirebbe la pagina
   // che sta guardando lui, non quella navigata dall'agente).
   let sessionTabId = null;
+  // Tab create da questa sessione: un altro processo server (un'altra sessione
+  // Claude, un subagent con il proprio MCP) non le vede come sue. Senza il
+  // permesso tabGroups non c'è un gruppo colorato, ma c'è un perimetro.
+  const ownedTabs = new Set();
+  const sourceMaps = createResolver(async (url) => { const r = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' }); if (!r || r.status >= 400) throw new Error(`HTTP ${r?.status}`); return r.body ?? ''; });
 
   // Recording attivo: { name, file }. I comandi (senza tab_id, che in un
   // replay sarebbe stale) vengono appesi come jsonl replayabile dal CLI.
@@ -478,6 +484,7 @@ export function registerTools(server, wsManager, caps = 'all') {
             caps_active: activeCaps,
             caps_available: ['core', ...Object.keys(TOOL_CAPS)],
             session_tab_id: sessionTabId,
+            owned_tabs: [...ownedTabs],
             uptime_sec: Math.round((Date.now() - startedAt) / 1000),
           }),
         }],
@@ -498,6 +505,8 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ include_windows }) => {
       const data = await send(MessageType.GET_TABS, { include_windows: include_windows === true });
+      const list = Array.isArray(data) ? data : (data?.tabs ?? []);
+      for (const t of list) if (ownedTabs.has(t.id)) t.mine = true;
       return {
         content: [{
           type: 'text',
@@ -821,14 +830,16 @@ export function registerTools(server, wsManager, caps = 'all') {
       level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('all merges every level in one chronological list'),
       limit: z.number().optional().default(50).describe('Most recent; buffer 1000'),
       format: z.enum(['lines', 'json']).optional().default('lines').describe('lines is compact; json keeps timestamps and stack traces'),
+      sourcemap: z.boolean().optional().default(false).describe('Resolve bundle.js:line:col frames to source files through their source maps (dev servers, localhost)'),
       tab_id: tabId,
     },
-    async ({ clear, level, limit, format, tab_id }) => {
+    async ({ clear, level, limit, format, tab_id, sourcemap }) => {
       // limit va all'estensione: taglia in pagina e cancella (con clear) solo
       // ciò che ha restituito. Lo slice qui resta come fallback per estensioni
       // più vecchie che ignorano il parametro.
       const data = await send(MessageType.READ_CONSOLE, { clear, level, limit, tab_id });
       const all = data?.messages ?? [];
+      if (sourcemap) for (const msg of all) msg.args = await Promise.all((msg.args ?? []).map((a) => sourceMaps.resolve(String(a))));
       const tail = all.slice(-(limit ?? 50));
       const total = data?.count ?? all.length;
       const note = data?.note;
@@ -905,7 +916,7 @@ export function registerTools(server, wsManager, caps = 'all') {
     },
     async ({ url, active, new_window, left, top, width, height }) => {
       const data = await send(MessageType.CREATE_TAB, { url, active, new_window: new_window === true || undefined, left, top, width, height });
-      if (data?.id != null) sessionTabId = data.id;
+      if (data?.id != null) { sessionTabId = data.id; ownedTabs.add(data.id); }
       return {
         content: [{
           type: 'text',
@@ -1295,11 +1306,18 @@ export function registerTools(server, wsManager, caps = 'all') {
       + 'window, app windows included — the only way to open a new Terminal session inside the Terminal window. '
       + 'discard replaces the tab id: the result carries the new one, saved ids go stale.',
     {
-      action: z.enum(['close', 'activate', 'reload', 'back', 'forward', 'discard', 'mute', 'unmute', 'duplicate']).describe('close cannot be undone; discard frees memory, the tab reloads on focus; reload drops injected CSS and hooks'),
+      action: z.enum(['close', 'activate', 'reload', 'back', 'forward', 'discard', 'mute', 'unmute', 'duplicate', 'close_session']).describe('close cannot be undone; discard frees memory, the tab reloads on focus; reload drops injected CSS and hooks'),
       bypass_cache: z.boolean().optional().default(false).describe('reload only'),
       tab_id: tabId,
     },
     async ({ action, bypass_cache, tab_id }) => {
+      // close_session: solo le tab create da questa sessione, mai quelle dell'utente
+      if (action === 'close_session') {
+        const closed = [];
+        for (const id of [...ownedTabs]) { try { await send(MessageType.TAB_ACTION, { action: 'close', tab_id: id }); closed.push(id); } catch { /* già chiusa */ } ownedTabs.delete(id); }
+        if (sessionTabId != null && closed.includes(sessionTabId)) sessionTabId = null;
+        return { content: [{ type: 'text', text: jsonText({ closed }) }] };
+      }
       const data = await send(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
       if (action === 'close' && (tab_id == null || tab_id === sessionTabId)) sessionTabId = null;
       if (action === 'activate' && tab_id != null) sessionTabId = tab_id;
@@ -2382,4 +2400,22 @@ export function registerTools(server, wsManager, caps = 'all') {
       return { content: [{ type: 'text', text: jsonText(stopped ? { stopped: stopped.name, file: stopped.file } : { stopped: null }) }] };
     }
   );
+
+  // Per index.js allo shutdown: chiudi le tab create qui e rimaste vuote,
+  // come fa Claude in Chrome col suo tab group; le pagine con contenuto restano.
+  return {
+    async closeEmptyOwnedTabs() {
+      if (!ownedTabs.size || !wsManager.isConnected()) return [];
+      let tabs = [];
+      try { tabs = await wsManager.sendCommand(MessageType.GET_TABS, {}); } catch { return []; }
+      const list = Array.isArray(tabs) ? tabs : (tabs?.tabs ?? []);
+      const closed = [];
+      for (const t of list) {
+        if (!ownedTabs.has(t.id)) continue;
+        if (/^(about:blank|chrome:\/\/newtab)/.test(t.url || '')) { try { await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: t.id }); closed.push(t.id); } catch { /* già chiusa */ } }
+      }
+      return closed;
+    },
+  };
+
 }

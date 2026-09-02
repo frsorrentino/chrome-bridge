@@ -35,7 +35,8 @@ benchmark form, at the same byte count.
 ## DOM & Inspection (10) — group `dom`
 
 `read_page`, `extract`, `get_page_info`, `query_dom`, `modify_dom`, `find_text`,
-`get_interactives`, `inject_css`, `watch_dom`,
+`get_interactives`, `inject_css`, `watch_dom`, `get_page_info` (with `dev`: dev server and
+error overlay when one is open),
 `measure_spacing`.
 
 `read_page(mode="markdown")` keeps headings, links and tables at a fraction of

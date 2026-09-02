@@ -79,6 +79,19 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **Dev server locale**: `get_page_info` riporta `dev.server` (vite,
+  webpack-dev-server, next, nuxt) e `dev.overlay` col messaggio del
+  compilatore quando un overlay di errore è aperto — prima una pagina in
+  errore veniva letta come valida. `read_console sourcemap=true` aggiunge
+  `src/file.ts:riga:col (funzione)` ai frame `bundle.js:1:284913`, leggendo
+  le source map con i fetch del browser (localhost e host loggati);
+  dipendenza nuova `@jridgewell/trace-mapping`, JS puro.
+- **Perimetro di sessione senza permessi nuovi**: le tab create con
+  `create_tab` appartengono alla sessione — `get_tabs` le marca `mine`,
+  `get_status` elenca `owned_tabs`, `tab_action close_session` chiude solo
+  quelle, e allo shutdown del server le tab nostre rimaste vuote vengono
+  chiuse. Le tab dell'utente non vengono toccate. Il gruppo colorato
+  vorrebbe `tabGroups`, cioè una review dello Store: non in questa versione.
 - **`watch`** — «avvisami quando la pipeline è verde», «quando appare
   Approva», «quando cambia questo prezzo». L'estensione controlla da sola a
   ogni `alarm` (min 30 s, sopravvive all'idle del service worker, non al

@@ -1263,8 +1263,28 @@ async function cmdGetPageInfo({ tab_id, frame_id }) {
           id: el.id || null,
         })),
       }));
+      // Dev server e overlay di errore: una pagina in errore letta come valida
+      // era il buco di luglio (§15.1).
+      const dev = (() => {
+        let server = null;
+        if (document.querySelector('script[src*="/@vite/client"]') || window.__vite_plugin_react_preamble_installed__) server = 'vite';
+        else if (document.querySelector('script[src*="webpack-dev-server"]') || window.webpackHotUpdate) server = 'webpack-dev-server';
+        else if (document.querySelector('script[src*="/_next/static/"]') && document.getElementById('__NEXT_DATA__')) server = 'next';
+        else if (window.__NUXT__ && document.querySelector('script[src*="/_nuxt/"]')) server = 'nuxt';
+        let overlay = null;
+        const vite = document.querySelector('vite-error-overlay');
+        if (vite) overlay = { tool: 'vite', message: (vite.shadowRoot?.querySelector('.message')?.textContent || vite.textContent || '').trim().slice(0, 300) };
+        const wp = document.querySelector('#webpack-dev-server-client-overlay');
+        if (!overlay && wp) overlay = { tool: 'webpack-dev-server', message: (wp.contentDocument?.body?.innerText || '').trim().slice(0, 300) || 'overlay open' };
+        const nx = document.querySelector('nextjs-portal');
+        if (!overlay && nx) { const t = (nx.shadowRoot?.textContent || '').trim(); if (/error|failed to compile|unhandled/i.test(t)) overlay = { tool: 'next', message: t.slice(0, 300) }; }
+        const nuxt = document.querySelector('.__nuxt-error-page, #nuxt-error');
+        if (!overlay && nuxt) overlay = { tool: 'nuxt', message: (nuxt.innerText || '').trim().slice(0, 300) };
+        return server || overlay ? { server, overlay } : null;
+      })();
       return {
         title: document.title,
+        ...(dev ? { dev } : {}),
         url: location.href,
         doctype: document.doctype ? document.doctype.name : null,
         charset: document.characterSet,
