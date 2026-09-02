@@ -23,6 +23,8 @@ import { runAssert } from './assertions.js';
 import { checkLinksBatch } from './link-checker.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { toHar } from './har.js';
+import { decodeTrackingRequests, trackingLines } from './trackers.js';
+import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js';
 
 const INTERNAL_TYPES = new Set([
   MessageType.RESULT, MessageType.ERROR, MessageType.PING, MessageType.PONG,
@@ -30,7 +32,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -51,7 +53,7 @@ const NUMERIC_KEYS = new Set([
   'max_rows', 'max_items', 'max_scrolls', 'max_segments', 'segment_offset', 'max_selectors',
   'delay', 'offset', 'scan_rows', 'width', 'height', 'x', 'y', 'level_num',
   'status', 'zoom', 'depth', 'count', 'index', 'port', 'threshold', 'scale',
-  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat',
+  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency',
 ]);
 const BOOLEAN_KEYS = new Set([
   'clear', 'stop', 'force', 'visible', 'visible_only', 'stitch', 'reset',
@@ -257,6 +259,24 @@ async function run(client, command, params, opts) {
     if (opts.format === 'json') return JSON.stringify({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results });
     return linksLines(results, { total: links.length, broken, anchors: data.totalAnchors });
   }
+  // "verifica che il pixel spari gli eventi giusti": beacon decodificati dal log browser
+  if (command === 'track') {
+    if (params.clear) await client.sendCommand(MessageType.MONITOR_NETWORK, { source: 'browser', clear: true, limit: 1, tab_id: params.tab_id });
+    const wait = Number(params.wait_ms ?? params.wait ?? 0);
+    if (wait > 0) await new Promise((r) => setTimeout(r, Math.min(wait, 60000)));
+    const data = await client.sendCommand(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id: params.tab_id });
+    const decoded = decodeTrackingRequests(data?.requests ?? []);
+    return opts.format === 'json' ? JSON.stringify(decoded) : trackingLines(decoded);
+  }
+  // "verifica i redirect della migrazione": un CSV vecchio,nuovo e una riga di esito per URL
+  if (command === 'redirects') {
+    if (!params.csv) throw new Error('redirects requires --csv /path/to/map.csv (columns: old,new)');
+    const rows = parseRedirectCsv(await readFile(params.csv, 'utf8'));
+    if (!rows.length) throw new Error(`No rows in ${params.csv}`);
+    const results = await checkRedirects(client.sendCommand, rows, { concurrency: Number(params.concurrency ?? 4) });
+    if (results.some((r) => r.verdict !== 'ok')) process.exitCode = 1;
+    return opts.format === 'json' ? JSON.stringify(results) : redirectLines(results);
+  }
   if (command === 'security_headers') {
     const data = await client.sendCommand(MessageType.GET_RESPONSE_HEADERS, params);
     if (!data.available) return JSON.stringify(data);
@@ -353,6 +373,8 @@ Examples:
   chrome-bridge screenshot --out /tmp/shot.png
   chrome-bridge check_links --scope same-origin
   chrome-bridge replay --file ~/.config/chrome-bridge/recordings/login.jsonl --vars '{"user":"jane"}'
+  chrome-bridge track --clear --wait-ms 8000        # tracking beacons fired (GA4, Meta, Ads…)
+  chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
 `);
 }
 

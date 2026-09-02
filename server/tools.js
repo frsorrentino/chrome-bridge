@@ -15,6 +15,8 @@ import { ensureStubServer, addStub, clearStubs, listStubs, stubHost } from './st
 import { MessageType, VERSION } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
+import { decodeTrackingRequests, trackingLines } from './trackers.js';
+import { summarizeConsent, consentLines } from './consent.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
@@ -180,9 +182,9 @@ async function applyWaitAfter(send, wait_after, tab_id) {
  * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
  */
 export const TOOL_CAPS = {
-  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals'],
+  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'cookie_audit'],
   visual: ['screenshot_diff', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
-  network: ['network_rules', 'http_auth', 'set_geolocation'],
+  network: ['network_rules', 'http_auth', 'set_geolocation', 'track_events'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
   files: ['save_page', 'manage_downloads', 'extract_table', 'session_record'],
@@ -267,6 +269,8 @@ export const TOOL_ANNOTATIONS = {
   wait_for: ro(),
   watch_dom: ro(),
   web_vitals: ro(),
+  track_events: ro(),
+  cookie_audit: rw({ idempotent: true }),
 
   // --- interazione con la pagina ---
   click: rw({ open: true }),          // un click può navigare
@@ -1459,16 +1463,20 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- screenshot_diff ---
   server.tool(
     'screenshot_diff',
-    'Visual regression: save a named baseline (viewport or element), compare later — returns changed-pixel % and red-highlighted diff image. Baselines are in-memory (lost on service worker restart).',
+    'Visual regression: save a named baseline (viewport, element, or a PNG from disk such as the design mockup), compare later — returns changed-pixel % and red-highlighted diff image. Baselines are in-memory (lost on service worker restart).',
     {
       action: z.enum(['baseline', 'compare', 'list', 'clear']).describe('baseline stores, compare measures against it, clear drops baselines'),
       name: z.string().optional().default('default').describe('Baseline id: reuse the same one to compare across runs'),
       selector: z.string().optional().describe('Capture one element (default viewport)'),
       threshold: z.number().optional().default(10).describe('Per-channel tolerance 0-255'),
+      from_file: z.string().optional().describe('action=baseline: PNG on disk (design mockup, another environment) instead of capturing; compare at the same viewport size'),
       tab_id: tabId,
     },
-    async ({ action, name, selector, threshold, tab_id }) => {
-      const data = await send(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, tab_id });
+    async ({ action, name, selector, threshold, from_file, tab_id }) => {
+      // Baseline da file: il mockup del designer o lo screenshot di produzione
+      // diventano il riferimento; l'estensione riceve i byte, non un percorso.
+      const image_b64 = action === 'baseline' && from_file ? (await readFile(from_file)).toString('base64') : undefined;
+      const data = await send(MessageType.SCREENSHOT_DIFF, { action, name, selector, threshold, image_b64, tab_id });
       if (data && data.diff_image) {
         const { diff_image, ...rest } = data;
         return {
@@ -1479,6 +1487,62 @@ export function registerTools(server, wsManager, caps = 'all') {
         };
       }
       return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- track_events ---
+  server.tool(
+    'track_events',
+    'Decode the tracking beacons the page fired (GA4, Meta Pixel, Google Ads, TikTok, LinkedIn, Pinterest, Microsoft Ads, GTM, Hotjar, Clarity) '
+      + 'from the browser network log into one line per event with its key params — "does the pixel fire purchase?" answered without reading the raw log. '
+      + 'Read-only. Params sent in a POST body are flagged, not decoded.',
+    {
+      clear: z.boolean().optional().default(false).describe('Clear the browser log first — call it right before the action you want to observe'),
+      wait_ms: z.number().optional().default(0).describe('Time to wait before reading, for beacons sent after the action'),
+      tab_id: tabId,
+    },
+    async ({ clear, wait_ms, tab_id }) => {
+      if (clear) await send(MessageType.MONITOR_NETWORK, { source: 'browser', clear: true, limit: 1, tab_id });
+      if (wait_ms > 0) await new Promise((r) => setTimeout(r, Math.min(wait_ms, 60000)));
+      const data = await send(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id });
+      const decoded = decodeTrackingRequests(data?.requests ?? []);
+      return { content: [{ type: 'text', text: trackingLines(decoded) }] };
+    }
+  );
+
+  // --- cookie_audit ---
+  server.tool(
+    'cookie_audit',
+    'Cookie and consent-banner audit: clears the cookies of the current page, reloads it, records cookies and third-party requests BEFORE any consent, '
+      + 'then accepts the banner (accept_selector, or the overlay dismisser) and records what changed. The findings name the tracking hosts contacted '
+      + 'before consent. Deletes the cookies of this origin: you will be logged out of the site being audited.',
+    {
+      accept_selector: z.string().optional().describe('Accept button of the banner; omitted = dismiss_overlays; "none" skips the consent step'),
+      settle_ms: z.number().optional().default(3000).describe('Wait after load and after consent, for late beacons'),
+      tab_id: tabId,
+    },
+    async ({ accept_selector, settle_ms, tab_id }) => {
+      const info = await send(MessageType.GET_PAGE_INFO, { tab_id });
+      const pageUrl = info?.url;
+      if (!/^https?:/.test(String(pageUrl))) throw new Error(`cookie_audit needs an http(s) page, current tab is ${pageUrl}`);
+      const settle = () => new Promise((r) => setTimeout(r, Math.min(settle_ms ?? 3000, 30000)));
+      await send(MessageType.SET_STORAGE, { type: 'cookie', action: 'clear', tab_id });
+      await send(MessageType.MONITOR_NETWORK, { source: 'browser', clear: true, limit: 1, tab_id });
+      await send(MessageType.NAVIGATE, { url: pageUrl, tab_id });
+      await settle();
+      const cookiesBefore = (await send(MessageType.GET_STORAGE, { type: 'cookies', tab_id }))?.cookies ?? [];
+      const requestsBefore = (await send(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id }))?.requests ?? [];
+      let consent = 'none';
+      if (accept_selector !== 'none') {
+        await send(MessageType.MONITOR_NETWORK, { source: 'browser', clear: true, limit: 1, tab_id });
+        if (accept_selector) { await send(MessageType.CLICK, { selector: accept_selector, tab_id }); consent = `click ${accept_selector}`; }
+        else { const d = await send(MessageType.DISMISS_OVERLAYS, { tab_id }); consent = d?.dismissed || d?.removed ? 'dismiss_overlays' : 'dismiss_overlays (nothing found)'; }
+        await settle();
+      }
+      const cookiesAfter = consent === 'none' ? [] : ((await send(MessageType.GET_STORAGE, { type: 'cookies', tab_id }))?.cookies ?? []);
+      const requestsAfter = consent === 'none' ? [] : ((await send(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id }))?.requests ?? []);
+      const summary = summarizeConsent({ pageUrl, cookiesBefore, requestsBefore, cookiesAfter, requestsAfter, consent });
+      return { content: [{ type: 'text', text: consentLines(summary) }] };
     }
   );
 

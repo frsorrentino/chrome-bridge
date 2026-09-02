@@ -1,6 +1,6 @@
 # Tool reference
 
-All 58 tools, by capability group. The group name is the value to pass to
+All 60 tools, by capability group. The group name is the value to pass to
 `--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
@@ -26,7 +26,7 @@ agent can act without a separate discovery call.
 `fill_form` fills N fields and submits in one call — 3 calls instead of 9 on the
 benchmark form, at the same byte count.
 
-## DOM & Inspection (11) — group `dom`
+## DOM & Inspection (10) — group `dom`
 
 `read_page`, `extract`, `get_page_info`, `query_dom`, `modify_dom`, `find_text`,
 `get_interactives`, `inject_css`, `watch_dom`,
@@ -37,29 +37,32 @@ the HTML cost. `read_page`, `extract`, `screenshot` and `http_request` accept
 `save_to`: the result goes to a file and the tool returns the path, so the bytes
 never enter the context unless the agent decides to read them.
 
-## Debugging & Network (9) — group `network`
+## Debugging & Network (8) — group `network`
 
 `execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
 `network_rules` (block / redirect / stub / headers),
-`http_request` (sent with the user's session cookies), `web_vitals`.
+`http_request` (sent with the user's session cookies), `web_vitals`,
+`track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log).
 
 `execute_js` needs **Allow user scripts** enabled in the extension details.
 
-## Visual & Responsive (7) — group `visual`
+## Visual & Responsive (5) — group `visual`
 
 `element_screenshot`, `full_page_screenshot`, `screenshot_diff`,
 `viewport_resize` (presets, explicit size, zoom), `emulate_media`, `set_geolocation`.
 
+`screenshot_diff` also takes its baseline from a PNG on disk (`from_file`): the
+design mockup or a production screenshot becomes the reference.
 Screenshots are downscaled to ≤1568px; to read fine print, `element_screenshot`
 crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
 with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
 baseline.
 
-## Audits (6) — group `audits`
+## Audits (7) — group `audits`
 
 `accessibility_audit`, `seo_audit`, `security_headers`,
-`check_links` (server-side verification), `unused_css`,
-`extract_table` (with `where` filtering).
+`check_links` (server-side verification), `unused_css`, `cookie_audit` (what fires
+before consent), `extract_table` (with `where` filtering).
 
 `extract_table` filters server-side: 236 bytes to find one row among 1500,
 against 50,070 bytes for `read_page` on the same table.

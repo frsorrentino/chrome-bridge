@@ -86,8 +86,10 @@ Figma?", «somiglia al design?».
 `query_dom({selector, properties:['font-family','font-size','color','background-color','margin','padding']})`
 on the key elements; compare with the token file in the repo. Spacing between
 two elements: `measure_spacing({selector1, selector2})`. Visual comparison:
-`screenshot` at the mockup's viewport (`viewport_resize({preset:'desktop'})`)
-and, for detail, `element_screenshot({selector, scale:2})`.
+`viewport_resize({width, height})` to the mockup's size, then
+`screenshot_diff({action:'baseline', name:'home', from_file:'./mockups/home.png'})`
+and `screenshot_diff({action:'compare', name:'home'})` → changed-pixel % and a
+highlighted diff; zoom into a region with `element_screenshot({region, scale:2})`.
 
 ### Three viewports
 Triggers: "check it on mobile/tablet/desktop", «com'è su telefono?».
@@ -110,29 +112,29 @@ and `wp.data.dispatch('core/editor').savePost()`. Verify with `find_text`.
 ### Pixel, GA4, GTM events
 Triggers: "does the pixel fire the right events?", "does GTM send purchase?",
 «verifica che il pixel spari gli eventi giusti».
-`monitor_network({source:'browser', clear:true})` → perform the action →
-`monitor_network({source:'browser', format:'json'})` filtered on
-`facebook.com/tr`, `google-analytics.com/g/collect`, `googleadservices`,
-`analytics.tiktok.com`; decode `ev=`/`en=` and the value/currency params.
-`execute_js('JSON.stringify(window.dataLayer)')` for the data layer. Report a
-table: vendor, event, key params, order.
+`track_events({clear:true})` right before the action, the action, then
+`track_events({wait_ms:5000})`: one line per beacon — vendor, event, key
+params (value, currency, ids), time since the first. Params sent in a POST
+body are flagged, not decoded. `execute_js('JSON.stringify(window.dataLayer)')`
+for the data layer. Zero-token: `chrome-bridge track --clear --wait-ms 8000`.
 
 ### Cookies and the consent banner
 Triggers: "is the consent banner compliant?", "what fires before consent?",
 «audit dei cookie e del banner».
-1. `get_storage({type:'cookies'})` and `monitor_network({source:'browser', clear:true})`
-   on a fresh load **before** clicking anything.
-2. `monitor_network({source:'browser'})`: third-party requests that already
-   fired (analytics, pixels, embeds) are the finding.
-3. `dismiss_overlays()` or `click` on Accept, then `get_storage` again.
-Report: cookies before/after by domain, third-party requests before consent.
+`cookie_audit({accept_selector:'#accept'})` (omit the selector to let the
+overlay dismisser find the button; `'none'` to skip consent): it clears the
+site's cookies, reloads, records cookies and third-party hosts **before**
+consent, accepts, records again. The findings name the tracking hosts
+contacted before consent — the part a regulator asks about. Warn the user:
+it logs them out of the audited site.
 
 ### Redirects after a migration
 Triggers: "check the migration redirects", "do the old URLs reach the new
 ones?", «verifica i redirect della migrazione».
-Per URL: `http_request({url})` → status and headers (`location` on a 3xx);
-follow the chain and compare the final URL with the expected one. Dozens of URLs → the CLI lane in a shell loop,
-reading only the mismatches back.
+A CSV with `old,new` per line, then `chrome-bridge redirects --csv map.csv`:
+one line per URL (`ok` / `mismatch` / `error`, status, final URL), exit code 1
+if anything is off, cookies of the logged-in session included. Read back only
+the non-ok lines. A single URL: `http_request({url})` → status and final URL.
 
 ### SEO, links, structured data
 Triggers: "any broken links?", "is the structured data valid?".
@@ -206,6 +208,8 @@ propose them for batches, logs and anything repetitive.
 | "replay the recorded flow" | `chrome-bridge replay --file flow.jsonl --vars '{"user":"jane"}'` |
 | "assert without the model" | `chrome-bridge assert --selector "#ok" --text "Done"` |
 | "security headers" | `chrome-bridge security_headers --url https://…` |
+| "does the pixel fire the right events?" | `chrome-bridge track --clear --wait-ms 8000` |
+| "check the migration redirects" | `chrome-bridge redirects --csv map.csv` (exit 1 on mismatch) |
 | "save the page" | `chrome-bridge save_page --out page.mhtml` |
 | "filter a big table" | `chrome-bridge extract_table --selector table --json '{"where":{"sku":"SKU-0777"}}'` |
 

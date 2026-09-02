@@ -58,6 +58,27 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
   `get_interactives` subito dopo è un turno buttato), e che per leggere un
   dettaglio si ritaglia e ingrandisce invece di rifare lo screenshot intero,
   mentre per verificare un esito `assert`/`wait_for` fanno polling da soli.
+- **`track_events`** — «verifica che il pixel spari gli eventi giusti». I
+  beacon di GA4, Meta Pixel, Google Ads, TikTok, LinkedIn, Pinterest,
+  Microsoft Ads, GTM, Hotjar e Clarity decodificati dal log di rete
+  browser-side in una riga per evento: vendor, evento, parametri chiave,
+  tempo dal primo. I parametri dentro un corpo POST vengono dichiarati non
+  decodificati, non inventati. Anche nella CLI: `chrome-bridge track --clear
+  --wait-ms 8000`.
+- **`cookie_audit`** — «audit dei cookie e del banner». Cancella i cookie del
+  sito, ricarica, fotografa cookie e host di terze parti **prima** del
+  consenso, accetta il banner (`accept_selector` o `dismiss_overlays`) e
+  fotografa di nuovo. I findings nominano i tracker contattati prima del
+  consenso: la domanda che il Garante fa. Avviso nella descrizione: scollega
+  dal sito auditato.
+- **`chrome-bridge redirects --csv mappa.csv`** — «verifica i redirect della
+  migrazione». Una riga `vecchio,nuovo` per URL, una `http_request` per riga
+  con i cookie del browser (quindi anche dietro login), esito `ok`/`mismatch`/
+  `error` con stato e URL finale, exit code 1 se qualcosa non torna. Solo CLI:
+  il modello legge le righe che non tornano, non le 400 giuste.
+- **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
+  baseline può essere un PNG su disco: il mockup del designer o lo screenshot
+  di produzione diventano il riferimento, il confronto è quello di sempre.
 - **Cinque tool tolti dallo schema MCP, 63 → 58**: `set_zoom` (diventa il
   parametro `zoom` di `viewport_resize`), `monitor_websocket` (diventa
   `monitor_network source=websocket`), `get_performance` (doppione di

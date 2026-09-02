@@ -3056,6 +3056,14 @@ async function cmdNetworkRules({ action, url_filter, redirect_url, header, heade
 const MAX_DIFF_BASELINES = 10;
 const diffBaselines = new Map(); // name → { bitmapData: ImageData, width, height, capturedAt, selector }
 
+async function imageToDiffCanvas(b64) {
+  const bitmap = await dataUrlToBitmap(`data:image/png;base64,${b64}`);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+  return { ctx, width: bitmap.width, height: bitmap.height };
+}
+
 async function captureForDiff(tabId, selector) {
   const { cropRect, dataUrl } = await withTabVisible(tabId, async (tab) => {
     let cropRect = null;
@@ -3098,7 +3106,7 @@ async function captureForDiff(tabId, selector) {
   return { canvas, ctx, width: sw, height: sh };
 }
 
-async function cmdScreenshotDiff({ action, name = 'default', selector, threshold = 10, tab_id }) {
+async function cmdScreenshotDiff({ action, name = 'default', selector, threshold = 10, image_b64, tab_id }) {
   if (!action) throw new Error('Missing required parameter: action');
 
   if (action === 'list') {
@@ -3121,7 +3129,10 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
     if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
       throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
     }
-    const { ctx, width, height } = await captureForDiff(tabId, selector);
+    // Baseline da file (mockup, screenshot di un altro ambiente): stessi
+    // pixel di una cattura, ma li porta il server. Nessun cap a 1568px qui:
+    // il confronto vuole le dimensioni originali.
+    const { ctx, width, height } = image_b64 ? await imageToDiffCanvas(image_b64) : await captureForDiff(tabId, selector);
     // Ricontrolla dopo l'await: due baseline concorrenti possono aver
     // superato entrambe il check iniziale
     if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
