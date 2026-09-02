@@ -197,6 +197,16 @@ oltre quella normale dell'aggiornamento.
   sessione di ogni utente. I comandi dell'estensione restano e la **CLI li
   accetta ancora con i nomi vecchi** (`chrome-bridge set_zoom --factor 1.5`).
   Schema: −3 102 B.
+- **Provato dal vivo in launch mode** (Chromium dedicato con `extension/`
+  unpacked, porta 8799, pagina `bench/form.html`): `read_form`,
+  `keyboard_walk`, `list_assets`, `resource_timing`, `audit` con i nove kind
+  e report su disco, `screenshot_diff` con baseline da file (0% di diff
+  contro se stessa), `watch` add/list/poll/remove, `observe` con clic e
+  digitazione (segnaposto `{{nome}}`, `{{email}}`), `track`, `handoff` fino
+  al timeout. Il ramo "Done" e il picker di `handoff` richiedono un clic
+  umano. Trovato e corretto: `VERSION` in `protocol.js` era rimasto a 1.15.0
+  (il bump di release non lo tocca), e il clic su una checkbox veniva
+  descritto col suo `value` ("on") invece che con l'etichetta.
 - **Costo dello schema, a fine ciclo**: `npm run measure` 57 362 B all'inizio
   (63 tool, 34 core) → **57 546 B** alla fine (59 tool, 38 core): +184 B,
   ~+46 token, con nove capacità nuove dentro. Pagato togliendo cinque tool a

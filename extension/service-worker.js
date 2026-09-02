@@ -2149,7 +2149,9 @@ function observeContentScript(recordValues) {
   document.addEventListener('click', (e) => {
     const el = e.target?.closest?.('a, button, input[type=submit], input[type=button], input[type=checkbox], input[type=radio], [role=button], summary, [onclick]') || e.target;
     if (!el || el === badge) return;
-    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    // Per checkbox e radio il "testo" è il value (spesso "on"): l'etichetta dice di più
+    const isToggle = el.tagName === 'INPUT' && /^(checkbox|radio)$/.test(el.type);
+    const text = isToggle ? labelOf(el) : (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 60);
     send({ command: 'click', params: { selector: selectorOf(el) }, human: { label: text || labelOf(el), tag: el.tagName.toLowerCase() } });
   }, true);
   document.addEventListener('change', (e) => {
