@@ -226,6 +226,16 @@ oltre quella normale dell'aggiornamento.
   test: 199 → 257, verdi. E2E non eseguiti: serve l'estensione ricaricata con
   il nuovo service worker e la porta 8765 libera.
 
+## Unreleased (dopo la 1.16.0)
+
+- **Il relay scartava le risposte dei comandi lunghi**: `pendingRelay` aveva
+  un TTL fisso di 150 s, mentre `handoff` può aspettare fino a 10 minuti. Un
+  handoff di 4 minuti lanciato dalla CLI (che è un relay) finiva regolarmente
+  nell'estensione e la risposta veniva buttata allo sweep: il chiamante
+  restava appeso fino al timeout di trasporto. Trovato provando dal vivo il
+  ramo con clic umano. La scadenza ora segue il comando (`relayExpiry`:
+  timeout del tipo, o quello chiesto, più margine). Test unitario.
+
 ## 1.15.1 — 2026-07-31
 
 Nata dal collaudo dal vivo della 1.15.0 su ChromeOS: due bugie del reporting

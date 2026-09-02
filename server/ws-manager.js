@@ -16,6 +16,13 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType, VERSION } from './protocol.js';
 
+/** Quanto tenere in vita l'attesa di risposta per un comando arrivato da un relay. */
+export function relayExpiry(msg) {
+  const asked = Number(msg?.params?.timeout);
+  const base = getTimeout(msg?.type);
+  return Math.max(PENDING_RELAY_TTL_MS, base, Number.isFinite(asked) && asked > 0 ? asked + 5000 : 0) + 5000;
+}
+
 export class WSManager {
   constructor(port = DEFAULT_PORT, opts = {}) {
     this.port = port;
@@ -377,8 +384,11 @@ export class WSManager {
         return;
       }
 
-      // Traccia quale relay ha inviato questo comando
-      this.pendingRelay.set(msg.id, { ws, ts: Date.now() });
+      // Traccia quale relay ha inviato questo comando. La scadenza è quella del
+      // comando, non un TTL fisso: un handoff di 4 minuti attraverso il relay
+      // finiva regolarmente nell'estensione e la risposta veniva scartata qui
+      // allo sweep dei 150 s — il chiamante aspettava fino al timeout di trasporto.
+      this.pendingRelay.set(msg.id, { ws, ts: Date.now(), expires: Date.now() + relayExpiry(msg) });
       this.client.send(JSON.stringify(msg));
     });
 
@@ -637,10 +647,10 @@ export class WSManager {
           timestamp: Date.now(),
         }));
       }
-      // Sweep pendingRelay scaduti
-      const cutoff = Date.now() - PENDING_RELAY_TTL_MS;
+      // Sweep pendingRelay scaduti (scadenza per comando, vedi relayExpiry)
+      const now = Date.now();
       for (const [id, entry] of this.pendingRelay) {
-        if (entry.ts < cutoff) this.pendingRelay.delete(id);
+        if ((entry.expires ?? entry.ts + PENDING_RELAY_TTL_MS) < now) this.pendingRelay.delete(id);
       }
     }, this.pingIntervalMs);
   }
