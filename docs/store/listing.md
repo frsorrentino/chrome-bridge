@@ -28,13 +28,13 @@ Built to be token-efficient: the agent acts on compact element references instea
 
 59 specialized web-development tools:
 
-• Navigation & tabs — open, close, navigate, list tabs
-• DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, modify the DOM
-• Input — click, type, press keys, fill forms, drag & drop, upload files
-• Screenshots — viewport, element, full page, visual regression diff; captures run in the background without stealing window focus
-• Audits — accessibility (WCAG), SEO, security headers, web vitals, unused CSS
-• Network — monitor requests, mock/block/redirect, WebSocket monitoring, HAR export
-• Debugging — console logs, JS execution, event listeners, performance metrics
+• Navigation & tabs — open, close, navigate, list tabs; move, tile and lay out windows
+• DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, read a form as filled, modify the DOM
+• Input — click, type, press keys, fill forms, drag & drop, upload files; hand the browser to the user for 2FA, CAPTCHA or a choice
+• Screenshots — viewport (one per device preset), element with zoom, full page, visual regression against a baseline, a design mockup or another URL; captures run in the background without stealing window focus
+• Audits — one call for accessibility, keyboard navigation, SEO, security headers, broken links, web vitals, unused CSS, slow plugins and CDN cache; cookie-consent audit; tracking pixels decoded
+• Network — monitor requests, mock/block/redirect, record and replay API responses with forced errors, HAR export
+• Debugging — console logs with source-mapped stacks, JS execution, dev-server error overlays, background page watch
 • Emulation — media, geolocation, viewport, zoom
 
 Cross-platform: Windows, macOS, Linux — any desktop Chrome 135+. Also the only Claude Code browser automation that works on ChromeOS (Crostini).

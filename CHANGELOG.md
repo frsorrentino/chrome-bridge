@@ -21,7 +21,7 @@ quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
 esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
 uno che rifiuta subito.
 
-## 1.16.0 — 2026-09-01
+## 1.16.0 — 2026-09-02
 
 Il ciclo nato dall'analisi del 2026-09-01 (`docs/analisi-2026-09-01.md`):
 la skill con le ricette, le capacità del ciclo di vita (pixel, cookie,
