@@ -23,11 +23,15 @@ uno che rifiuta subito.
 
 ## 1.16.0 — 2026-09-01
 
-Un solo concetto in più, nessun tool in più: il ritaglio si ingrandisce. La
-raccomandazione corrente per la visione dei modelli è un tool che prende un
-bounding box e restituisce quella regione ritagliata e ingrandita — sposta il
-calcolo sui token immagine invece che sullo sforzo di ragionamento. Il server
-resta agnostico sul modello: sono migliorie che aiutano qualunque client.
+Il ciclo nato dall'analisi del 2026-09-01 (`docs/analisi-2026-09-01.md`):
+la skill con le ricette, le capacità del ciclo di vita (pixel, cookie,
+redirect, mockup, CDN, plugin lenti, tastiera, pannelli sconosciuti), le
+funzionalità che solo un browser con la persona davanti può avere (handoff,
+guarda come faccio, secondo paio d'occhi, fascicolo di prova, watch), e lo
+schema che finisce dove era partito. Il server resta agnostico sul modello che
+lo chiama: nessuna modifica condizionale, solo migliorie per qualunque client.
+Nessun permesso Chrome nuovo: nessuna review dello Store per l'estensione
+oltre quella normale dell'aggiornamento.
 
 - **`element_screenshot` accetta `region` e `scale`.** Il box si indica per
   `selector` (come prima, scrollato in vista) oppure per `region`
@@ -166,17 +170,20 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
   nell'unico log d'uso avevano zero chiamate in sei — e restano comandi CLI.
   Anche `chrome-bridge audit --kinds a11y,seo --out audit.md`. Schema:
   −3 573 B dai sei, +≈900 B dell'unico.
-- **`keyboard_walk`** — «si naviga da tastiera?». Ordine di tabulazione
+- **`audit kinds=['keyboard']`** — «si naviga da tastiera?». Ordine di tabulazione
   calcolato e focus programmatico elemento per elemento: chi rifiuta il
   focus, chi finisce fuori schermo, chi non mostra un indicatore, chi sta
   fuori da un modale aperto. Non sono veri tasti Tab, e la descrizione lo
-  dice: un trap che ascolta `keydown` non viene esercitato.
-- **`slow_plugins`** — «quale plugin rallenta la pagina?». Resource Timing
+  dice: un trap che ascolta `keydown` non viene esercitato. Nato come tool
+  `keyboard_walk`, piegato in `audit` nello stesso ciclo.
+- **`audit kinds=['resources']`** — «quale plugin rallenta la pagina?». Resource Timing
   della pagina raggruppato per plugin/tema WordPress, modulo PrestaShop, sito,
   host esterno: richieste, KB, tempo, render-blocking, file più lento.
-- **`cache_check`** — «la CDN serve la versione nuova?». Pagina e asset
+- **`audit kinds=['cache']`** — «la CDN serve la versione nuova?». Pagina e asset
   principali chiesti due volte dal browser, con e senza cache-buster; ETag,
   Last-Modified o dimensione a confronto, stato di cache della CDN in chiaro.
+  Nati come tool a sé (`slow_plugins`, `cache_check`) e piegati in `audit`
+  nello stesso ciclo: due voci di schema in meno, stesso risultato.
 - **`find_setting`** — «trova dove si imposta X nel pannello». Segue i link
   del menu del pannello, prima quelli con la parola nell'etichetta, finché una
   pagina la contiene; riporta il percorso di menu. Naviga davvero e si ferma a
@@ -190,10 +197,13 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
   sessione di ogni utente. I comandi dell'estensione restano e la **CLI li
   accetta ancora con i nomi vecchi** (`chrome-bridge set_zoom --factor 1.5`).
   Schema: −3 102 B.
-- Costo dello schema: `npm run measure` 57 362 → 57 529 B (+167 B, ~+42
-  token) con i due parametri nuovi già compensati accorciando `move_tab` e
-  il rimando a `execute_js` in `viewport_resize` che l'`action=get` aveva
-  reso una toppa.
+- **Costo dello schema, a fine ciclo**: `npm run measure` 57 362 B all'inizio
+  (63 tool, 34 core) → **57 546 B** alla fine (59 tool, 38 core): +184 B,
+  ~+46 token, con nove capacità nuove dentro. Pagato togliendo cinque tool a
+  zero usi, piegando nove tool in `audit` (sei audit singoli, `keyboard_walk`,
+  `slow_plugins`, `cache_check`) e accorciando le descrizioni più lunghe. Unit
+  test: 199 → 257, verdi. E2E non eseguiti: serve l'estensione ricaricata con
+  il nuovo service worker e la porta 8765 libera.
 
 ## 1.15.1 — 2026-07-31
 

@@ -130,8 +130,8 @@ isn't installed: reload the page first.
 ### Which plugin slows the page (WordPress, PrestaShop)
 Triggers: "why is it slow", "which plugin slows the page", «quale plugin
 rallenta la pagina?».
-`slow_plugins()` on the loaded page (reload first if it was opened long
-ago): Resource Timing grouped by WordPress plugin/theme, PrestaShop module,
+`audit({kinds:['resources']})` on the loaded page (reload first if it was
+opened long ago): Resource Timing grouped by WordPress plugin/theme, PrestaShop module,
 the site itself and each third-party host — requests, KB, time, render-blocking
 count, slowest file. Then `audit({kinds:['vitals']})` for the numbers; suggest disabling the
 top group and re-running both.
@@ -157,7 +157,7 @@ Print stylesheet: `emulate_media({printMode:true})` then `screenshot`.
 ### Accessibility and keyboard navigation
 Triggers: "run an accessibility audit", "can it be used with the keyboard?",
 "is the tab order right?", "does the modal trap focus?", «si naviga da tastiera?».
-`audit({kinds:['a11y']})` for the rules; `keyboard_walk({max_steps:60})` for what
+`audit({kinds:['a11y']})` for the rules; `audit({kinds:['keyboard']})` for what
 a keyboard user meets: focus refused, off-screen, no visible indicator, focus
 escaping an open modal. It uses computed tab order and programmatic focus, not
 real Tab keys — report a trap as "not exercised", not as "works".
@@ -229,7 +229,7 @@ expiry is not readable from an extension: use a checker page via `navigate`.
 ### Post-deploy check
 Triggers: "did the deploy go through?", "do I still see the old CSS?".
 `navigate` → `assert` on the version string (footer/meta) → `read_console({level:'error'})`
-→ `cache_check()`: page and main assets requested as is and with a cache-buster,
+→ `audit({kinds:['cache']})`: page and main assets requested as is and with a cache-buster,
 ETag/Last-Modified compared, cache status header shown. `stale` on a CSS means
 the CDN still serves the old build: purge it.
 

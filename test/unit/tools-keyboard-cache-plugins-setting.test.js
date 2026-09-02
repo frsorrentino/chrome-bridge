@@ -1,8 +1,8 @@
 /**
  * Quattro capacità della sezione E dell'analisi 2026-09-01:
- * - keyboard_walk: "si naviga da tastiera?" — ordine di tab e anomalie
- * - slow_plugins: "quale plugin rallenta?" — Resource Timing per origine
- * - cache_check: "la CDN serve la versione nuova?" — validatori a confronto
+ * - audit kinds=keyboard: "si naviga da tastiera?" — ordine di tab e anomalie
+ * - audit kinds=resources: "quale plugin rallenta?" — Resource Timing per origine
+ * - audit kinds=cache: "la CDN serve la versione nuova?" — validatori a confronto
  * - find_setting: "dove si imposta X nel pannello?" — i link del menu, uno a uno
  */
 import { test } from 'node:test';
@@ -64,42 +64,40 @@ test('cacheVerdict confronta etag, poi last-modified, poi la dimensione', () => 
 
 // --- wiring ---
 
-test('keyboard_walk stampa una riga per passo e il riepilogo dei problemi', async () => {
-  const { handlers } = build(async () => ({
+test('audit kinds=keyboard riassume passi e problemi e dichiara il limite', async () => {
+  const { handlers } = build(async (type) => (type === MessageType.KEYBOARD_WALK ? {
     total_focusable: 3, walked: 2, positive_tabindex: 1, dialog_open: false,
     steps: [{ step: 1, selector: '#a', tag: 'a', text: 'Home', tabindex: 0, issue: null }, { step: 2, selector: 'button.x:nth-of-type(1)', tag: 'button', text: 'Go', tabindex: 3, issue: 'no visible focus indicator' }],
     issues: { 'no visible focus indicator': 1 },
-  }));
-  const res = await handlers.get('keyboard_walk').handler({ max_steps: 60 });
-  const t = res.content[0].text;
-  assert.match(t, /^keyboard walk focusable=3 walked=2 positive_tabindex=1\nissues: 1× no visible focus indicator/);
-  assert.match(t, /2\tbutton\.x:nth-of-type\(1\)\tbutton\[tabindex=3\]\tGo\tno visible focus indicator/);
+  } : { url: 'https://a.it/' }));
+  const res = await handlers.get('audit').handler({ kinds: ['keyboard'], max_links: 50 });
+  assert.match(res.content[0].text, /keyboard: 3 focusable, 2 walked, 1 issue\(s\) — 1× no visible focus indicator; e\.g\. button\.x:nth-of-type\(1\) \(no visible focus indicator\)\. Computed tab order, not real Tab keys/);
 });
 
-test('cache_check chiede pagina e asset due volte, con e senza cache-buster', async () => {
+test('audit kinds=cache chiede pagina e asset due volte, con e senza cache-buster', async () => {
   const { handlers, sent } = build(async (type, p) => {
+    if (type === MessageType.GET_PAGE_INFO) return { url: 'https://a.it/' };
     if (type === MessageType.LIST_ASSETS) return { page: 'https://a.it/', stylesheets: ['https://a.it/s.css'], scripts: [], images: [] };
     if (type === MessageType.HTTP_REQUEST) return { status: 200, headers: { etag: p.url.includes('cb=') && p.url.includes('s.css') ? '"new"' : '"old"' } };
     return {};
   });
-  const res = await handlers.get('cache_check').handler({ assets: true, max_assets: 8 });
+  const res = await handlers.get('audit').handler({ kinds: ['cache'], max_links: 50 });
   const reqs = sent.filter((m) => m.type === MessageType.HTTP_REQUEST).map((m) => m.params.url);
   assert.equal(reqs.length, 4);
   assert.match(reqs[1], /^https:\/\/a\.it\/\?cb=\d+$/);
-  assert.match(res.content[0].text, /stale_or_different=1/);
-  assert.match(res.content[0].text, /fresh\thttps:\/\/a\.it\//);
-  assert.match(res.content[0].text, /stale\thttps:\/\/a\.it\/s\.css/);
+  assert.match(res.content[0].text, /cache: 1 stale\/different of 2 URL\(s\) — stale https:\/\/a\.it\/s\.css/);
 });
 
-test('cache_check rifiuta le pagine non http', async () => {
-  const { handlers } = build(async () => ({ page: 'chrome://newtab', stylesheets: [], scripts: [], images: [] }));
-  await assert.rejects(() => handlers.get('cache_check').handler({ assets: true, max_assets: 1 }), /http\(s\) page/);
+test('audit kinds=cache su una pagina non http riporta l\'errore nel kind', async () => {
+  const { handlers } = build(async (type) => (type === MessageType.LIST_ASSETS ? { page: 'chrome://newtab', stylesheets: [], scripts: [], images: [] } : { url: 'chrome://newtab' }));
+  const res = await handlers.get('audit').handler({ kinds: ['cache'], max_links: 50 });
+  assert.match(res.content[0].text, /cache: error — needs an http\(s\) page/);
 });
 
-test('slow_plugins raggruppa le voci di Resource Timing della pagina', async () => {
-  const { handlers } = build(async () => ({ host: 'shop.it', entries: [{ name: 'https://shop.it/wp-content/plugins/slider/x.js', duration: 300, transfer: 1024 }], navigation: { load: 900 } }));
-  const res = await handlers.get('slow_plugins').handler({ top: 15 });
-  assert.match(res.content[0].text, /load=900ms\nplugin:slider\t1 req\t1KB\t300ms/);
+test('audit kinds=resources raggruppa le voci di Resource Timing della pagina', async () => {
+  const { handlers } = build(async (type) => (type === MessageType.RESOURCE_TIMING ? { host: 'shop.it', entries: [{ name: 'https://shop.it/wp-content/plugins/slider/x.js', duration: 300, transfer: 1024 }], navigation: { load: 900 } } : { url: 'https://shop.it/' }));
+  const res = await handlers.get('audit').handler({ kinds: ['resources'], max_links: 50 });
+  assert.match(res.content[0].text, /resources: 1 requests, 1KB, load 900ms — plugin:slider 300ms\/1KB/);
 });
 
 test('find_setting prova prima i link del menu che contengono la parola e si ferma alla pagina trovata', async () => {

@@ -1,6 +1,6 @@
 # Tool reference
 
-All 62 tools, by capability group. The group name is the value to pass to
+All 59 tools, by capability group. The group name is the value to pass to
 `--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
@@ -48,13 +48,12 @@ the HTML cost. `read_page`, `extract`, `screenshot` and `http_request` accept
 `save_to`: the result goes to a file and the tool returns the path, so the bytes
 never enter the context unless the agent decides to read them.
 
-## Debugging & Network (9) — group `network`
+## Debugging & Network (8) — group `network`
 
 `execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
 `network_rules` (block, redirect, headers, stub, and record/replay of real API responses with forced errors) (block / redirect / stub / headers),
 `http_request` (sent with the user's session cookies),
-`track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log),
-`cache_check` (is the CDN serving the new version: validators with and without a cache-buster).
+`track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log).
 
 `execute_js` needs **Allow user scripts** enabled in the extension details.
 
@@ -72,12 +71,13 @@ crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
 with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
 baseline.
 
-## Audits (4) — group `audits`
+## Audits (2) — group `audits`
 
-`audit` (accessibility, SEO, security headers, broken links verified server-side,
-Core Web Vitals, unused CSS — pick the kinds, `save_to` writes the Markdown
-report), `cookie_audit` (what fires before consent), `keyboard_walk` (tab order
-and focus issues), `slow_plugins` (Resource Timing by plugin/theme/module/host).
+`audit` (accessibility, keyboard = tab order and focus issues, SEO, security headers, broken links verified server-side,
+Core Web Vitals, unused CSS, `resources` = which plugin/theme/module/host slows
+the page, `cache` = is the CDN serving the new version — pick the kinds,
+`save_to` writes the Markdown report), `cookie_audit` (what fires before
+consent).
 The six former single audits stay available as CLI commands.
 
 `extract_table` filters server-side: 236 bytes to find one row among 1500,

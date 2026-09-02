@@ -10,12 +10,16 @@
 import { MessageType } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
+import { groupResources } from './resources.js';
+import { cacheVerdict } from './cache-check.js';
 
-export const AUDIT_KINDS = ['a11y', 'seo', 'security', 'links', 'vitals', 'css'];
+export const AUDIT_KINDS = ['a11y', 'keyboard', 'seo', 'security', 'links', 'vitals', 'css', 'resources', 'cache'];
 export const DEFAULT_KINDS = ['a11y', 'seo', 'security', 'links', 'vitals'];
 
 const RUNNERS = {
   a11y: (send, o) => send(MessageType.ACCESSIBILITY_AUDIT, { scope: o.scope, checks: ['all'], tab_id: o.tab_id }),
+  // "si naviga da tastiera?": ordine di tab calcolato e focus programmatico, non veri tasti Tab
+  keyboard: (send, o) => send(MessageType.KEYBOARD_WALK, { max_steps: o.max_steps ?? 60, tab_id: o.tab_id }),
   seo: (send, o) => send(MessageType.SEO_AUDIT, { tab_id: o.tab_id }),
   security: async (send, o) => {
     const data = await send(MessageType.GET_RESPONSE_HEADERS, { tab_id: o.tab_id });
@@ -32,6 +36,26 @@ const RUNNERS = {
   },
   vitals: (send, o) => send(MessageType.WEB_VITALS, { tab_id: o.tab_id }),
   css: (send, o) => send(MessageType.UNUSED_CSS, { max_selectors: o.max_selectors ?? 200, tab_id: o.tab_id }),
+  // "quale plugin rallenta": Resource Timing per plugin/tema/modulo/host
+  resources: async (send, o) => {
+    const d = await send(MessageType.RESOURCE_TIMING, { tab_id: o.tab_id });
+    return { ...groupResources(d?.entries ?? [], { pageHost: d?.host ?? '', top: o.top ?? 15 }), navigation: d?.navigation ?? null };
+  },
+  // "la CDN serve la versione nuova": pagina e asset con e senza cache-buster
+  cache: async (send, o) => {
+    const list = await send(MessageType.LIST_ASSETS, { max_per_kind: o.max_assets ?? 8, tab_id: o.tab_id });
+    if (!/^https?:/.test(String(list?.page))) throw new Error(`needs an http(s) page, current tab is ${list?.page}`);
+    const urls = [list.page, ...list.stylesheets, ...list.scripts, ...list.images];
+    const rows = [];
+    for (const url of urls) {
+      try {
+        const a = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' });
+        const b = await send(MessageType.HTTP_REQUEST, { url: `${url}${url.includes('?') ? '&' : '?'}cb=${Date.now()}`, method: 'GET' });
+        rows.push({ url, ...cacheVerdict(a, b) });
+      } catch (err) { rows.push({ url, verdict: 'error', basis: '', cache_status: null, age: null, error: err.message }); }
+    }
+    return { urls: rows.length, stale: rows.filter((r) => /stale|differs/.test(r.verdict)).length, rows };
+  },
 };
 
 /** Esegue i kind richiesti in sequenza; un errore in uno non ferma gli altri. */
@@ -60,6 +84,13 @@ export function summarizeAudit(results) {
         for (const x of v) byType[x.type] = (byType[x.type] || 0) + 1;
         counts.a11y = { errors: r.summary?.errors ?? v.filter((x) => x.severity === 'error').length, warnings: r.summary?.warnings ?? v.filter((x) => x.severity === 'warning').length };
         lines.push(`a11y: ${counts.a11y.errors} errors, ${counts.a11y.warnings} warnings` + (v.length ? ` (${Object.entries(byType).map(([t, n]) => `${t} ${n}`).join(', ')})` : ''));
+        break;
+      }
+      case 'keyboard': {
+        const issues = Object.entries(r.issues ?? {});
+        counts.keyboard = { focusable: r.total_focusable, walked: r.walked, issues: issues.reduce((a, [, n]) => a + n, 0) };
+        const firsts = (r.steps ?? []).filter((st) => st.issue).slice(0, 3).map((st) => `${st.selector} (${st.issue})`);
+        lines.push(`keyboard: ${r.total_focusable} focusable, ${r.walked} walked, ${counts.keyboard.issues} issue(s)${r.dialog_open ? ', dialog open' : ''}` + (issues.length ? ` — ${issues.map(([k, n]) => `${n}× ${k}`).join(', ')}` : '') + (firsts.length ? `; e.g. ${firsts.join('; ')}` : '') + '. Computed tab order, not real Tab keys');
         break;
       }
       case 'seo': {
@@ -92,6 +123,18 @@ export function summarizeAudit(results) {
       case 'css': {
         counts.css = { unused: r.total_unused ?? r.totalUnused ?? (r.unused_selectors ?? r.unusedSelectors ?? []).length, checked: r.total_checked ?? r.totalChecked ?? null };
         lines.push(`css: ${counts.css.unused} unused selector(s)${counts.css.checked != null ? ` of ${counts.css.checked}` : ''}`);
+        break;
+      }
+      case 'resources': {
+        const top = (r.groups ?? []).slice(0, 4).map((g) => `${g.group} ${Math.round(g.duration)}ms/${(g.transfer / 1024).toFixed(0)}KB${g.blocking ? ` ${g.blocking} blocking` : ''}`);
+        counts.resources = { requests: r.total_requests, groups: r.total_groups, transfer_kb: Math.round((r.total_transfer ?? 0) / 1024) };
+        lines.push(`resources: ${r.total_requests} requests, ${counts.resources.transfer_kb}KB${r.navigation?.load ? `, load ${r.navigation.load}ms` : ''}` + (top.length ? ` — ${top.join('; ')}` : ''));
+        break;
+      }
+      case 'cache': {
+        counts.cache = { urls: r.urls, stale: r.stale };
+        const bad = (r.rows ?? []).filter((x) => /stale|differs/.test(x.verdict)).slice(0, 3).map((x) => `${x.verdict} ${x.url}`);
+        lines.push(`cache: ${r.stale} stale/different of ${r.urls} URL(s)` + (bad.length ? ` — ${bad.join('; ')}` : '') + ((r.rows ?? [])[0]?.cache_status ? ` (${r.rows[0].cache_status})` : ''));
         break;
       }
       default:
