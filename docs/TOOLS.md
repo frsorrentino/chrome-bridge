@@ -44,7 +44,7 @@ never enter the context unless the agent decides to read them.
 ## Debugging & Network (9) — group `network`
 
 `execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
-`network_rules` (block / redirect / stub / headers),
+`network_rules` (block, redirect, headers, stub, and record/replay of real API responses with forced errors) (block / redirect / stub / headers),
 `http_request` (sent with the user's session cookies),
 `track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log),
 `cache_check` (is the CDN serving the new version: validators with and without a cache-buster).

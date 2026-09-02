@@ -27,6 +27,7 @@ import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js';
 import { runAudit, summarizeAudit, auditReport } from './audit.js';
 import { parseCsv, fillFromRows, fillLines } from './csv-fill.js';
+import { toPlaywrightTest } from './playwright-export.js';
 
 const INTERNAL_TYPES = new Set([
   MessageType.RESULT, MessageType.ERROR, MessageType.PING, MessageType.PONG,
@@ -34,7 +35,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -279,6 +280,15 @@ async function run(client, command, params, opts) {
     if (results.some((r) => r.verdict !== 'ok')) process.exitCode = 1;
     return opts.format === 'json' ? JSON.stringify(results) : redirectLines(results);
   }
+  // "esporta il flusso come test Playwright": nessun browser coinvolto
+  if (command === 'export') {
+    if (!params.file) throw new Error('export requires --file flow.jsonl (and --out flow.spec.ts)');
+    const steps = (await readFile(params.file, 'utf8')).split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const out = toPlaywrightTest(steps, { name: basename(params.file, '.jsonl') });
+    const target = opts.out || params.file.replace(/\.jsonl$/, '.spec.ts');
+    await writeFile(target, out.source);
+    return `exported ${out.steps} step(s) to ${target}` + (out.skipped.length ? ` (no equivalent: ${[...new Set(out.skipped)].join(', ')})` : '');
+  }
   // "fai un audit": sei audit in una chiamata, report Markdown con --out
   if (command === 'audit') {
     const kinds = params.kinds ? String(params.kinds).split(',').map((k) => k.trim()).filter(Boolean) : undefined;
@@ -400,6 +410,7 @@ Examples:
   chrome-bridge track --clear --wait-ms 8000        # tracking beacons fired (GA4, Meta, Ads…)
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
   chrome-bridge audit --kinds a11y,seo,links --out audit.md
+  chrome-bridge export --file login.jsonl --out tests/login.spec.ts
   chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);
 }
@@ -411,6 +422,8 @@ async function main() {
     return;
   }
   const { command, params, opts } = parseCliArgs(argv);
+  // export non tocca il browser: niente bridge da raggiungere
+  if (command === 'export') { printResult(await run(null, command, params, opts), opts); return; }
   const port = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
   const client = await connect(port);
   try {

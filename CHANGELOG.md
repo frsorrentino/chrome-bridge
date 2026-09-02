@@ -79,6 +79,19 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`session_record export`** — «fammene un test Playwright», «lo voglio in
+  CI». Un flusso registrato nel browser reale diventa `<nome>.spec.ts` con
+  `goto/fill/click/expect`; i passi umani (`handoff`) restano `page.pause()`,
+  i comandi senza equivalente restano commenti, la testata dice che lo stato
+  loggato non è esportato e rimanda a `storageState`. Anche
+  `chrome-bridge export --file flow.jsonl --out tests/flow.spec.ts`, senza
+  bridge acceso.
+- **`network_rules record / replay`** — «testa lo stato d'errore». `record`
+  rifà adesso, con i cookie dell'utente, le richieste API che la pagina ha
+  fatto (filtrate da `url_filter`) e le salva come fixture; `replay` le
+  riserve dallo stub locale con `overrides` per URL: status 500, corpo vuoto,
+  latenza di 3 secondi — gli stati che un backend vero non produce a comando.
+  Lo stub server ha imparato `delay_ms`.
 - **`screenshot_diff compare_urls`** — «confronta staging e produzione»,
   «cosa è cambiato nella preview della PR?». Le due pagine aperte nella stessa
   tab allo stesso viewport (loggate, se il browser lo è), `mask` per nascondere

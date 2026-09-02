@@ -213,11 +213,27 @@ Triggers: "do the site emails land in spam?". `navigate('https://www.mail-tester
 → `clipboard({action:'read'})` after copying the address → send from the site
 form → `click` Check → `extract` the score and findings.
 
-### Smoke test of a recorded flow
-Triggers: "re-run the login flow and tell me if it passes".
+### Smoke test of a recorded flow, and a Playwright test out of it
+Triggers: "re-run the login flow and tell me if it passes", "turn what you just
+did into a test", "I want this in CI", «fammene un test Playwright».
 `session_record({action:'start', name})` … actions … `session_record({action:'stop'})`
 then, with no model in the loop: `chrome-bridge replay --file <path>` and
-`chrome-bridge assert --selector "#ok" --text "Done"`.
+`chrome-bridge assert --selector "#ok" --text "Done"`. For CI without the
+bridge: `session_record({action:'export', name})` → `<name>.spec.ts` with
+`page.goto/fill/click/expect`, human steps as `page.pause()`, and a header
+saying the login state is not exported (use `storageState`). Zero-token:
+`chrome-bridge export --file flow.jsonl --out tests/flow.spec.ts`.
+
+### Error states the backend will not produce
+Triggers: "what does the UI do if the API returns 500 / times out / returns an
+empty list?", "test the error state", «testa lo stato d'errore».
+With `monitor_network({source:'page'})` on, load the page so it fetches its
+APIs, then `network_rules({action:'record', name:'catalog', url_filter:'||shop.it/api/*'})`
+(re-fetches those URLs now, with the user's cookies, into a fixture). Then
+`network_rules({action:'replay', name:'catalog', overrides:[{url_contains:'/api/items', status:500, latency_ms:3000}]})`,
+reload, `screenshot`/`assert` the error UI. `network_rules({action:'clear'})`
+restores the real backend. A single URL with a hand-written body:
+`network_rules({action:'stub', url_filter, body, status})`.
 
 ### Visual regression between two runs, or two URLs
 Triggers: "did anything change visually?", "compare staging with production",
@@ -239,6 +255,7 @@ propose them for batches, logs and anything repetitive.
 |---|---|
 | "check every link" | `chrome-bridge check_links --scope same-origin` |
 | "audit the page, report on disk" | `chrome-bridge audit --out audit.md` |
+| "turn the recording into a Playwright test" | `chrome-bridge export --file flow.jsonl --out tests/flow.spec.ts` |
 | "fill the CRM from this spreadsheet" | `chrome-bridge fill_form --from rows.csv --map '{"#name":"name"}' --url https://crm/new --submit '#save' --assert-text Saved` |
 | "grep the console" | `chrome-bridge read_console --level error \| head -20` |
 | "export the network log" | `chrome-bridge monitor_network --source browser --format har > page.har` |

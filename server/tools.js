@@ -20,6 +20,7 @@ import { summarizeConsent, consentLines } from './consent.js';
 import { groupResources, resourceLines } from './resources.js';
 import { cacheVerdict, cacheLines } from './cache-check.js';
 import { runAudit, summarizeAudit, auditReport, AUDIT_KINDS, DEFAULT_KINDS } from './audit.js';
+import { toPlaywrightTest } from './playwright-export.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
@@ -28,6 +29,7 @@ const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
 const LAYOUTS_FILE = process.env.CHROME_BRIDGE_LAYOUTS_FILE
   || join(homedir(), '.config', 'chrome-bridge', 'layouts.json');
 const RECORDINGS_DIR = process.env.CHROME_BRIDGE_RECORD_DIR || join(homedir(), '.config', 'chrome-bridge', 'recordings');
+const FIXTURES_DIR = process.env.CHROME_BRIDGE_FIXTURES_DIR || join(homedir(), '.config', 'chrome-bridge', 'fixtures');
 
 // Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
 const RECORD_EXCLUDE = new Set([MessageType.GET_TABS]);
@@ -1400,9 +1402,12 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- network_rules ---
   server.tool(
     'network_rules',
-    'Network interception, browser-wide, survives reloads until cleared: block requests, redirect URLs, set/remove request headers, or stub responses with a synthetic body (served by a local helper; from HTTPS pages the stub host must be trustworthy).',
+    'Network interception, browser-wide, survives reloads until cleared: block, redirect, set/remove headers, stub a synthetic body, or record real API responses and replay them with forced errors/latency (local helper; from HTTPS pages the stub host must be trusted).',
     {
-      action: z.enum(['block', 'redirect', 'modify_header', 'stub', 'list', 'clear']).describe('list and clear inspect and drop the rules already installed'),
+      action: z.enum(['block', 'redirect', 'modify_header', 'stub', 'record', 'replay', 'list', 'clear']).describe('record saves the page\'s API responses (url_filter) as a fixture, replay serves them with overrides; list/clear'),
+      name: z.string().optional().describe('Fixture name for record/replay'),
+      overrides: z.array(z.object({ url_contains: z.string(), status: z.number().optional(), body: z.string().optional(), latency_ms: z.number().optional() })).optional()
+        .describe('replay: force a status, body or delay on matching URLs — the error states a real backend will not produce on demand'),
       url_filter: z.string().optional().describe('declarativeNetRequest urlFilter, e.g. "||example.com/api/*"'),
       redirect_url: z.string().optional().describe('Destination for action=redirect'),
       header: z.string().optional().describe('Header name for action=modify_header, e.g. "User-Agent"'),
@@ -1413,7 +1418,44 @@ export function registerTools(server, wsManager, caps = 'all') {
       content_type: z.string().optional().default('application/json').describe('action=stub'),
       resource_types: z.array(z.enum(['main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'])).optional().describe('Limit the rule to these request types; omitted = all of them'),
     },
-    async ({ action, url_filter, redirect_url, header, header_value, header_target, body, status, content_type, resource_types }) => {
+    async ({ action, url_filter, redirect_url, header, header_value, header_target, body, status, content_type, resource_types, name, overrides }) => {
+      // "testa lo stato d'errore": le risposte vere dell'API, salvate una volta
+      // (rifatte adesso con i cookie dell'utente) e riservite con status,
+      // corpo o latenza forzati.
+      if (action === 'record') {
+        if (!name || !/^[\w-]+$/.test(name)) throw new Error('record needs name matching [\\w-]+');
+        const log = await send(MessageType.MONITOR_NETWORK, { source: 'page', limit: 0 });
+        // urlFilter di declarativeNetRequest → regex: via le ancore ||, |, poi glob
+        const pat = String(url_filter ?? '').replace(/^\|\|/, '').replace(/^\|/, '').replace(/\|$/, '');
+        const filter = url_filter ? new RegExp(pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')) : /./;
+        const urls = [...new Set((log?.requests ?? []).filter((r) => r.url && filter.test(r.url) && (r.method ?? 'GET') === 'GET').map((r) => r.url))].slice(0, 50);
+        const entries = [];
+        for (const url of urls) {
+          try { const r = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' }); entries.push({ url, status: r.status, content_type: r.content_type || 'application/json', body: r.body ?? '' }); }
+          catch (err) { entries.push({ url, error: err.message }); }
+        }
+        await mkdir(FIXTURES_DIR, { recursive: true });
+        const file = join(FIXTURES_DIR, `${name}.json`);
+        await writeFile(file, JSON.stringify({ recorded_at: new Date().toISOString(), url_filter: url_filter ?? null, entries }, null, 1));
+        return { content: [{ type: 'text', text: `recorded ${entries.filter((e) => !e.error).length} response(s) to ${file}` + (urls.length === 0 ? '\nnothing matched: monitor_network source=page must have been on while the page fetched' : '') + '\n' + entries.map((e) => `${e.status ?? 'ERR'}\t${e.url}`).join('\n') }] };
+      }
+      if (action === 'replay') {
+        if (!name) throw new Error('replay needs name');
+        const file = join(FIXTURES_DIR, `${name}.json`);
+        const fx = JSON.parse(await readFile(file, 'utf8'));
+        const port = await ensureStubServer();
+        const rules = [];
+        for (const e of fx.entries ?? []) {
+          if (e.error) continue;
+          const ov = (overrides ?? []).find((o) => e.url.includes(o.url_contains));
+          const id = addStub({ body: ov?.body ?? e.body, status: ov?.status ?? e.status, content_type: e.content_type, delay_ms: ov?.latency_ms ?? 0 });
+          const u = new URL(e.url);
+          const exact = `|${u.origin}${u.pathname}${u.search ? '^' : '|'}`;
+          await send(MessageType.NETWORK_RULES, { action: 'redirect', url_filter: exact, redirect_url: `http://${stubHost()}:${port}/__stub__/${id}`, resource_types: ['xmlhttprequest', 'other'] });
+          rules.push(`${ov ? 'override ' : ''}${ov?.status ?? e.status}${ov?.latency_ms ? ` +${ov.latency_ms}ms` : ''}\t${e.url}`);
+        }
+        return { content: [{ type: 'text', text: `replaying ${rules.length} response(s) from ${file} — reload the page; network_rules clear stops it\n${rules.join('\n')}` }] };
+      }
       if (action === 'stub') {
         if (!url_filter) throw new Error('url_filter is required for action=stub');
         if (body == null) throw new Error('body is required for action=stub');
@@ -1436,7 +1478,7 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- screenshot_diff ---
   server.tool(
     'screenshot_diff',
-    'Visual regression: save a named baseline (viewport, element, or a PNG from disk such as the design mockup), compare later — changed-pixel % and a red-highlighted diff image; or compare_urls: production vs staging in this tab, pixels plus a text diff, logged-in pages included. Baselines are in-memory (lost on service worker restart).',
+    'Visual regression: save a named baseline (viewport, element, or a PNG such as the design mockup) and compare later — changed-pixel % and a red-highlighted diff; or compare_urls: production vs staging in this tab, pixels plus text diff, logged-in pages included. Baselines are in-memory (lost on service worker restart).',
     {
       action: z.enum(['baseline', 'compare', 'compare_urls', 'list', 'clear']).describe('baseline stores, compare measures against it, compare_urls diffs url_a vs url_b in this tab, clear drops baselines'),
       name: z.string().optional().default('default').describe('Baseline id: reuse the same one to compare across runs'),
@@ -1886,11 +1928,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- move_tab ---
   server.tool(
     'move_tab',
-    'Move an existing tab into another window (chrome.tabs.move): the tab keeps its id, history and page state, '
-      + 'and it works on chrome-untrusted:// tabs where creating one is forbidden. The **destination** must be a '
-      + 'normal window: moving out of an app or popup window is fine, moving into one is refused. A ChromeOS '
-      + 'Terminal tab can be pulled out (new_window, window_type popup for the terminal look) but never merged '
-      + 'back into the Terminal window: an extension cannot create app windows.',
+    'Move an existing tab into another window (chrome.tabs.move), keeping id, history and page state; works on chrome-untrusted:// '
+      + 'tabs too. The **destination** must be a normal window: out of an app/popup window is fine, into one is refused. A ChromeOS '
+      + 'Terminal tab can be pulled out (new_window, window_type popup) but never merged back: extensions cannot create app windows.',
     {
       tab_id: z.number().describe('Tab to move; get it from get_tabs'),
       window_id: z.number().optional().describe('Destination window; get_tabs reports windowId for every tab'),
@@ -2265,12 +2305,25 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- session_record ---
   server.tool(
     'session_record',
-    'Record the commands of this session as a replayable jsonl file (replay with the CLI: chrome-bridge replay --file <path>). tab_id is stripped — replays target the tab they navigate.',
+    'Record the commands of this session as a replayable jsonl (chrome-bridge replay --file <path>), or export a recording as a Playwright test that runs in CI without the bridge. tab_id is stripped: replays target the tab they navigate.',
     {
-      action: z.enum(['start', 'stop', 'status', 'list']).describe('start begins recording, stop writes the file and returns its path'),
-      name: z.string().optional().describe('Required for start'),
+      action: z.enum(['start', 'stop', 'status', 'list', 'export']).describe('start records, stop writes the file, export turns a recording into a Playwright test'),
+      name: z.string().optional().describe('Required for start and export (recording name, or a .jsonl path)'),
+      save_to: saveToField('the exported .spec.ts (default: next to the recording)'),
     },
-    async ({ action, name }) => {
+    async ({ action, name, save_to }) => {
+      // Il flusso registrato nel browser reale diventa un test che gira in CI
+      // senza bridge: i passi umani restano come page.pause(), lo stato loggato
+      // non viene esportato e la testata lo dice.
+      if (action === 'export') {
+        if (!name) throw new Error('export needs name (a recording name or a .jsonl path)');
+        const file = name.endsWith('.jsonl') ? name : join(RECORDINGS_DIR, `${name}.jsonl`);
+        const steps = (await readFile(file, 'utf8')).split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+        const out = toPlaywrightTest(steps, { name: basename(file, '.jsonl') });
+        const target = save_to || file.replace(/\.jsonl$/, '.spec.ts');
+        await writeFile(target, out.source);
+        return { content: [{ type: 'text', text: `exported ${out.steps} step(s) to ${target}` + (out.skipped.length ? `\nno Playwright equivalent (left as comments): ${[...new Set(out.skipped)].join(', ')}` : '') + '\nlogin state is not exported: use storageState or add the login steps' }] };
+      }
       if (action === 'status') {
         return { content: [{ type: 'text', text: jsonText(recording ? { recording: recording.name, file: recording.file } : { recording: null }) }] };
       }

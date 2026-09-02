@@ -44,8 +44,11 @@ export async function ensureStubServer() {
       res.end('stub not found');
       return;
     }
-    res.writeHead(stub.status, { ...cors, 'Content-Type': stub.content_type });
-    res.end(stub.body);
+    // latency simulata: "cosa fa la UI mentre l'API ci mette 3 secondi"
+    setTimeout(() => {
+      res.writeHead(stub.status, { ...cors, 'Content-Type': stub.content_type });
+      res.end(stub.body);
+    }, stub.delay_ms || 0);
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -57,9 +60,9 @@ export async function ensureStubServer() {
   return port;
 }
 
-export function addStub({ body, status = 200, content_type = 'application/json' }) {
+export function addStub({ body, status = 200, content_type = 'application/json', delay_ms = 0 }) {
   const id = `s${++seq}`;
-  stubs.set(id, { body, status, content_type });
+  stubs.set(id, { body, status, content_type, delay_ms });
   return id;
 }
 
