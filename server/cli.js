@@ -14,8 +14,8 @@
  */
 
 import WebSocket from 'ws';
-import { readFile, writeFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, MessageType, createCommand, getTimeout } from './protocol.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
@@ -28,6 +28,7 @@ import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js'
 import { runAudit, summarizeAudit, auditReport } from './audit.js';
 import { parseCsv, fillFromRows, fillLines } from './csv-fill.js';
 import { toPlaywrightTest } from './playwright-export.js';
+import { redactHar, redactText, redactHeaders, buildManifest, evidenceIndex } from './evidence.js';
 
 const INTERNAL_TYPES = new Set([
   MessageType.RESULT, MessageType.ERROR, MessageType.PING, MessageType.PONG,
@@ -35,7 +36,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -56,12 +57,12 @@ const NUMERIC_KEYS = new Set([
   'max_rows', 'max_items', 'max_scrolls', 'max_segments', 'segment_offset', 'max_selectors',
   'delay', 'offset', 'scan_rows', 'width', 'height', 'x', 'y', 'level_num',
   'status', 'zoom', 'depth', 'count', 'index', 'port', 'threshold', 'scale',
-  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency', 'delay_ms', 'interval_s', 'expires_min', 'since',
+  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency', 'delay_ms', 'interval_s', 'expires_min', 'since', 'max_scrolls',
 ]);
 const BOOLEAN_KEYS = new Set([
   'clear', 'stop', 'force', 'visible', 'visible_only', 'stitch', 'reset',
   'attributes', 'childList', 'characterData', 'subtree', 'print_mode',
-  'include_cross_origin', 'headless', 'active', 'submit', 'accept', 'include_rect', 'reload', 'once',
+  'include_cross_origin', 'headless', 'active', 'submit', 'accept', 'include_rect', 'reload', 'once', 'keep_tab',
 ]);
 
 function coerce(raw, key) {
@@ -297,6 +298,38 @@ async function run(client, command, params, opts) {
     process.exitCode = 2;
     return `watch ${name}: no event within ${params.timeout ?? 3600}s`;
   }
+  // "fai un fascicolo su questo URL": la pagina come la vede l'utente, con hash e redazione obbligatoria
+  if (command === 'evidence') {
+    if (!params.url) throw new Error('evidence requires --url https://… (and --out DIR)');
+    const dir = opts.out || `evidence-${new Date().toISOString().slice(0, 10)}-${new URL(params.url).hostname}`;
+    await mkdir(dir, { recursive: true });
+    const tab = await client.sendCommand(MessageType.CREATE_TAB, { url: params.url, active: true });
+    const tab_id = tab?.id;
+    await client.sendCommand(MessageType.MONITOR_NETWORK, { source: 'browser', clear: true, limit: 1, tab_id });
+    await client.sendCommand(MessageType.NAVIGATE, { url: params.url, tab_id });
+    await client.sendCommand(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 800, timeout: 20000, tab_id }).catch(() => {});
+    await new Promise((r) => setTimeout(r, Number(params.settle_ms ?? 2000)));
+    const info = await client.sendCommand(MessageType.GET_PAGE_INFO, { tab_id });
+    const files = [];
+    const add = async (name, bytes, note) => { await writeFile(join(dir, name), bytes); files.push({ name, bytes, note }); };
+    const shots = await client.sendCommand(MessageType.FULL_PAGE_SCREENSHOT, { max_scrolls: Number(params.max_scrolls ?? 20), delay: 500, stitch: true, tab_id });
+    const images = shots?.images ?? (shots?.image ? [shots.image] : []);
+    for (let i = 0; i < images.length; i++) await add(images.length === 1 ? 'page.png' : `page-${i + 1}.png`, Buffer.from(images[i], 'base64'), 'full-page screenshot as rendered for this user');
+    const html = await client.sendCommand(MessageType.READ_PAGE, { mode: 'html', tab_id });
+    await add('page.html', redactText(typeof html === 'string' ? html : JSON.stringify(html)), 'DOM after load, redacted');
+    const text = await client.sendCommand(MessageType.READ_PAGE, { mode: 'text', tab_id });
+    await add('page.txt', redactText(typeof text === 'string' ? text : JSON.stringify(text)), 'visible text, redacted');
+    const net = await client.sendCommand(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id });
+    await add('network.har', JSON.stringify(redactHar(toHar(net?.requests ?? [])), null, 1), 'HAR 1.2 of the load, redacted');
+    const hdr = await client.sendCommand(MessageType.GET_RESPONSE_HEADERS, { tab_id }).catch(() => null);
+    if (hdr?.available) await add('response-headers.json', JSON.stringify({ url: hdr.url, status: hdr.status, headers: redactHeaders(hdr.headers) }, null, 1), 'main document response headers, redacted');
+    await add('page-info.json', JSON.stringify(info, null, 1), 'title, url, meta as seen');
+    const manifest = buildManifest({ url: info?.url ?? params.url, title: info?.title, files, extra: { requested_url: params.url, final_url: info?.url ?? null, user_agent: params.user_agent ?? null } });
+    await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 1));
+    await writeFile(join(dir, 'README.md'), evidenceIndex(manifest));
+    if (!params.keep_tab && tab_id != null) await client.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+    return `evidence ${dir}: ${files.length} file(s) + manifest.json + README.md\n${manifest.files.map((f) => `${f.sha256.slice(0, 12)}…\t${f.bytes}\t${f.name}`).join('\n')}\nredacted: cookies, auth headers, tokens, JWTs, password/hidden values`;
+  }
   // "esporta il flusso come test Playwright": nessun browser coinvolto
   if (command === 'export') {
     if (!params.file) throw new Error('export requires --file flow.jsonl (and --out flow.spec.ts)');
@@ -428,6 +461,7 @@ Examples:
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
   chrome-bridge audit --kinds a11y,seo,links --out audit.md
   chrome-bridge export --file login.jsonl --out tests/login.spec.ts
+  chrome-bridge evidence --url https://copycat.example --out fascicolo/   # screenshot, DOM, HAR, headers, hashes; redacted
   chrome-bridge watch --wait deploy --timeout 3600 && notify-send 'deploy done'   # after watch action=add name=deploy
   chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);

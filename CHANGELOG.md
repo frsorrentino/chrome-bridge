@@ -79,6 +79,26 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`chrome-bridge evidence --url … --out DIR`** — «fai un fascicolo su questo
+  URL», «prova per l'avvocato». Screenshot intero, DOM, testo, HAR del
+  caricamento, header di risposta, `page-info.json`, `manifest.json` con
+  SHA-256 per file e `README.md` indice, catturati nel Chrome dell'utente
+  (loggato, IP suo, niente cloaking anti-bot). **Redazione obbligatoria prima
+  dell'hash**: cookie, header di autorizzazione, token nelle query, JWT,
+  bearer, `value` dei campi password/hidden. Il manifest dice che l'orario è
+  quello della macchina, non una marca certificata.
+- **`session_record observe`** — «guarda come faccio». L'utente esegue la
+  procedura nella propria scheda (badge visibile); clic, campi compilati,
+  Invio e navigazioni finiscono nello stesso jsonl di `replay` più un `.md`
+  con i passi numerati. **Mai il valore dei campi sensibili** (password,
+  carte, IBAN, token, OTP): segnaposto `{{campo}}` e passo `[HUMAN]`; gli
+  altri valori solo con `values:true`. Solo la scheda scelta, mai il resto
+  del browser.
+- **`read_form`** — «controlla il modulo prima che invio». Ogni controllo con
+  etichetta, valore com'è, checked/selezionato, obbligatorio vuoto, validità
+  del browser; password e carte `[redacted]`. Su richiesta, mai continuo; la
+  risposta deve dire cosa non torna e cosa non ha potuto controllare, mai un
+  «tutto bene» secco.
 - **Dev server locale**: `get_page_info` riporta `dev.server` (vite,
   webpack-dev-server, next, nuxt) e `dev.overlay` col messaggio del
   compilatore quando un overlay di errore è aperto — prima una pagina in

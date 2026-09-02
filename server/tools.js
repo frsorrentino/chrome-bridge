@@ -270,6 +270,7 @@ export const TOOL_ANNOTATIONS = {
   wait_for: ro(),
   watch_dom: ro(),
   audit: ro(),
+  read_form: ro(),
   watch: rw({ idempotent: true }),
   handoff: rw({ idempotent: true }),
   track_events: ro(),
@@ -333,6 +334,22 @@ export const TOOL_ANNOTATIONS = {
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
  * @param {string} [caps='all'] - 'all', 'core', o lista di gruppi "audits,visual"
  */
+/** Procedura leggibile da un'osservazione: un passo per riga, i campi sensibili marcati come passo umano. */
+function observedProcedure(name, d) {
+  const lines = [`# ${name}`, '', `Observed on ${new Date(d.started_at ?? Date.now()).toISOString()}${d.final_url ? `, ended on ${d.final_url}` : ''}.`, 'Replay: `chrome-bridge replay --file <name>.jsonl --vars \'{"field":"value"}\'` — placeholders {{field}} are filled from --vars; sensitive ones are for the human.', ''];
+  let n = 0;
+  for (const st of d.steps ?? []) {
+    n += 1;
+    const h = st.human ?? {};
+    if (st.command === 'navigate') lines.push(`${n}. Open ${st.params.url}${h.label ? ` («${h.label}»)` : ''}`);
+    else if (st.command === 'click') lines.push(`${n}. Click «${h.label || st.params.selector}» (\`${st.params.selector}\`)`);
+    else if (st.command === 'type_text') lines.push(h.sensitive ? `${n}. [HUMAN] Enter ${h.label || 'the value'} in \`${st.params.selector}\` — not recorded` : `${n}. Fill «${h.label || st.params.selector}» (\`${st.params.selector}\`) with ${st.params.text}`);
+    else if (st.command === 'press_key') lines.push(`${n}. Press ${st.params.key} in «${h.label || st.params.selector}»`);
+    else lines.push(`${n}. ${st.command} ${JSON.stringify(st.params)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
 export function registerTools(server, wsManager, caps = 'all') {
   const startedAt = Date.now();
   const activeCaps = caps === 'all'
@@ -1665,6 +1682,23 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
+  // --- read_form ---
+  server.tool(
+    'read_form',
+    'Read a form as the user filled it — label, type, current value, checked/selected, required-but-empty, browser validity — to check it before an irreversible '
+      + 'Submit against the project\'s documents or a checklist. Password and card values come back [redacted]. Read-only; on request, not continuous.',
+    {
+      selector: z.string().optional().describe('The form or container; omitted = every visible control on the page'),
+      tab_id: tabId,
+    },
+    async ({ selector, tab_id }) => {
+      const d = await send(MessageType.READ_FORM, { selector, tab_id });
+      if (d?.error) return { content: [{ type: 'text', text: d.error }] };
+      const lines = (d.controls ?? []).map((c) => [c.label || c.name || c.selector, c.type, typeof c.value === 'boolean' ? (c.value ? 'checked' : 'unchecked') : Array.isArray(c.value) ? c.value.join('|') : (c.value === '' ? '(empty)' : String(c.value).slice(0, 120)), c.selector, c.empty_required ? 'REQUIRED EMPTY' : !c.valid ? `INVALID${c.validation ? `: ${c.validation}` : ''}` : c.required ? 'required' : '', c.disabled ? 'disabled' : ''].filter((x) => x !== '').join('\t'));
+      return { content: [{ type: 'text', text: `form controls=${d.count ?? lines.length} empty_required=${d.empty_required ?? 0} invalid=${d.invalid ?? 0} url=${d.url ?? ''}\n${lines.join('\n')}\nreview: compare each value with the source of truth (documents, previous records) and list what does not match and what you could not check — never a bare "all good"` }] };
+    }
+  );
+
   // --- audit ---
   server.tool(
     'audit',
@@ -2357,13 +2391,25 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- session_record ---
   server.tool(
     'session_record',
-    'Record the commands of this session as a replayable jsonl (chrome-bridge replay --file <path>), or export a recording as a Playwright test that runs in CI without the bridge. tab_id is stripped: replays target the tab they navigate.',
+    'Record the commands of this session as a replayable jsonl (chrome-bridge replay --file <path>); observe what the user does in a tab ("watch how I do it") into the same format plus a readable procedure, never recording sensitive values; export a recording as a Playwright test for CI. Replays target the tab they navigate.',
     {
-      action: z.enum(['start', 'stop', 'status', 'list', 'export']).describe('start records, stop writes the file, export turns a recording into a Playwright test'),
-      name: z.string().optional().describe('Required for start and export (recording name, or a .jsonl path)'),
+      action: z.enum(['start', 'stop', 'status', 'list', 'export', 'observe']).describe('start records this session, observe records what the USER does in the tab, stop writes the file, export makes a Playwright test'),
+      name: z.string().optional().describe('Required for start, observe and export (recording name, or a .jsonl path)'),
       save_to: saveToField('the exported .spec.ts (default: next to the recording)'),
+      values: z.boolean().optional().default(false).describe('observe: record the values typed in non-sensitive fields instead of {{field}} placeholders'),
+      tab_id: tabId,
     },
-    async ({ action, name, save_to }) => {
+    async ({ action, name, save_to, values, tab_id }) => {
+      // "Guarda come faccio": la procedura la esegue l'umano nel suo browser,
+      // noi la trascriviamo — mai i valori dei campi sensibili — nello stesso
+      // jsonl che replay esegue, più un .md leggibile con i passi umani marcati.
+      if (action === 'observe') {
+        if (!name || !/^[\w-]+$/.test(name)) throw new Error('observe needs name matching [\\w-]+');
+        if (recording) throw new Error(`Already recording "${recording.name}": stop it first`);
+        const d = await send(MessageType.OBSERVE, { action: 'start', name, values, tab_id });
+        recording = { name, file: join(RECORDINGS_DIR, `${name}.jsonl`), observe: true };
+        return { content: [{ type: 'text', text: `observing "${name}" on tab ${d.tabId} (${d.url}) — a badge marks the tab; the user performs the procedure, then session_record stop. Sensitive fields are never recorded.` }] };
+      }
       // Il flusso registrato nel browser reale diventa un test che gira in CI
       // senza bridge: i passi umani restano come page.pause(), lo stato loggato
       // non viene esportato e la testata lo dice.
@@ -2396,6 +2442,17 @@ export function registerTools(server, wsManager, caps = 'all') {
       // stop
       const stopped = recording;
       recording = null;
+      if (stopped?.observe) {
+        const d = await send(MessageType.OBSERVE, { action: 'stop' });
+        const steps = (d.steps ?? []).map(({ ts, human, ...step }) => step);
+        await mkdir(RECORDINGS_DIR, { recursive: true });
+        await writeFile(stopped.file, steps.map((st) => JSON.stringify(st)).join('\n') + (steps.length ? '\n' : ''));
+        const md = observedProcedure(stopped.name, d);
+        const mdFile = stopped.file.replace(/\.jsonl$/, '.md');
+        await writeFile(mdFile, md);
+        const humanSteps = (d.steps ?? []).filter((st) => st.human?.sensitive).length;
+        return { content: [{ type: 'text', text: `observed ${steps.length} step(s) on ${d.final_url ?? 'the tab'}\nreplayable: ${stopped.file}\nprocedure: ${mdFile}${humanSteps ? `\n${humanSteps} sensitive field(s) recorded as placeholders — the human fills them at replay` : ''}\n\n${md.split('\n').slice(0, 25).join('\n')}` }] };
+      }
       await recordChain; // il file deve essere completo quando il tool ritorna
       return { content: [{ type: 'text', text: jsonText(stopped ? { stopped: stopped.name, file: stopped.file } : { stopped: null }) }] };
     }
