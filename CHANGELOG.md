@@ -235,6 +235,10 @@ oltre quella normale dell'aggiornamento.
   restava appeso fino al timeout di trasporto. Trovato provando dal vivo il
   ramo con clic umano. La scadenza ora segue il comando (`relayExpiry`:
   timeout del tipo, o quello chiesto, più margine). Test unitario.
+- **`handoff` provato dal vivo con clic umano**: ramo Done (`{"done":true,
+  "action":"done"}`) e picker (`#newsletter`, box 13×13) via relay. Il picker
+  descriveva una checkbox col suo `value` ("on"): ora usa l'etichetta, come
+  già `observe`.
 
 ## 1.15.1 — 2026-07-31
 

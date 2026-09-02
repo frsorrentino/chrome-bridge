@@ -2430,7 +2430,11 @@ function handoffBanner(id, message, pick) {
       if (!el || el === host || host.contains(el)) return;
       e.preventDefault(); e.stopPropagation();
       const r = el.getBoundingClientRect();
-      const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      // Checkbox e radio: il value ("on") non dice niente, l'etichetta sì
+      const labelFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      const isToggle = el.tagName === 'INPUT' && /^(checkbox|radio)$/.test(el.type);
+      const label = (labelFor?.textContent || el.closest('label')?.textContent || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+      const text = (isToggle ? label || el.name : (el.innerText || el.value || el.getAttribute('aria-label') || label || '')).trim().replace(/\s+/g, ' ').slice(0, 80);
       finish({ done: true, action: 'picked', picked: { selector: selectorOf(el), tag: el.tagName.toLowerCase(), text, rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } } });
     };
     document.addEventListener('mousemove', onMove, true);
