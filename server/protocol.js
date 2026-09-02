@@ -69,6 +69,9 @@ export const MessageType = Object.freeze({
   WAIT_FOR_FUNCTION:     'wait_for_function',
   SCROLL_UNTIL:          'scroll_until',
   DISMISS_OVERLAYS:      'dismiss_overlays',
+  KEYBOARD_WALK:         'keyboard_walk',
+  LIST_ASSETS:           'list_assets',
+  RESOURCE_TIMING:       'resource_timing',
 
   // Risposte (extension → server)
   RESULT: 'result',

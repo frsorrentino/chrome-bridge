@@ -434,6 +434,12 @@ async function executeCommand(msg) {
       return await cmdWaitForText(params);
     case 'http_request':
       return await cmdHttpRequest(params);
+    case 'keyboard_walk':
+      return await cmdKeyboardWalk(params);
+    case 'list_assets':
+      return await cmdListAssets(params);
+    case 'resource_timing':
+      return await cmdResourceTiming(params);
     case 'set_zoom':
       return await cmdSetZoom(params);
     case 'http_auth':
@@ -2060,6 +2066,99 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     scrollHeight, viewportHeight, totalCaptures: shots.length,
     truncated: scrollHeight * dpr > fullH,
   };
+}
+
+// --- keyboard_walk ---
+// Ordine di tabulazione calcolato (tabindex>0 crescente, poi ordine DOM) e
+// focus programmatico elemento per elemento. NON sono veri tasti Tab: un
+// focus trap che ascolta keydown non viene esercitato, e lo si dichiara.
+
+async function cmdKeyboardWalk({ max_steps = 60, start_selector, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (maxSteps, startSel) => {
+      const FOCUSABLE = 'a[href],area[href],button,input,select,textarea,iframe,summary,[tabindex],[contenteditable=""],[contenteditable="true"]';
+      const visible = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
+      const candidates = [...document.querySelectorAll(FOCUSABLE)].filter((el) => !el.disabled && el.tabIndex >= 0 && !el.closest('[inert]') && el.type !== 'hidden' && visible(el));
+      const order = [...candidates.filter((e) => e.tabIndex > 0).sort((a, b) => a.tabIndex - b.tabIndex), ...candidates.filter((e) => e.tabIndex === 0)];
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]');
+      const selectorOf = (el) => {
+        if (el.id) return `#${CSS.escape(el.id)}`;
+        const tag = el.tagName.toLowerCase();
+        const name = el.getAttribute('name');
+        if (name) return `${tag}[name="${name}"]`;
+        const cls = [...el.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
+        const p = el.parentElement;
+        const idx = p ? [...p.children].filter((c) => c.tagName === el.tagName).indexOf(el) + 1 : 1;
+        return `${tag}${cls}:nth-of-type(${idx})`;
+      };
+      let start = 0;
+      if (startSel) { const i = order.indexOf(document.querySelector(startSel)); if (i >= 0) start = i; }
+      const prev = document.activeElement;
+      const steps = []; const issues = {};
+      for (let i = start; i < order.length && steps.length < maxSteps; i++) {
+        const el = order[i];
+        el.focus();
+        const got = document.activeElement === el;
+        const r = el.getBoundingClientRect();
+        const inView = r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+        let fv = false; try { fv = el.matches(':focus-visible'); } catch { /* vecchio Chrome */ }
+        const cs = getComputedStyle(el);
+        const indicator = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || cs.boxShadow !== 'none';
+        let issue = null;
+        if (!got) issue = 'focus refused';
+        else if (!inView) issue = 'focused but off-screen';
+        else if (fv && !indicator) issue = 'no visible focus indicator';
+        else if (dialog && !dialog.contains(el)) issue = 'outside the open dialog (focus not trapped)';
+        if (issue) issues[issue] = (issues[issue] || 0) + 1;
+        const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+        steps.push({ step: steps.length + 1, selector: selectorOf(el), tag: el.tagName.toLowerCase(), text, tabindex: el.tabIndex, focus_visible: fv, issue });
+      }
+      if (prev && prev.focus) prev.focus(); else if (document.activeElement?.blur) document.activeElement.blur();
+      return { total_focusable: order.length, walked: steps.length, dialog_open: !!dialog, positive_tabindex: candidates.filter((e) => e.tabIndex > 0).length, steps, issues };
+    },
+    args: [max_steps, start_selector ?? null],
+  });
+  return results?.[0]?.result ?? { error: 'no result' };
+}
+
+// --- list_assets ---
+
+async function cmdListAssets({ max_per_kind = 8, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (max) => {
+      const abs = (u) => { try { return new URL(u, location.href).href; } catch { return null; } };
+      const take = (sel, attr) => [...document.querySelectorAll(sel)].map((e) => abs(e.getAttribute(attr))).filter((u) => u && /^https?:/.test(u)).filter((u, i, a) => a.indexOf(u) === i).slice(0, max);
+      return { page: location.href, stylesheets: take('link[rel~="stylesheet"][href]', 'href'), scripts: take('script[src]', 'src'), images: take('img[src]', 'src') };
+    },
+    args: [max_per_kind],
+  });
+  return results?.[0]?.result ?? { page: null, stylesheets: [], scripts: [], images: [] };
+}
+
+// --- resource_timing ---
+
+async function cmdResourceTiming({ limit = 500, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (max) => {
+      const nav = performance.getEntriesByType('navigation')[0];
+      const entries = performance.getEntriesByType('resource').slice(0, max).map((e) => ({
+        name: e.name, type: e.initiatorType, start: Math.round(e.startTime), duration: Math.round(e.duration),
+        transfer: e.transferSize || 0, size: e.encodedBodySize || 0, blocking: e.renderBlockingStatus || '',
+      }));
+      return {
+        page: location.href, host: location.hostname, entries,
+        navigation: nav ? { dom_content_loaded: Math.round(nav.domContentLoadedEventEnd), load: Math.round(nav.loadEventEnd), ttfb: Math.round(nav.responseStart) } : null,
+      };
+    },
+    args: [limit],
+  });
+  return results?.[0]?.result ?? { entries: [] };
 }
 
 // --- element_screenshot ---

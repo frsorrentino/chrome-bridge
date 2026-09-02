@@ -73,12 +73,11 @@ isn't installed: reload the page first.
 ### Which plugin slows the page (WordPress, PrestaShop)
 Triggers: "why is it slow", "which plugin slows the page", «quale plugin
 rallenta la pagina?».
-1. `web_vitals()` for the baseline.
-2. `monitor_network({source:'browser', format:'json'})`, group requests by
-   `/wp-content/plugins/<name>/` (or `/modules/<name>/`): count, KB, time.
-   Zero-token variant: `chrome-bridge monitor_network --source browser
-   --format json | jq` with a `group_by` on the plugin path.
-3. Name the top three; suggest disabling one at a time and re-running step 1.
+`slow_plugins()` on the loaded page (reload first if it was opened long
+ago): Resource Timing grouped by WordPress plugin/theme, PrestaShop module,
+the site itself and each third-party host — requests, KB, time, render-blocking
+count, slowest file. Then `web_vitals()` for the numbers; suggest disabling the
+top group and re-running both.
 
 ### Design tokens, fonts and colours against the mockup
 Triggers: "does it use the design's fonts/colours?", "does it match the
@@ -96,6 +95,14 @@ Triggers: "check it on mobile/tablet/desktop", «com'è su telefono?».
 For each preset: `viewport_resize({preset})` → `screenshot({save_to})`. Report
 overflow, overlapping elements, hidden CTAs. Dark mode: `emulate_media({colorScheme:'dark'})`.
 Print stylesheet: `emulate_media({printMode:true})` then `screenshot`.
+
+### Accessibility and keyboard navigation
+Triggers: "run an accessibility audit", "can it be used with the keyboard?",
+"is the tab order right?", "does the modal trap focus?", «si naviga da tastiera?».
+`accessibility_audit()` for the rules; `keyboard_walk({max_steps:60})` for what
+a keyboard user meets: focus refused, off-screen, no visible indicator, focus
+escaping an open modal. It uses computed tab order and programmatic focus, not
+real Tab keys — report a trap as "not exercised", not as "works".
 
 ### Form validation states
 Triggers: "try submitting the form with wrong data".
@@ -156,8 +163,9 @@ expiry is not readable from an extension: use a checker page via `navigate`.
 ### Post-deploy check
 Triggers: "did the deploy go through?", "do I still see the old CSS?".
 `navigate` → `assert` on the version string (footer/meta) → `read_console({level:'error'})`
-→ `http_request({url:<css>})` with and without `?v=<timestamp>` and compare
-`etag`/`last-modified` in the headers: same content means the CDN is fresh.
+→ `cache_check()`: page and main assets requested as is and with a cache-buster,
+ETag/Last-Modified compared, cache status header shown. `stale` on a CSS means
+the CDN still serves the old build: purge it.
 
 ### Hosting panel logs (SiteGround, Plesk, cPanel)
 Triggers: "read the hosting error log", «leggi il log errori dell'hosting».
@@ -168,9 +176,11 @@ errors with time and file path.
 
 ### Finding a setting in an unknown admin panel
 Triggers: "where do I enable X in this theme/panel?", «trova dove si imposta X».
-`get_interactives({scope:'nav, aside, .menu'})` for the menu → `find_text(X)`
-on each candidate page → `scroll({action:'until', selector})` when hidden.
-Stop as soon as found; report the menu path.
+`find_setting({keyword:'webp'})`: follows the panel's own menu links, the
+ones whose label contains the keyword first, until a page contains it, and
+reports the menu path. It navigates the tab and stops at `max_pages`. Not
+found → try a synonym, a wider `menu_selector`, or `find_text` on the page
+the user points at.
 
 ### Export from a back office and analyse it
 Triggers: "download the orders export and tell me…".

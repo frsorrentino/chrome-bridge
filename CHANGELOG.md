@@ -79,6 +79,21 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`keyboard_walk`** — «si naviga da tastiera?». Ordine di tabulazione
+  calcolato e focus programmatico elemento per elemento: chi rifiuta il
+  focus, chi finisce fuori schermo, chi non mostra un indicatore, chi sta
+  fuori da un modale aperto. Non sono veri tasti Tab, e la descrizione lo
+  dice: un trap che ascolta `keydown` non viene esercitato.
+- **`slow_plugins`** — «quale plugin rallenta la pagina?». Resource Timing
+  della pagina raggruppato per plugin/tema WordPress, modulo PrestaShop, sito,
+  host esterno: richieste, KB, tempo, render-blocking, file più lento.
+- **`cache_check`** — «la CDN serve la versione nuova?». Pagina e asset
+  principali chiesti due volte dal browser, con e senza cache-buster; ETag,
+  Last-Modified o dimensione a confronto, stato di cache della CDN in chiaro.
+- **`find_setting`** — «trova dove si imposta X nel pannello». Segue i link
+  del menu del pannello, prima quelli con la parola nell'etichetta, finché una
+  pagina la contiene; riporta il percorso di menu. Naviga davvero e si ferma a
+  `max_pages`.
 - **Cinque tool tolti dallo schema MCP, 63 → 58**: `set_zoom` (diventa il
   parametro `zoom` di `viewport_resize`), `monitor_websocket` (diventa
   `monitor_network source=websocket`), `get_performance` (doppione di

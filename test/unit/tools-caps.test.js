@@ -32,14 +32,14 @@ function textOf(result) {
 
 // --- capability opt-in ---
 
-test('caps=all registra tutti i 60 tool', () => {
-  assert.equal(setup().size, 60);
+test('caps=all registra tutti i 64 tool', () => {
+  assert.equal(setup().size, 64);
 });
 
-test('caps=core registra solo il set core (34 tool)', () => {
+test('caps=core registra solo il set core (35 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
-  assert.equal(handlers.size, 60 - optInCount);
+  assert.equal(handlers.size, 64 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
   assert.ok(!handlers.has('accessibility_audit'));
@@ -64,7 +64,7 @@ test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', 
   const client = new Client({ name: 'c', version: '0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 60);
+  assert.equal(tools.length, 64);
   await client.close();
 });
 
@@ -160,8 +160,8 @@ test('find_text allega interactives vicini al primo match, con ref usabili', asy
     find_text: { count: 1, matches: [{ selector: 'td', context: 'Quantum Widget 1042', visible: true, position: { x: 20, y: 41680 } }] },
     get_interactives: { count: 3, elements: [
       { selector: 'nav > a', tag: 'a', text: 'Home', enabled: true, visible: true, rect: { x: 0, y: 10, width: 50, height: 20 } },
-      { selector: '#row-1042 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 41682, width: 60, height: 24 } },
-      { selector: '#row-1050 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 42000, width: 60, height: 24 } },
+      { selector: '#row-1042 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 41682, width: 64, height: 24 } },
+      { selector: '#row-1050 .details-btn', tag: 'button', text: 'Details', enabled: true, visible: true, rect: { x: 500, y: 42000, width: 64, height: 24 } },
     ] },
     click: (params) => { clicked = params.selector; return { clicked: true }; },
     get_tabs: [],

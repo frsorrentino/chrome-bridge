@@ -17,6 +17,8 @@ import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
 import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { summarizeConsent, consentLines } from './consent.js';
+import { groupResources, resourceLines } from './resources.js';
+import { cacheVerdict, cacheLines } from './cache-check.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
@@ -182,9 +184,9 @@ async function applyWaitAfter(send, wait_after, tab_id) {
  * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
  */
 export const TOOL_CAPS = {
-  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'cookie_audit'],
+  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'cookie_audit', 'keyboard_walk', 'slow_plugins'],
   visual: ['screenshot_diff', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
-  network: ['network_rules', 'http_auth', 'set_geolocation', 'track_events'],
+  network: ['network_rules', 'http_auth', 'set_geolocation', 'track_events', 'cache_check'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
   files: ['save_page', 'manage_downloads', 'extract_table', 'session_record'],
@@ -271,6 +273,10 @@ export const TOOL_ANNOTATIONS = {
   web_vitals: ro(),
   track_events: ro(),
   cookie_audit: rw({ idempotent: true }),
+  keyboard_walk: ro(),
+  slow_plugins: ro(),
+  cache_check: ro(),
+  find_setting: rw({ idempotent: true }),
 
   // --- interazione con la pagina ---
   click: rw({ open: true }),          // un click può navigare
@@ -1494,8 +1500,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   server.tool(
     'track_events',
     'Decode the tracking beacons the page fired (GA4, Meta Pixel, Google Ads, TikTok, LinkedIn, Pinterest, Microsoft Ads, GTM, Hotjar, Clarity) '
-      + 'from the browser network log into one line per event with its key params — "does the pixel fire purchase?" answered without reading the raw log. '
-      + 'Read-only. Params sent in a POST body are flagged, not decoded.',
+      + 'from the browser network log, one line per event with its key params: "does the pixel fire purchase?" without the raw log. '
+      + 'Read-only; POST-body params are flagged, not decoded.',
     {
       clear: z.boolean().optional().default(false).describe('Clear the browser log first — call it right before the action you want to observe'),
       wait_ms: z.number().optional().default(0).describe('Time to wait before reading, for beacons sent after the action'),
@@ -1513,9 +1519,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- cookie_audit ---
   server.tool(
     'cookie_audit',
-    'Cookie and consent-banner audit: clears the cookies of the current page, reloads it, records cookies and third-party requests BEFORE any consent, '
-      + 'then accepts the banner (accept_selector, or the overlay dismisser) and records what changed. The findings name the tracking hosts contacted '
-      + 'before consent. Deletes the cookies of this origin: you will be logged out of the site being audited.',
+    'Cookie and consent-banner audit: clears this site\'s cookies, reloads, records cookies and third-party requests BEFORE consent, '
+      + 'accepts the banner (accept_selector or the overlay dismisser), records again; the findings name the trackers contacted before consent. '
+      + 'Logs you out of the audited site.',
     {
       accept_selector: z.string().optional().describe('Accept button of the banner; omitted = dismiss_overlays; "none" skips the consent step'),
       settle_ms: z.number().optional().default(3000).describe('Wait after load and after consent, for late beacons'),
@@ -1543,6 +1549,122 @@ export function registerTools(server, wsManager, caps = 'all') {
       const requestsAfter = consent === 'none' ? [] : ((await send(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id }))?.requests ?? []);
       const summary = summarizeConsent({ pageUrl, cookiesBefore, requestsBefore, cookiesAfter, requestsAfter, consent });
       return { content: [{ type: 'text', text: consentLines(summary) }] };
+    }
+  );
+
+  // --- keyboard_walk ---
+  server.tool(
+    'keyboard_walk',
+    'Walk the page in tab order and report what a keyboard user meets: focus refused, off-screen, no visible focus indicator, '
+      + 'outside an open modal. Computed order and programmatic focus, not real Tab keys: keydown-based traps are not exercised. Read-only.',
+    {
+      max_steps: z.number().optional().default(60).describe('Stop after this many elements'),
+      start_selector: z.string().optional().describe('Begin the walk at this element instead of the first'),
+      tab_id: tabId,
+    },
+    async ({ max_steps, start_selector, tab_id }) => {
+      const d = await send(MessageType.KEYBOARD_WALK, { max_steps, start_selector, tab_id });
+      const head = `keyboard walk focusable=${d.total_focusable} walked=${d.walked}${d.positive_tabindex ? ` positive_tabindex=${d.positive_tabindex}` : ''}${d.dialog_open ? ' dialog_open' : ''}`;
+      const issues = Object.entries(d.issues ?? {}).map(([k, v]) => `${v}× ${k}`).join(', ');
+      const lines = (d.steps ?? []).map((st) => [st.step, st.selector, `${st.tag}${st.tabindex > 0 ? `[tabindex=${st.tabindex}]` : ''}`, st.text, st.issue ?? ''].filter((x) => x !== '').join('\t'));
+      return { content: [{ type: 'text', text: `${head}${issues ? `\nissues: ${issues}` : '\nissues: none'}\n${lines.join('\n')}` }] };
+    }
+  );
+
+  // --- slow_plugins ---
+  server.tool(
+    'slow_plugins',
+    'Which plugin, theme, module or third party slows the page: Resource Timing grouped by WordPress plugin/theme, PrestaShop module, '
+      + 'site and external host — requests, KB, time, render-blocking, slowest first. Read-only; reload first if the page is old.',
+    {
+      top: z.number().optional().default(15).describe('Groups returned'),
+      tab_id: tabId,
+    },
+    async ({ top, tab_id }) => {
+      const d = await send(MessageType.RESOURCE_TIMING, { tab_id });
+      const grouped = groupResources(d?.entries ?? [], { pageHost: d?.host ?? '', top });
+      return { content: [{ type: 'text', text: resourceLines(grouped, d?.navigation ?? {}) }] };
+    }
+  );
+
+  // --- cache_check ---
+  server.tool(
+    'cache_check',
+    'Is the CDN serving the new version? Page and main assets requested as is and with a cache-buster, ETag/Last-Modified/size compared: '
+      + 'fresh, stale or differs, plus the cache status header. Read-only.',
+    {
+      assets: z.boolean().optional().default(true).describe('Also check stylesheets, scripts and images of the page'),
+      max_assets: z.number().optional().default(8).describe('Per kind'),
+      tab_id: tabId,
+    },
+    async ({ assets, max_assets, tab_id }) => {
+      const list = await send(MessageType.LIST_ASSETS, { max_per_kind: max_assets, tab_id });
+      if (!/^https?:/.test(String(list?.page))) throw new Error(`cache_check needs an http(s) page, current tab is ${list?.page}`);
+      const urls = [list.page, ...(assets ? [...list.stylesheets, ...list.scripts, ...list.images] : [])];
+      const rows = [];
+      for (const url of urls) {
+        try {
+          const a = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' });
+          const bust = `${url}${url.includes('?') ? '&' : '?'}cb=${Date.now()}`;
+          const b = await send(MessageType.HTTP_REQUEST, { url: bust, method: 'GET' });
+          rows.push({ url, ...cacheVerdict(a, b) });
+        } catch (err) {
+          rows.push({ url, verdict: 'error', basis: '', cache_status: null, age: null, error: err.message });
+        }
+      }
+      return { content: [{ type: 'text', text: cacheLines(rows) }] };
+    }
+  );
+
+  // --- find_setting ---
+  server.tool(
+    'find_setting',
+    'Where is a setting in an unknown admin panel: follows the panel\'s menu links (same origin) until a page contains the keyword and '
+      + 'reports the menu path. Navigates the tab, leaves it on the page found, stops at max_pages.',
+    {
+      keyword: z.string().describe('What you are looking for, e.g. "webp", "cron", "maintenance mode"'),
+      max_pages: z.number().optional().default(25).describe('Pages visited at most'),
+      menu_selector: z.string().optional().default('nav, aside, [role="navigation"], #adminmenu, .menu, .sidebar, .navbar, .tabs').describe('Where the menu links are'),
+      tab_id: tabId,
+    },
+    async ({ keyword, max_pages, menu_selector, tab_id }) => {
+      const kw = keyword.toLowerCase();
+      const found = async () => {
+        const r = await send(MessageType.FIND_TEXT, { text: keyword, max_results: 3, tab_id });
+        return r?.matches?.length ? r.matches[0] : null;
+      };
+      const menuLinks = async () => {
+        const r = await send(MessageType.COLLECT_LINKS, { scope: 'same-origin', selector: `:is(${menu_selector}) a[href]`, max_links: 200, tab_id });
+        return (r?.links ?? []).map((l) => ({ url: l.url, text: (l.text ?? '').trim() }));
+      };
+      const info = await send(MessageType.GET_PAGE_INFO, { tab_id });
+      const start = info?.url;
+      const visited = new Set([start]);
+      const hit = await found();
+      if (hit) return { content: [{ type: 'text', text: `found on the current page ${start}\n${JSON.stringify(hit)}` }] };
+      const queue = [];
+      const enqueue = (links, via) => {
+        for (const l of links) {
+          if (!l.url || visited.has(l.url) || queue.some((q) => q.url === l.url)) continue;
+          queue.push({ ...l, via, score: l.text.toLowerCase().includes(kw) ? 0 : 1 });
+        }
+        queue.sort((a, b) => a.score - b.score);
+      };
+      enqueue(await menuLinks(), []);
+      let pages = 0;
+      while (queue.length && pages < max_pages) {
+        const next = queue.shift();
+        visited.add(next.url);
+        pages += 1;
+        try {
+          await send(MessageType.NAVIGATE, { url: next.url, tab_id });
+        } catch { continue; }
+        const m = await found();
+        const path = [...next.via, next.text].filter(Boolean).join(' › ');
+        if (m) return { content: [{ type: 'text', text: `found after ${pages} page(s): ${next.url}\nmenu path: ${path}\n${JSON.stringify(m)}` }] };
+        if (next.via.length < 1) enqueue(await menuLinks(), [...next.via, next.text]);
+      }
+      return { content: [{ type: 'text', text: `not found in ${pages} page(s) reached from the menu (${visited.size - 1} links tried, ${queue.length} left). Try another keyword, a wider menu_selector or a higher max_pages.` }] };
     }
   );
 
