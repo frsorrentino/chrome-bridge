@@ -226,7 +226,10 @@ oltre quella normale dell'aggiornamento.
   test: 199 → 257, verdi. E2E non eseguiti: serve l'estensione ricaricata con
   il nuovo service worker e la porta 8765 libera.
 
-## Unreleased (dopo la 1.16.0)
+## 1.16.1 — 2026-09-02
+
+Due correzioni trovate provando dal vivo il ramo con clic umano di `handoff`.
+Sostituisce la 1.16.0 nella coda di review dello Store.
 
 - **Il relay scartava le risposte dei comandi lunghi**: `pendingRelay` aveva
   un TTL fisso di 150 s, mentre `handoff` può aspettare fino a 10 minuti. Un
