@@ -1,5 +1,5 @@
 title: Chrome Bridge for Claude Code
-description: 56 browser automation tools for Claude Code over a local WebSocket
+description: 59 token-efficient browser automation tools for Claude Code over a local WebSocket — your real, logged-in Chrome, ChromeOS included
 theme: jekyll-theme-primer
 exclude:
   - superpowers/
