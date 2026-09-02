@@ -79,6 +79,20 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`screenshot_diff compare_urls`** — «confronta staging e produzione»,
+  «cosa è cambiato nella preview della PR?». Le due pagine aperte nella stessa
+  tab allo stesso viewport (loggate, se il browser lo è), `mask` per nascondere
+  date e caroselli, e in risposta la percentuale di pixel cambiati, l'immagine
+  del diff e le righe di testo presenti solo in A o solo in B — spesso bastano
+  a decidere senza guardare i pixel.
+- **`screenshot presets`** — «com'è su mobile, tablet e desktop?». Una
+  chiamata, una cattura per preset, finestra ripristinata; con `save_to` una
+  cartella, un file per preset. Erano 2N turni.
+- **`chrome-bridge fill_form --from righe.csv --map '{"#name":"name"}'`** —
+  «compila il CRM da questo foglio». Una riga per volta, `--url` per ricaricare
+  il modulo, `--submit`, `--assert-text` per verificare; il modello scrive la
+  mappa una volta e legge solo gli esiti. Lo scenario che Claude in Chrome
+  vende facendo passare ogni riga dal modello.
 - **`handoff`** — «c'è un CAPTCHA», «fai il login tu» (no: lo fa l'utente),
   «quale bottone intendo? guardalo». Un banner nella pagina (shadow DOM,
   nessun permesso nuovo) con il messaggio e Fatto/Annulla; il tool aspetta il

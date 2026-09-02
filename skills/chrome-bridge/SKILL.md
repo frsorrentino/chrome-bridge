@@ -104,8 +104,9 @@ highlighted diff; zoom into a region with `element_screenshot({region, scale:2})
 
 ### Three viewports
 Triggers: "check it on mobile/tablet/desktop", «com'è su telefono?».
-For each preset: `viewport_resize({preset})` → `screenshot({save_to})`. Report
-overflow, overlapping elements, hidden CTAs. Dark mode: `emulate_media({colorScheme:'dark'})`.
+`screenshot({presets:['mobile','tablet','desktop'], save_to:'./shots'})`: one
+call, one file per viewport, window restored. Report overflow, overlapping
+elements, hidden CTAs. Dark mode: `emulate_media({colorScheme:'dark'})`.
 Print stylesheet: `emulate_media({printMode:true})` then `screenshot`.
 
 ### Accessibility and keyboard navigation
@@ -218,10 +219,15 @@ Triggers: "re-run the login flow and tell me if it passes".
 then, with no model in the loop: `chrome-bridge replay --file <path>` and
 `chrome-bridge assert --selector "#ok" --text "Done"`.
 
-### Visual regression between two runs
-Triggers: "did anything change visually?". `screenshot_diff({action:'baseline', name})`
-before, `screenshot_diff({action:'compare', name})` after → changed-pixel % and
-a highlighted image. Baselines live in the extension's memory until it restarts.
+### Visual regression between two runs, or two URLs
+Triggers: "did anything change visually?", "compare staging with production",
+"what changed in this PR preview?", «confronta staging e produzione».
+Same page over time: `screenshot_diff({action:'baseline', name})` before,
+`screenshot_diff({action:'compare', name})` after. Two URLs (logged-in pages
+too): `screenshot_diff({action:'compare_urls', url_a:'https://prod', url_b:'https://staging', mask:['.date','.carousel']})`
+→ changed-pixel %, the diff image, and the text lines only in A / only in B —
+often enough to decide without looking at pixels. Baselines live in the
+extension's memory until it restarts.
 
 ## CLI lane (zero tokens)
 
@@ -233,6 +239,7 @@ propose them for batches, logs and anything repetitive.
 |---|---|
 | "check every link" | `chrome-bridge check_links --scope same-origin` |
 | "audit the page, report on disk" | `chrome-bridge audit --out audit.md` |
+| "fill the CRM from this spreadsheet" | `chrome-bridge fill_form --from rows.csv --map '{"#name":"name"}' --url https://crm/new --submit '#save' --assert-text Saved` |
 | "grep the console" | `chrome-bridge read_console --level error \| head -20` |
 | "export the network log" | `chrome-bridge monitor_network --source browser --format har > page.har` |
 | "save a screenshot" | `chrome-bridge screenshot --out shot.png` |

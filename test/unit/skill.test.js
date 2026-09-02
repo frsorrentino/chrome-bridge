@@ -26,7 +26,7 @@ function tools() {
 }
 const TOOLS = tools();
 // Comandi solo CLI, citati nella corsia a zero token
-const CLI_ONLY = new Set(['replay', 'track', 'redirects', 'check_links', 'security_headers']);
+const CLI_ONLY = new Set(['replay', 'track', 'redirects', 'check_links', 'security_headers', 'fill_form']);
 
 test('la skill ha frontmatter con name e description', () => {
   assert.match(SKILL, /^---\nname: chrome-bridge\ndescription: .{80,}\n---/);

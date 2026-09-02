@@ -26,6 +26,7 @@ import { toHar } from './har.js';
 import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js';
 import { runAudit, summarizeAudit, auditReport } from './audit.js';
+import { parseCsv, fillFromRows, fillLines } from './csv-fill.js';
 
 const INTERNAL_TYPES = new Set([
   MessageType.RESULT, MessageType.ERROR, MessageType.PING, MessageType.PONG,
@@ -54,7 +55,7 @@ const NUMERIC_KEYS = new Set([
   'max_rows', 'max_items', 'max_scrolls', 'max_segments', 'segment_offset', 'max_selectors',
   'delay', 'offset', 'scan_rows', 'width', 'height', 'x', 'y', 'level_num',
   'status', 'zoom', 'depth', 'count', 'index', 'port', 'threshold', 'scale',
-  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency',
+  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency', 'delay_ms',
 ]);
 const BOOLEAN_KEYS = new Set([
   'clear', 'stop', 'force', 'visible', 'visible_only', 'stitch', 'reset',
@@ -297,6 +298,17 @@ async function run(client, command, params, opts) {
     return JSON.stringify(result);
   }
 
+  // "compila il modulo da questo CSV": una riga per volta, il modello vede solo gli esiti
+  if (command === 'fill_form' && params.from) {
+    if (!params.map) throw new Error('fill_form --from needs --map \'{"#selector":"column"}\'');
+    const map = typeof params.map === 'string' ? JSON.parse(params.map) : params.map;
+    const rows = parseCsv(await readFile(params.from, 'utf8'));
+    if (!rows.length) throw new Error(`No data rows in ${params.from}`);
+    const results = await fillFromRows(client.sendCommand, { rows, map, url: params.url, submit: params.submit, tab_id: params.tab_id, assert_text: params.assert_text, delay_ms: Number(params.delay_ms ?? 0) });
+    if (results.some((r) => r.verdict !== 'ok')) process.exitCode = 1;
+    return opts.format === 'json' ? JSON.stringify(results) : fillLines(results);
+  }
+
   // Comandi con file I/O lato CLI
   if (command === 'upload_file') {
     const buf = await readFile(params.path);
@@ -388,6 +400,7 @@ Examples:
   chrome-bridge track --clear --wait-ms 8000        # tracking beacons fired (GA4, Meta, Ads…)
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
   chrome-bridge audit --kinds a11y,seo,links --out audit.md
+  chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);
 }
 

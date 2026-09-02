@@ -529,14 +529,44 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- screenshot ---
   server.tool(
     'screenshot',
-    'Screenshot of the visible viewport only (PNG), at the current scroll position. Read-only. '
+    'Screenshot of the visible viewport only (PNG), at the current scroll position, or one per viewport preset with presets. Read-only. '
       + 'Activates the tab in the background without stealing window focus, then restores the previous tab. '
       + 'Downscaled to ≤1568px: for fine print, element_screenshot with scale.',
     {
       tab_id: tabId,
       save_to: saveToField('the PNG'),
+      presets: z.array(z.enum(['mobile', 'tablet', 'desktop'])).optional().describe('One capture per preset, window restored; save_to = directory, one file each'),
     },
-    async ({ tab_id, save_to }) => {
+    async ({ tab_id, save_to, presets }) => {
+      // Matrice responsive: viewport_resize + screenshot per preset erano 2N
+      // turni; qui è una chiamata, e la finestra torna com'era.
+      if (presets?.length) {
+        const before = await send(MessageType.VIEWPORT_RESIZE, { read_only: true, tab_id });
+        const content = [];
+        const notes = [];
+        try {
+          for (const preset of presets) {
+            await send(MessageType.VIEWPORT_RESIZE, { preset, tab_id });
+            await new Promise((r) => setTimeout(r, 400));
+            const shot = await send(MessageType.SCREENSHOT, { tab_id });
+            if (!shot?.image) { notes.push(`${preset}: no image`); continue; }
+            if (save_to) {
+              await mkdir(save_to, { recursive: true });
+              const path = join(save_to, `${preset}.png`);
+              await writeFile(path, Buffer.from(shot.image, 'base64'));
+              notes.push(`${preset}: ${path} (viewport ${shot.viewport?.width}×${shot.viewport?.height})`);
+            } else {
+              content.push({ type: 'text', text: `${preset}: viewport ${shot.viewport?.width}×${shot.viewport?.height} CSS px` });
+              content.push({ type: 'image', data: shot.image, mimeType: 'image/png' });
+            }
+          }
+        } finally {
+          const w = before?.window;
+          if (w?.width && w?.height) await send(MessageType.VIEWPORT_RESIZE, { width: w.width, height: w.height, left: w.left, top: w.top, tab_id }).catch(() => {});
+        }
+        if (notes.length) content.unshift({ type: 'text', text: notes.join('\n') });
+        return { content };
+      }
       const data = await send(MessageType.SCREENSHOT, { tab_id });
       const b64 = data?.image ?? data?.data;
       if (save_to && b64) return savedSummary(save_to, Buffer.from(b64, 'base64'), { mimeType: 'image/png' });
@@ -617,11 +647,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- type_text ---
   server.tool(
     'type_text',
-    'Put text into an input, textarea or contenteditable, by CSS selector or by a ref from get_interactives. '
-      + 'Replaces the whole value rather than appending, and assigns through the native setter so React and '
-      + 'Vue controlled inputs register the change, then fires input and change. mode=keys instead emits '
-      + 'keydown/input/keyup per character, which is what autocomplete and masked fields need — slower, so '
-      + 'reach for it only when mode=set leaves the field empty or the dropdown never opens.',
+    'Put text into an input, textarea or contenteditable, by selector or ref. Replaces the whole value through the '
+      + 'native setter (React/Vue controlled inputs register it) and fires input and change. mode=keys emits '
+      + 'keydown/input/keyup per character for autocomplete and masked fields: slower, use it only when mode=set leaves the field empty.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -887,11 +915,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- wait_for ---
   server.tool(
     'wait_for',
-    'Block until a condition holds: element (selector in the DOM), function (JS expression turns truthy; needs '
-      + 'the "Allow user scripts" toggle), navigation (mode=spa for client-side route changes), network_idle. '
-      + 'Polls until timeout — 10s for element and function, 15s for navigation and network_idle — then '
-      + '**returns `found: false` with a reason instead of raising**, so a caller that ignores the result '
-      + 'silently proceeds as if the wait had succeeded. Read-only: waiting changes nothing on the page.',
+    'Block until a condition holds: element, text, function (JS expression; needs the "Allow user scripts" toggle), '
+      + 'navigation (mode=spa for client-side routes), network_idle. Polls until timeout (10s element/function, 15s the rest) then '
+      + '**returns `found: false` with a reason instead of raising**: check it, or a failed wait reads as success. Read-only.',
     {
       condition: z.enum(['element', 'text', 'function', 'navigation', 'network_idle']).describe('element and text need selector or text; function needs expression'),
       selector: z.string().optional().describe('condition=element; with condition=text it narrows the search to that subtree'),
@@ -1021,10 +1047,8 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- viewport_resize ---
   server.tool(
     'viewport_resize',
-    'Resize the Chrome **window** to a preset (mobile 375x812, tablet 768x1024, desktop 1440x900) or to explicit '
-      + 'dimensions. The rendered viewport ends up smaller than what you ask for, by the height of the browser '
-      + 'chrome — action=get reports the real one. width and height each override the '
-      + 'corresponding half of the preset, so preset plus width gives a custom width at the preset height. '
+    'Resize the Chrome **window** to a preset (mobile 375x812, tablet 768x1024, desktop 1440x900) or explicit dimensions; '
+      + 'the viewport is smaller by the browser chrome, action=get reports the real one. width/height override half a preset. '
       + 'A maximized window on ChromeOS ignores the request.',
     {
       action: z.enum(['set', 'get']).optional().default('set').describe('get reports the current viewport without resizing anything'),
@@ -1412,16 +1436,45 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- screenshot_diff ---
   server.tool(
     'screenshot_diff',
-    'Visual regression: save a named baseline (viewport, element, or a PNG from disk such as the design mockup), compare later — returns changed-pixel % and red-highlighted diff image. Baselines are in-memory (lost on service worker restart).',
+    'Visual regression: save a named baseline (viewport, element, or a PNG from disk such as the design mockup), compare later — changed-pixel % and a red-highlighted diff image; or compare_urls: production vs staging in this tab, pixels plus a text diff, logged-in pages included. Baselines are in-memory (lost on service worker restart).',
     {
-      action: z.enum(['baseline', 'compare', 'list', 'clear']).describe('baseline stores, compare measures against it, clear drops baselines'),
+      action: z.enum(['baseline', 'compare', 'compare_urls', 'list', 'clear']).describe('baseline stores, compare measures against it, compare_urls diffs url_a vs url_b in this tab, clear drops baselines'),
       name: z.string().optional().default('default').describe('Baseline id: reuse the same one to compare across runs'),
       selector: z.string().optional().describe('Capture one element (default viewport)'),
       threshold: z.number().optional().default(10).describe('Per-channel tolerance 0-255'),
-      from_file: z.string().optional().describe('action=baseline: PNG on disk (design mockup, another environment) instead of capturing; compare at the same viewport size'),
+      from_file: z.string().optional().describe('action=baseline: take it from this PNG (design mockup, other environment) instead of capturing'),
+      url_a: z.string().optional().describe('compare_urls: reference page, e.g. production'),
+      url_b: z.string().optional().describe('compare_urls: page under test, e.g. staging or a PR preview'),
+      mask: z.array(z.string()).optional().describe('compare_urls: selectors hidden on both pages (dates, carousels, ads)'),
       tab_id: tabId,
     },
-    async ({ action, name, selector, threshold, from_file, tab_id }) => {
+    async ({ action, name, selector, threshold, from_file, url_a, url_b, mask, tab_id }) => {
+      // Due URL, stessa tab, stesso viewport: produzione contro staging, anche
+      // dietro login perché il browser è quello dell'utente. Il diff testuale
+      // spesso basta a decidere senza guardare l'immagine.
+      if (action === 'compare_urls') {
+        if (!url_a || !url_b) throw new Error('compare_urls needs url_a and url_b');
+        const settle = () => send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 600, timeout: 15000, tab_id }).catch(() => {});
+        const hide = async () => { if (mask?.length) await send(MessageType.INJECT_CSS, { css: `${mask.join(', ')} { visibility: hidden !important; }`, tab_id }).catch(() => {}); };
+        const textOf = async () => { const t = await send(MessageType.READ_PAGE, { mode: 'text', tab_id }); return (typeof t === 'string' ? t : JSON.stringify(t)).split('\n').map((l) => l.trim()).filter(Boolean); };
+        const cmpName = `__compare_${Date.now()}`;
+        await send(MessageType.NAVIGATE, { url: url_a, tab_id }); await settle(); await hide();
+        const textA = await textOf();
+        await send(MessageType.SCREENSHOT_DIFF, { action: 'baseline', name: cmpName, selector, tab_id });
+        await send(MessageType.NAVIGATE, { url: url_b, tab_id }); await settle(); await hide();
+        const textB = await textOf();
+        const diff = await send(MessageType.SCREENSHOT_DIFF, { action: 'compare', name: cmpName, selector, threshold, tab_id });
+        await send(MessageType.SCREENSHOT_DIFF, { action: 'clear', name: cmpName, tab_id }).catch(() => {});
+        const setA = new Set(textA); const setB = new Set(textB);
+        const onlyA = textA.filter((l) => !setB.has(l)); const onlyB = textB.filter((l) => !setA.has(l));
+        const { diff_image, ...rest } = diff ?? {};
+        const lines = [`compare_urls a=${url_a} b=${url_b}`, `pixels: ${rest.reason === 'size_mismatch' ? `size mismatch ${rest.baseline?.width}x${rest.baseline?.height} vs ${rest.current?.width}x${rest.current?.height}` : `${rest.diff_percent ?? rest.diffPercent ?? rest.changed_percent ?? JSON.stringify(rest)}% changed`}`,
+          `text: ${onlyA.length} line(s) only in A, ${onlyB.length} only in B`,
+          ...onlyA.slice(0, 15).map((l) => `- ${l.slice(0, 160)}`), ...onlyB.slice(0, 15).map((l) => `+ ${l.slice(0, 160)}`)];
+        const content = [{ type: 'text', text: lines.join('\n') }];
+        if (diff_image) content.push({ type: 'image', data: diff_image, mimeType: 'image/png' });
+        return { content };
+      }
       // Baseline da file: il mockup del designer o lo screenshot di produzione
       // diventano il riferimento; l'estensione riceve i byte, non un percorso.
       const image_b64 = action === 'baseline' && from_file ? (await readFile(from_file)).toString('base64') : undefined;
@@ -1861,11 +1914,9 @@ export function registerTools(server, wsManager, caps = 'all') {
   // --- tile_windows ---
   server.tool(
     'tile_windows',
-    'Tile Chrome windows over one monitor, splitting its usable area into equal parts that leave no gap. '
-      + 'Only Chrome windows: an extension cannot touch other applications. The monitor is chosen by pointing at '
-      + 'a window already on it, since the work area is read from a page there — so at least one target window '
-      + 'needs a scriptable tab (a chrome:// or chrome-untrusted:// tab cannot provide it). Maximized windows are '
-      + 'restored first, because a maximized window accepts bounds and ignores them.',
+    'Tile Chrome windows over one monitor in equal parts with no gap. Only Chrome windows. The monitor is the one of a '
+      + 'window already on it, whose work area is read from a page there: at least one target needs a scriptable tab '
+      + '(not chrome://). Maximized windows are restored first, since maximized ignores bounds.',
     {
       window_ids: z.array(z.number()).optional().describe('Windows to tile; omitted = every normal window on the reference monitor'),
       reference_window_id: z.number().optional().describe('Window whose monitor is used; omitted = the focused one'),

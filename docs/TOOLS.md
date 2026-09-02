@@ -57,7 +57,9 @@ never enter the context unless the agent decides to read them.
 `viewport_resize` (presets, explicit size, zoom), `emulate_media`, `set_geolocation`.
 
 `screenshot_diff` also takes its baseline from a PNG on disk (`from_file`): the
-design mockup or a production screenshot becomes the reference.
+design mockup or a production screenshot becomes the reference; `compare_urls`
+diffs two pages (production vs staging) in pixels and in text. `screenshot`
+takes `presets` for one capture per viewport in a single call.
 Screenshots are downscaled to ≤1568px; to read fine print, `element_screenshot`
 crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
 with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
