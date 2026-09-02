@@ -269,6 +269,7 @@ export const TOOL_ANNOTATIONS = {
   wait_for: ro(),
   watch_dom: ro(),
   audit: ro(),
+  watch: rw({ idempotent: true }),
   handoff: rw({ idempotent: true }),
   track_events: ro(),
   cookie_audit: rw({ idempotent: true }),
@@ -1610,6 +1611,39 @@ export function registerTools(server, wsManager, caps = 'all') {
       }
       if (d.action === 'timeout') lines.push('the user did not click within the timeout: ask before retrying');
       return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+  );
+
+  // --- watch ---
+  server.tool(
+    'watch',
+    'Keep watching a page in the background — "tell me when the pipeline turns green / the Approve button appears / this number changes" — '
+      + 'checked every interval_s by the extension on its own. Events are collected, not pushed: read them with action=poll, or block a script on '
+      + '"chrome-bridge watch --wait <name>" and notify. Survives extension idling, not a browser restart.',
+    {
+      action: z.enum(['add', 'poll', 'list', 'remove']).optional().default('add').describe('poll = events since a timestamp'),
+      name: z.string().optional().describe('Watch id'),
+      selector: z.string().optional().describe('Element that appears (until=match) or disappears (until=gone)'),
+      text: z.string().optional().describe('Text that appears / disappears'),
+      value_of: z.string().optional().describe('Element whose text changing fires (until=change)'),
+      until: z.enum(['match', 'gone', 'change']).optional().describe('Default: change with value_of, else match'),
+      interval_s: z.number().optional().default(60).describe('Between checks, min 30'),
+      expires_min: z.number().optional().default(240).describe('Give up after'),
+      reload: z.boolean().optional().default(false).describe('Reload before each check, for pages that do not update live'),
+      since: z.number().optional().describe('poll: events after this ms timestamp'),
+      tab_id: tabId,
+    },
+    async ({ action, name, selector, text, value_of, until, interval_s, expires_min, reload, since, tab_id }) => {
+      const d = await send(MessageType.WATCH, { action, name, selector, text, value_of, until, interval_s, expires_min, reload, since, tab_id });
+      if (action === 'poll') {
+        const lines = (d.events ?? []).map((e) => `${new Date(e.ts).toISOString()}\t${e.name}\t${e.kind}${e.url ? `\t${e.url}` : ''}${e.value != null ? `\tvalue=${String(e.value).slice(0, 80)}` : ''}${e.previous != null ? `\tprevious=${String(e.previous).slice(0, 80)}` : ''}`);
+        return { content: [{ type: 'text', text: `watch events=${lines.length} now=${d.now}\n${lines.join('\n')}` }] };
+      }
+      if (action === 'list') {
+        const lines = (d.watches ?? []).map((w) => `${w.name}\t${w.until}\t${w.selector ?? w.text ?? w.value_of}\tevery ${w.interval_s}s\tchecks=${w.checks}\ttab ${w.tabId}`);
+        return { content: [{ type: 'text', text: `watches=${lines.length}\n${lines.join('\n')}` }] };
+      }
+      return { content: [{ type: 'text', text: jsonText(d) }] };
     }
   );
 

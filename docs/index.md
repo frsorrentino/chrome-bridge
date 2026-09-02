@@ -1,6 +1,6 @@
 # Chrome Bridge for Claude Code
 
-MCP server + Chrome extension that connect [Claude Code](https://claude.com/claude-code) to your real browser through a local WebSocket bridge. 60 web-development automation tools: navigation, DOM inspection, screenshots, visual regression, accessibility/SEO/security audits, network mocking.
+MCP server + Chrome extension that connect [Claude Code](https://claude.com/claude-code) to your real browser through a local WebSocket bridge. 61 web-development automation tools: navigation, DOM inspection, screenshots, visual regression, accessibility/SEO/security audits, network mocking.
 
 Cross-platform — Windows, macOS, Linux, and ChromeOS (Crostini), with any Chrome 135+. Fully self-hosted: no remote servers, no accounts, no data collection.
 

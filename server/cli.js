@@ -56,12 +56,12 @@ const NUMERIC_KEYS = new Set([
   'max_rows', 'max_items', 'max_scrolls', 'max_segments', 'segment_offset', 'max_selectors',
   'delay', 'offset', 'scan_rows', 'width', 'height', 'x', 'y', 'level_num',
   'status', 'zoom', 'depth', 'count', 'index', 'port', 'threshold', 'scale',
-  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency', 'delay_ms',
+  'latitude', 'longitude', 'accuracy', 'step_px', 'settle_ms', 'repeat', 'wait_ms', 'concurrency', 'delay_ms', 'interval_s', 'expires_min', 'since',
 ]);
 const BOOLEAN_KEYS = new Set([
   'clear', 'stop', 'force', 'visible', 'visible_only', 'stitch', 'reset',
   'attributes', 'childList', 'characterData', 'subtree', 'print_mode',
-  'include_cross_origin', 'headless', 'active', 'submit', 'accept', 'include_rect',
+  'include_cross_origin', 'headless', 'active', 'submit', 'accept', 'include_rect', 'reload', 'once',
 ]);
 
 function coerce(raw, key) {
@@ -280,6 +280,23 @@ async function run(client, command, params, opts) {
     if (results.some((r) => r.verdict !== 'ok')) process.exitCode = 1;
     return opts.format === 'json' ? JSON.stringify(results) : redirectLines(results);
   }
+  // "avvisami quando…": blocca finché il watch non spara, poi esce 0 — dentro un hook, un cron o `&& telegram-send`
+  if (command === 'watch' && (params.wait || params.name && params.wait_for)) {
+    const name = params.wait === true ? params.name : params.wait;
+    if (!name) throw new Error('watch --wait needs the watch name: chrome-bridge watch --wait deploy');
+    const deadline = Date.now() + (Number(params.timeout ?? 3600) * 1000);
+    const every = Math.max(5, Number(params.interval ?? 15)) * 1000;
+    let since = Number(params.since ?? Date.now() - 60000);
+    while (Date.now() < deadline) {
+      const d = await client.sendCommand(MessageType.WATCH, { action: 'poll', name, since });
+      const ev = (d?.events ?? [])[0];
+      if (ev) return `${ev.kind}	${ev.name}	${new Date(ev.ts).toISOString()}${ev.url ? `	${ev.url}` : ''}${ev.value != null ? `	value=${ev.value}` : ''}`;
+      since = d?.now ?? since;
+      await new Promise((r) => setTimeout(r, every));
+    }
+    process.exitCode = 2;
+    return `watch ${name}: no event within ${params.timeout ?? 3600}s`;
+  }
   // "esporta il flusso come test Playwright": nessun browser coinvolto
   if (command === 'export') {
     if (!params.file) throw new Error('export requires --file flow.jsonl (and --out flow.spec.ts)');
@@ -411,6 +428,7 @@ Examples:
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
   chrome-bridge audit --kinds a11y,seo,links --out audit.md
   chrome-bridge export --file login.jsonl --out tests/login.spec.ts
+  chrome-bridge watch --wait deploy --timeout 3600 && notify-send 'deploy done'   # after watch action=add name=deploy
   chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);
 }

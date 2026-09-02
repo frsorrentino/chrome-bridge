@@ -71,6 +71,7 @@ export const MessageType = Object.freeze({
   DISMISS_OVERLAYS:      'dismiss_overlays',
   KEYBOARD_WALK:         'keyboard_walk',
   HANDOFF:               'handoff',
+  WATCH:                 'watch',
   LIST_ASSETS:           'list_assets',
   RESOURCE_TIMING:       'resource_timing',
 

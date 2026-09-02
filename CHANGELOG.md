@@ -79,6 +79,16 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`watch`** — «avvisami quando la pipeline è verde», «quando appare
+  Approva», «quando cambia questo prezzo». L'estensione controlla da sola a
+  ogni `alarm` (min 30 s, sopravvive all'idle del service worker, non al
+  riavvio del browser): selettore che appare o sparisce, testo, valore di un
+  elemento che cambia, con `reload` per le pagine che non si aggiornano da
+  sole e `expires_min`. Gli eventi vengono **raccolti, non spinti**: un server
+  MCP non può svegliare il modello e la descrizione lo dice. Consegna
+  definita: `watch action=poll` nella sessione, oppure
+  `chrome-bridge watch --wait deploy --timeout 3600 && <notifica>` in un hook,
+  un cron o davanti a un invio Telegram.
 - **`session_record export`** — «fammene un test Playwright», «lo voglio in
   CI». Un flusso registrato nel browser reale diventa `<nome>.spec.ts` con
   `goto/fill/click/expect`; i passi umani (`handoff`) restano `page.pause()`,

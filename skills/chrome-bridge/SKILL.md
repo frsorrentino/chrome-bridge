@@ -203,6 +203,17 @@ reports the menu path. It navigates the tab and stops at `max_pages`. Not
 found → try a synonym, a wider `menu_selector`, or `find_text` on the page
 the user points at.
 
+### Watch a page and tell me when
+Triggers: "tell me when the pipeline is green", "warn me when the Approve
+button appears", "when this price changes", «avvisami quando…».
+`watch({name:'deploy', text:'Deployed', interval_s:60, expires_min:240, reload:true})`
+(or `selector`, or `value_of` for a changing number). The extension checks
+on its own; nothing wakes the model. Delivery is explicit: later
+`watch({action:'poll'})` in this session, or a script that blocks on
+`chrome-bridge watch --wait deploy --timeout 3600 && <notify: telegram-send,
+notify-send, a hook>`. Say which one you set up. `watch({action:'list'})`,
+`watch({action:'remove', name})`.
+
 ### Export from a back office and analyse it
 Triggers: "download the orders export and tell me…".
 `click` the export button → `manage_downloads({action:'wait_for_complete'})` → read the file
@@ -255,6 +266,7 @@ propose them for batches, logs and anything repetitive.
 |---|---|
 | "check every link" | `chrome-bridge check_links --scope same-origin` |
 | "audit the page, report on disk" | `chrome-bridge audit --out audit.md` |
+| "block until the watch fires, then notify" | `chrome-bridge watch --wait deploy --timeout 3600 && telegram-send "deploy done"` |
 | "turn the recording into a Playwright test" | `chrome-bridge export --file flow.jsonl --out tests/flow.spec.ts` |
 | "fill the CRM from this spreadsheet" | `chrome-bridge fill_form --from rows.csv --map '{"#name":"name"}' --url https://crm/new --submit '#save' --assert-text Saved` |
 | "grep the console" | `chrome-bridge read_console --level error \| head -20` |

@@ -112,6 +112,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
     // Il solo fatto che l'handler esista tiene il service worker attivo
   }
+  if (alarm.name.startsWith(WATCH_ALARM_PREFIX)) runWatch(alarm.name.slice(WATCH_ALARM_PREFIX.length)).catch(() => {});
 });
 
 // --- Listener per popup ---
@@ -443,6 +444,8 @@ async function executeCommand(msg) {
       return await cmdKeyboardWalk(params);
     case 'handoff':
       return await cmdHandoff(params);
+    case 'watch':
+      return await cmdWatch(params);
     case 'list_assets':
       return await cmdListAssets(params);
     case 'resource_timing':
@@ -2073,6 +2076,112 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     scrollHeight, viewportHeight, totalCaptures: shots.length,
     truncated: scrollHeight * dpr > fullH,
   };
+}
+
+// --- watch ---
+// Osservazione continua di una pagina: la condizione (selettore presente,
+// testo presente, o il testo di un elemento che cambia) viene valutata a
+// ogni alarm — sopravvive all'idle del service worker, non al riavvio del
+// browser — e ogni evento finisce in chrome.storage.session. La consegna a
+// chi ascolta è del server (poll) e della CLI (`watch --wait`): un server
+// MCP non può svegliare il modello, e lo si dice invece di fingere.
+
+const WATCH_ALARM_PREFIX = 'cb-watch:';
+const WATCH_MAX_EVENTS = 200;
+
+async function loadWatches() { return (await chrome.storage.session.get({ watches: {} })).watches; }
+async function saveWatches(w) { await chrome.storage.session.set({ watches: w }); }
+
+async function pushWatchEvent(ev) {
+  const { watchEvents = [] } = await chrome.storage.session.get({ watchEvents: [] });
+  watchEvents.push(ev);
+  await chrome.storage.session.set({ watchEvents: watchEvents.slice(-WATCH_MAX_EVENTS) });
+}
+
+async function evalWatch(w) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: w.tabId },
+    func: (selector, text, valueOf) => {
+      const out = { url: location.href };
+      if (selector) out.present = !!document.querySelector(selector);
+      if (text) out.text_found = (document.body?.innerText || '').toLowerCase().includes(String(text).toLowerCase());
+      if (valueOf) { const el = document.querySelector(valueOf); out.value = el ? (el.innerText || el.value || '').trim().slice(0, 500) : null; }
+      return out;
+    },
+    args: [w.selector ?? null, w.text ?? null, w.value_of ?? null],
+  });
+  return results?.[0]?.result ?? null;
+}
+
+async function runWatch(name) {
+  const watches = await loadWatches();
+  const w = watches[name];
+  if (!w) { await chrome.alarms.clear(WATCH_ALARM_PREFIX + name); return; }
+  const now = Date.now();
+  if (w.expires_at && now > w.expires_at) {
+    await pushWatchEvent({ ts: now, name, kind: 'expired' });
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return;
+  }
+  let tab;
+  try { tab = await chrome.tabs.get(w.tabId); } catch {
+    await pushWatchEvent({ ts: now, name, kind: 'tab_closed' });
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return;
+  }
+  if (w.reload) { try { await chrome.tabs.reload(w.tabId); await new Promise((r) => setTimeout(r, 3000)); } catch { /* pagina non ricaricabile */ } }
+  let cur;
+  try { cur = await evalWatch(w); } catch (err) { cur = { error: err.message, url: tab.url }; }
+  w.checks = (w.checks || 0) + 1;
+  w.last_check = now;
+  const matched = (w.selector != null && cur?.present === true) || (w.text != null && cur?.text_found === true);
+  const gone = (w.selector != null && cur?.present === false) || (w.text != null && cur?.text_found === false);
+  let fire = null;
+  if (w.until === 'match' && matched) fire = 'matched';
+  else if (w.until === 'gone' && gone && w.seen_once) fire = 'gone';
+  else if (w.until === 'change' && w.value_of != null && cur && cur.value !== undefined && w.last_value !== undefined && cur.value !== w.last_value) fire = 'changed';
+  if (matched) w.seen_once = true;
+  const prev = w.last_value;
+  if (cur && cur.value !== undefined) w.last_value = cur.value;
+  if (fire) {
+    await pushWatchEvent({ ts: now, name, kind: fire, url: cur?.url ?? tab.url, value: cur?.value ?? null, previous: prev ?? null });
+    if (w.once !== false) { delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name); return; }
+  }
+  watches[name] = w;
+  await saveWatches(watches);
+}
+
+async function cmdWatch({ action = 'add', name, selector, text, value_of, until, interval_s = 60, expires_min = 240, reload = false, once = true, since = 0, tab_id }) {
+  if (action === 'list') {
+    const watches = await loadWatches();
+    return { watches: Object.values(watches).map(({ last_value, ...w }) => ({ ...w, last_value: last_value == null ? null : String(last_value).slice(0, 80) })) };
+  }
+  if (action === 'poll') {
+    const { watchEvents = [] } = await chrome.storage.session.get({ watchEvents: [] });
+    const events = watchEvents.filter((e) => e.ts > (since || 0) && (!name || e.name === name));
+    return { events, now: Date.now() };
+  }
+  if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
+  if (action === 'remove') {
+    const watches = await loadWatches();
+    const existed = !!watches[name];
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return { removed: existed, name };
+  }
+  // add
+  if (!selector && !text && !value_of) throw new Error('watch needs selector, text or value_of');
+  const tabId = await resolveTabId(tab_id);
+  const mode = until || (value_of ? 'change' : 'match');
+  const w = { name, tabId, selector: selector ?? null, text: text ?? null, value_of: value_of ?? null, until: mode, interval_s: Math.max(30, Number(interval_s) || 60), expires_at: Date.now() + Math.max(1, Number(expires_min) || 240) * 60000, reload: !!reload, once: once !== false, created_at: Date.now(), checks: 0 };
+  let first = null;
+  try { first = await evalWatch(w); } catch (err) { throw new Error(`Cannot evaluate the watch on this page: ${err.message}`); }
+  if (first?.value !== undefined) w.last_value = first.value;
+  const matchedNow = (w.selector && first?.present) || (w.text && first?.text_found);
+  if (matchedNow) w.seen_once = true;
+  const watches = await loadWatches();
+  watches[name] = w; await saveWatches(watches);
+  await chrome.alarms.create(WATCH_ALARM_PREFIX + name, { periodInMinutes: Math.max(0.5, w.interval_s / 60), delayInMinutes: Math.max(0.5, w.interval_s / 60) });
+  return { added: name, tabId, until: mode, interval_s: w.interval_s, expires_at: w.expires_at, initial: first, note: matchedNow && mode === 'match' ? 'condition already true now: until=match will fire at the first check' : undefined };
 }
 
 // --- handoff ---
