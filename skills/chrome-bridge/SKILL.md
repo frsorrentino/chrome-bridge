@@ -76,7 +76,7 @@ rallenta la pagina?».
 `slow_plugins()` on the loaded page (reload first if it was opened long
 ago): Resource Timing grouped by WordPress plugin/theme, PrestaShop module,
 the site itself and each third-party host — requests, KB, time, render-blocking
-count, slowest file. Then `web_vitals()` for the numbers; suggest disabling the
+count, slowest file. Then `audit({kinds:['vitals']})` for the numbers; suggest disabling the
 top group and re-running both.
 
 ### Design tokens, fonts and colours against the mockup
@@ -99,7 +99,7 @@ Print stylesheet: `emulate_media({printMode:true})` then `screenshot`.
 ### Accessibility and keyboard navigation
 Triggers: "run an accessibility audit", "can it be used with the keyboard?",
 "is the tab order right?", "does the modal trap focus?", «si naviga da tastiera?».
-`accessibility_audit()` for the rules; `keyboard_walk({max_steps:60})` for what
+`audit({kinds:['a11y']})` for the rules; `keyboard_walk({max_steps:60})` for what
 a keyboard user meets: focus refused, off-screen, no visible indicator, focus
 escaping an open modal. It uses computed tab order and programmatic focus, not
 real Tab keys — report a trap as "not exercised", not as "works".
@@ -143,9 +143,17 @@ one line per URL (`ok` / `mismatch` / `error`, status, final URL), exit code 1
 if anything is off, cookies of the logged-in session included. Read back only
 the non-ok lines. A single URL: `http_request({url})` → status and final URL.
 
+### Page audit before a release
+Triggers: "audit this page", "check it before we go live", "prepare the site
+report for the client", «fai un audit», «prepara il report del sito».
+`audit({save_to:'./audit-<page>.md'})` runs accessibility, SEO, security
+headers, broken links and Core Web Vitals in one call (add `'css'` to `kinds`
+for unused selectors: slow, approximate). Chat gets one line per kind; the
+file has every finding, ready for the PR or the client.
+
 ### SEO, links, structured data
 Triggers: "any broken links?", "is the structured data valid?".
-`check_links({scope:'same-origin'})`, `seo_audit()`,
+`audit({kinds:['links','seo'], save_to:'./audit.md'})`,
 `extract({item_selector:'script[type="application/ld+json"]', fields:{json:'text'}})` then validate on
 validator.schema.org via `navigate` + `fill_form`.
 
@@ -157,7 +165,7 @@ the scores and the opportunities list. The page is Google's, the browser is the
 user's: no quota.
 
 ### Security headers and HTTPS
-Triggers: "are the security headers fine?". `security_headers()`; certificate
+Triggers: "are the security headers fine?". `audit({kinds:['security']})`; certificate
 expiry is not readable from an extension: use a checker page via `navigate`.
 
 ### Post-deploy check
@@ -212,6 +220,7 @@ propose them for batches, logs and anything repetitive.
 | Say | Run |
 |---|---|
 | "check every link" | `chrome-bridge check_links --scope same-origin` |
+| "audit the page, report on disk" | `chrome-bridge audit --out audit.md` |
 | "grep the console" | `chrome-bridge read_console --level error \| head -20` |
 | "export the network log" | `chrome-bridge monitor_network --source browser --format har > page.har` |
 | "save a screenshot" | `chrome-bridge screenshot --out shot.png` |

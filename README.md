@@ -6,7 +6,7 @@
 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome"
 extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
-64 web-development tools (navigation, DOM inspection, visual regression, audits,
+59 web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for CI.
 Self-hosted, local-only.
 
@@ -27,7 +27,7 @@ cd chrome-bridge && ./install.sh
 
 Then ask for something like *"open localhost:3000, run an accessibility audit
 and find the Sign Up button"*: Claude Code calls `navigate`,
-`accessibility_audit` and `find_text`. Because `navigate` already returns
+`audit` and `find_text`. Because `navigate` already returns
 element refs, `click(ref="n1")` follows with no discovery turn in between.
 
 > **On ChromeOS/Crostini** install from the [Chrome Web
@@ -45,11 +45,11 @@ Chrome Bridge → Details (on Chrome 135-137, enable Developer Mode instead).
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **64** (35 core) | ~20 | ~50 | 23 core (71 total) |
+| **Tools** | **59** (35 core) | ~20 | ~50 | 23 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
-| **Audits (a11y/SEO/sec)** | **Yes** (full suite) | No | Partial | No |
+| **Audits (a11y/SEO/sec)** | **Yes** (one call, report on disk) | No | Partial | No |
 | **Headless / CI** | **Yes** | No | Yes | Yes |
 | **GIF / video** | No | **Yes** | Partial | No |
 | **Breakpoints / heap** | No | No | **Yes** | No |
@@ -101,10 +101,10 @@ user-script toggle isn't available.
 
 ## Tools
 
-64 in total, in seven groups. Only `core` (35 tools) loads by default; the rest
+59 in total, in seven groups. Only `core` (35 tools) loads by default; the rest
 are opt-in via `--caps`.
 
-![64 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
+![59 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
@@ -113,7 +113,7 @@ are opt-in via `--caps`.
 | DOM & Inspection | 10 | `read_page`, `extract`, `query_dom`, `watch_dom` |
 | Debugging & Network | 9 | `execute_js`, console, network log, mocking, `track_events`, `cache_check` |
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
-| Audits | 9 | a11y, SEO, security headers, links, `cookie_audit`, `keyboard_walk`, `slow_plugins` |
+| Audits | 4 | `audit` (a11y, SEO, security headers, links, vitals, css in one call), `cookie_audit`, `keyboard_walk`, `slow_plugins` |
 | State, Storage & Files | 9 | storage, fixtures, MHTML, recording, `assert` |
 
 Every tool, with the notes that matter: [docs/TOOLS.md](docs/TOOLS.md).
@@ -171,7 +171,7 @@ paste into a chat.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 64 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 59 tools, by group
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [bench/RESULTS.md](bench/RESULTS.md) — raw runs and inclusion rule
 - [CHANGELOG.md](CHANGELOG.md)

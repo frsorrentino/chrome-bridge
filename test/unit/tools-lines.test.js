@@ -91,11 +91,9 @@ test('get_interactives: format=json resta disponibile', async () => {
   assert.equal(out.count, 2);
 });
 
-test('check_links: default formato lines', async () => {
+test('audit kinds=links: i link rotti in una riga', async () => {
   // Scheme non supportato: checkLinksBatch marca broken senza fare rete
-  const handlers = setup({ collect_links: { links: [{ url: 'ftp://a.test/x', text: 'file' }], totalAnchors: 5 } });
-  const text = textOf(await handlers.get('check_links')({}));
-  const lines = text.split('\n');
-  assert.match(lines[0], /total=1 checked=1 broken=1/);
-  assert.equal(lines[1], '0\tftp://a.test/x\tUnsupported scheme');
+  const handlers = setup({ collect_links: { links: [{ url: 'ftp://a.test/x', text: 'file' }], totalAnchors: 5 }, get_page_info: { url: 'https://a.test/' } });
+  const text = textOf(await handlers.get('audit')({ kinds: ['links'], max_links: 50 }));
+  assert.match(text, /links: 1 broken of 1 checked \(1 collected\) — Unsupported scheme ftp:\/\/a\.test\/x/);
 });

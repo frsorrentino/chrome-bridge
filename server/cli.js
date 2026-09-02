@@ -25,6 +25,7 @@ import { evaluateSecurityHeaders } from './security-headers.js';
 import { toHar } from './har.js';
 import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js';
+import { runAudit, summarizeAudit, auditReport } from './audit.js';
 
 const INTERNAL_TYPES = new Set([
   MessageType.RESULT, MessageType.ERROR, MessageType.PING, MessageType.PONG,
@@ -32,7 +33,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects']);
+const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -277,6 +278,17 @@ async function run(client, command, params, opts) {
     if (results.some((r) => r.verdict !== 'ok')) process.exitCode = 1;
     return opts.format === 'json' ? JSON.stringify(results) : redirectLines(results);
   }
+  // "fai un audit": sei audit in una chiamata, report Markdown con --out
+  if (command === 'audit') {
+    const kinds = params.kinds ? String(params.kinds).split(',').map((k) => k.trim()).filter(Boolean) : undefined;
+    const info = await client.sendCommand(MessageType.GET_PAGE_INFO, { tab_id: params.tab_id });
+    const results = await runAudit(client.sendCommand, { kinds, scope: params.scope, max_links: params.max_links, tab_id: params.tab_id });
+    const summary = summarizeAudit(results);
+    if (opts.format === 'json') return JSON.stringify({ url: info?.url, summary: summary.counts, results });
+    let text = `audit ${info?.url ?? ''}\n${summary.lines.join('\n')}`;
+    if (opts.out) { await writeFile(opts.out, auditReport({ url: info?.url, title: info?.title, results, summary })); text += `\nreport: ${opts.out}`; }
+    return text;
+  }
   if (command === 'security_headers') {
     const data = await client.sendCommand(MessageType.GET_RESPONSE_HEADERS, params);
     if (!data.available) return JSON.stringify(data);
@@ -375,6 +387,7 @@ Examples:
   chrome-bridge replay --file ~/.config/chrome-bridge/recordings/login.jsonl --vars '{"user":"jane"}'
   chrome-bridge track --clear --wait-ms 8000        # tracking beacons fired (GA4, Meta, Ads…)
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
+  chrome-bridge audit --kinds a11y,seo,links --out audit.md
 `);
 }
 

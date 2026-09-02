@@ -20,7 +20,7 @@ const ALL = measure('all').totals.n_tools;
 const CORE = measure('core').totals.n_tools;
 
 test('il conteggio misurato è quello dichiarato nei metadati', () => {
-  assert.equal(ALL, 64, 'se il numero di tool cambia, aggiorna i documenti sotto');
+  assert.equal(ALL, 59, 'se il numero di tool cambia, aggiorna i documenti sotto');
   assert.equal(CORE, 35);
 
   const pkg = JSON.parse(read('package.json'));

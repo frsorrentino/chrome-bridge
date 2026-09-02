@@ -33,23 +33,23 @@ function textOf(result) {
 // --- capability opt-in ---
 
 test('caps=all registra tutti i 64 tool', () => {
-  assert.equal(setup().size, 64);
+  assert.equal(setup().size, 59);
 });
 
 test('caps=core registra solo il set core (35 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
-  assert.equal(handlers.size, 64 - optInCount);
+  assert.equal(handlers.size, 59 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
-  assert.ok(!handlers.has('accessibility_audit'));
+  assert.ok(!handlers.has('audit'));
   assert.ok(!handlers.has('screenshot_diff'));
   assert.ok(!handlers.has('session_fixture'));
 });
 
 test('caps con gruppi aggiunge solo quei gruppi al core', () => {
   const handlers = setup({}, 'audits,visual');
-  assert.ok(handlers.has('accessibility_audit'));
+  assert.ok(handlers.has('audit'));
   assert.ok(handlers.has('screenshot_diff'));
   assert.ok(!handlers.has('network_rules'));
   assert.ok(!handlers.has('session_fixture'));
@@ -64,7 +64,7 @@ test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', 
   const client = new Client({ name: 'c', version: '0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 64);
+  assert.equal(tools.length, 59);
   await client.close();
 });
 

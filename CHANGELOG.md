@@ -79,6 +79,15 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`audit`** — «fai un audit», «prepara il report del sito». Accessibilità,
+  SEO, header di sicurezza, link rotti (verificati lato server), Core Web
+  Vitals e CSS inutilizzato in **una** chiamata: una riga per kind in chat,
+  con `save_to` il report Markdown completo su disco per la PR o il cliente.
+  I sei tool separati (`accessibility_audit`, `seo_audit`, `security_headers`,
+  `check_links`, `unused_css`, `web_vitals`) escono dallo schema MCP —
+  nell'unico log d'uso avevano zero chiamate in sei — e restano comandi CLI.
+  Anche `chrome-bridge audit --kinds a11y,seo --out audit.md`. Schema:
+  −3 573 B dai sei, +≈900 B dell'unico.
 - **`keyboard_walk`** — «si naviga da tastiera?». Ordine di tabulazione
   calcolato e focus programmatico elemento per elemento: chi rifiuta il
   focus, chi finisce fuori schermo, chi non mostra un indicatore, chi sta

@@ -19,6 +19,7 @@ import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { summarizeConsent, consentLines } from './consent.js';
 import { groupResources, resourceLines } from './resources.js';
 import { cacheVerdict, cacheLines } from './cache-check.js';
+import { runAudit, summarizeAudit, auditReport, AUDIT_KINDS, DEFAULT_KINDS } from './audit.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
@@ -184,7 +185,7 @@ async function applyWaitAfter(send, wait_after, tab_id) {
  * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
  */
 export const TOOL_CAPS = {
-  audits: ['accessibility_audit', 'seo_audit', 'security_headers', 'check_links', 'unused_css', 'web_vitals', 'cookie_audit', 'keyboard_walk', 'slow_plugins'],
+  audits: ['audit', 'cookie_audit', 'keyboard_walk', 'slow_plugins'],
   visual: ['screenshot_diff', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
   network: ['network_rules', 'http_auth', 'set_geolocation', 'track_events', 'cache_check'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
@@ -245,9 +246,7 @@ const rw = ({ destructive = false, idempotent = false, open = false } = {}) => (
 
 export const TOOL_ANNOTATIONS = {
   // --- osservazione pura ---
-  accessibility_audit: ro(),
   assert: ro(),
-  check_links: ro(true),
   element_screenshot: ro(),
   extract: ro(),
   extract_table: ro(),
@@ -265,12 +264,9 @@ export const TOOL_ANNOTATIONS = {
   query_dom: ro(),
   read_page: ro(),
   screenshot: ro(),
-  security_headers: ro(true),
-  seo_audit: ro(),
-  unused_css: ro(),
   wait_for: ro(),
   watch_dom: ro(),
-  web_vitals: ro(),
+  audit: ro(),
   track_events: ro(),
   cookie_audit: rw({ idempotent: true }),
   keyboard_walk: ro(),
@@ -1126,60 +1122,6 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
-  // --- accessibility_audit ---
-  server.tool(
-    'accessibility_audit',
-    'A11y audit: missing alt, empty links, heading hierarchy, ARIA, contrast (approximate), form labels.',
-    {
-      scope: z.string().optional().describe('Limit scope (CSS selector)'),
-      checks: z.array(z.enum(['images', 'links', 'headings', 'aria', 'contrast', 'forms', 'all'])).optional().default(['all']).describe('Subset to run; fewer checks means a shorter answer'),
-      tab_id: tabId,
-    },
-    async ({ scope, checks, tab_id }) => {
-      const data = await send(MessageType.ACCESSIBILITY_AUDIT, { scope, checks, tab_id });
-      return {
-        content: [{
-          type: 'text',
-          text: jsonText(data),
-        }],
-      };
-    }
-  );
-
-  // --- check_links ---
-  server.tool(
-    'check_links',
-    'Check page links for broken URLs, verified server-side (no CORS limits, real HTTP status).',
-    {
-      scope: z.enum(['same-origin', 'all', 'external']).optional().default('all').describe('same-origin skips third-party links, which are the slow ones'),
-      selector: z.string().optional().default('a[href]').describe('CSS selector; ">>>" pierces shadow DOM. Restricts which links are collected'),
-      timeout: z.number().optional().default(5000).describe('Per-link ms'),
-      max_links: z.number().optional().default(50).describe('Cap on links fetched: each one is a real HTTP request'),
-      format: z.enum(['lines', 'json']).optional().default('lines').describe('lines is compact; json keeps per-link status and timing'),
-      tab_id: tabId,
-    },
-    async ({ scope, selector, timeout, max_links, format, tab_id }) => {
-      const data = await send(MessageType.COLLECT_LINKS, { scope, selector, max_links, tab_id });
-      const links = data.links ?? [];
-      const results = await checkLinksBatch(links, timeout);
-      const broken = results.filter((r) => r.broken).length;
-      if ((format ?? 'lines') === 'json') {
-        return {
-          content: [{
-            type: 'text',
-            text: jsonText({ total: links.length, checked: results.length, broken, totalAnchors: data.totalAnchors, results }),
-          }],
-        };
-      }
-      return {
-        content: [{
-          type: 'text',
-          text: truncateText(linksLines(results, { total: links.length, broken, anchors: data.totalAnchors }), DEFAULT_MAX_OUTPUT),
-        }],
-      };
-    }
-  );
-
   // --- measure_spacing ---
   server.tool(
     'measure_spacing',
@@ -1552,6 +1494,34 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
+  // --- audit ---
+  server.tool(
+    'audit',
+    'One-call page audit: accessibility, SEO, security headers, broken links, Core Web Vitals, unused CSS — pick the kinds. '
+      + 'Returns a summary line per kind; with save_to the full report (Markdown with the raw findings) is written to disk for the PR or the client. '
+      + 'Read-only; links are verified server-side with real requests.',
+    {
+      kinds: z.array(z.enum(AUDIT_KINDS)).optional().default(DEFAULT_KINDS).describe('Default skips css, which is slow and approximate'),
+      save_to: saveToField('the Markdown report'),
+      scope: z.string().optional().describe('a11y only: limit to this subtree'),
+      max_links: z.number().optional().default(50).describe('links only: cap on URLs fetched'),
+      tab_id: tabId,
+    },
+    async ({ kinds, save_to, scope, max_links, tab_id }) => {
+      const info = await send(MessageType.GET_PAGE_INFO, { tab_id });
+      const results = await runAudit(send, { kinds, scope, max_links, tab_id });
+      const summary = summarizeAudit(results);
+      let text = `audit ${info?.url ?? ''}\n${summary.lines.join('\n')}`;
+      if (save_to) {
+        await writeFile(save_to, auditReport({ url: info?.url, title: info?.title, results, summary }));
+        text += `\nreport: ${save_to}`;
+      } else {
+        text += '\n(pass save_to for the full report with every finding)';
+      }
+      return { content: [{ type: 'text', text }] };
+    }
+  );
+
   // --- keyboard_walk ---
   server.tool(
     'keyboard_walk',
@@ -1668,35 +1638,6 @@ export function registerTools(server, wsManager, caps = 'all') {
     }
   );
 
-  // --- web_vitals ---
-  server.tool(
-    'web_vitals',
-    'Core Web Vitals accumulated since the current document loaded: CLS, LCP, FCP, TTFB, long tasks and an INP '
-      + 'approximation. Read-only. Needs the page instrumentation active from before load, so it reports whether it '
-      + 'was hooked instead of silently returning zeros — navigate() installs it. '
-      + 'Covers user-perceived stability and responsiveness after load, not the load timings themselves.',
-    {
-      tab_id: tabId,
-    },
-    async ({ tab_id }) => {
-      const data = await send(MessageType.WEB_VITALS, { tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
-    }
-  );
-
-  // --- seo_audit ---
-  server.tool(
-    'seo_audit',
-    'SEO audit: title/description lengths, canonical, robots, h1 count, Open Graph, Twitter card, JSON-LD validity, hreflang, lang, viewport, favicon',
-    {
-      tab_id: tabId,
-    },
-    async ({ tab_id }) => {
-      const data = await send(MessageType.SEO_AUDIT, { tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
-    }
-  );
-
   // --- extract_table ---
   server.tool(
     'extract_table',
@@ -1718,20 +1659,6 @@ export function registerTools(server, wsManager, caps = 'all') {
       const data = await send(MessageType.EXTRACT_TABLE, { selector, index, scan_rows, tab_id });
       const shaped = shapeTable(data, { where, columns, offset, max_rows });
       return { content: [{ type: 'text', text: jsonText(shaped) }] };
-    }
-  );
-
-  // --- unused_css ---
-  server.tool(
-    'unused_css',
-    'List CSS selectors matching nothing in the current DOM (approximate; cross-origin sheets unreadable).',
-    {
-      max_selectors: z.number().optional().default(200).describe('Cap on unused selectors reported: a large stylesheet has thousands'),
-      tab_id: tabId,
-    },
-    async ({ max_selectors, tab_id }) => {
-      const data = await send(MessageType.UNUSED_CSS, { max_selectors, tab_id });
-      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 
@@ -2073,24 +2000,6 @@ export function registerTools(server, wsManager, caps = 'all') {
       if (action === 'set' && !username) throw new Error('username is required for action=set');
       const data = await send(MessageType.HTTP_AUTH, { action, username, password });
       return { content: [{ type: 'text', text: jsonText(data) }] };
-    }
-  );
-
-  // --- security_headers ---
-  server.tool(
-    'security_headers',
-    'Audit security headers (CSP, HSTS, XCTO, clickjacking, Referrer/Permissions-Policy, version leaks). Captured from real navigations — reload if unavailable.',
-    {
-      tab_id: tabId,
-    },
-    async ({ tab_id }) => {
-      const data = await send(MessageType.GET_RESPONSE_HEADERS, { tab_id });
-      if (!data.available) {
-        return { content: [{ type: 'text', text: jsonText(data) }] };
-      }
-      const result = evaluateSecurityHeaders(data.headers, data.url);
-      result.status = data.status;
-      return { content: [{ type: 'text', text: jsonText(result) }] };
     }
   );
 

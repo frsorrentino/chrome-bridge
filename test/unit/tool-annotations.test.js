@@ -51,10 +51,10 @@ const MUTATING = [
 // Tool che osservano e basta: nessuna scrittura su pagina, tab o disco.
 const READ_ONLY = [
   'read_page', 'get_tabs', 'query_dom', 'screenshot', 'get_page_info',
-  'seo_audit', 'accessibility_audit', 'extract_table', 'find_text',
-  'web_vitals', 'get_interactives', 'get_frames',
-  'get_status', 'get_storage', 'security_headers',
-  'unused_css', 'measure_spacing', 'element_screenshot', 'full_page_screenshot',
+  'audit', 'extract_table', 'find_text',
+  'get_interactives', 'get_frames',
+  'get_status', 'get_storage',
+  'measure_spacing', 'element_screenshot', 'full_page_screenshot',
 ];
 
 test('ogni tool dichiara le annotations MCP', () => {

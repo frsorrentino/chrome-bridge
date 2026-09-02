@@ -1,6 +1,6 @@
 # Tool reference
 
-All 64 tools, by capability group. The group name is the value to pass to
+All 59 tools, by capability group. The group name is the value to pass to
 `--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
@@ -43,7 +43,7 @@ never enter the context unless the agent decides to read them.
 
 `execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
 `network_rules` (block / redirect / stub / headers),
-`http_request` (sent with the user's session cookies), `web_vitals`,
+`http_request` (sent with the user's session cookies),
 `track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log),
 `cache_check` (is the CDN serving the new version: validators with and without a cache-buster).
 
@@ -61,12 +61,13 @@ crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
 with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
 baseline.
 
-## Audits (9) — group `audits`
+## Audits (4) — group `audits`
 
-`accessibility_audit`, `seo_audit`, `security_headers`,
-`check_links` (server-side verification), `unused_css`, `cookie_audit` (what fires
-before consent), `keyboard_walk` (tab order and focus issues), `slow_plugins`
-(Resource Timing by plugin/theme/module/host), `extract_table` (with `where` filtering).
+`audit` (accessibility, SEO, security headers, broken links verified server-side,
+Core Web Vitals, unused CSS — pick the kinds, `save_to` writes the Markdown
+report), `cookie_audit` (what fires before consent), `keyboard_walk` (tab order
+and focus issues), `slow_plugins` (Resource Timing by plugin/theme/module/host).
+The six former single audits stay available as CLI commands.
 
 `extract_table` filters server-side: 236 bytes to find one row among 1500,
 against 50,070 bytes for `read_page` on the same table.
