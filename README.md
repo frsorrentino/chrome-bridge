@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-187%20unit%20%2B%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-257%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **An MCP server that gives Claude Code your real, logged-in Chrome — measured
 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome"
@@ -179,7 +179,9 @@ paste into a chat.
 ## Tests
 
 `npm test` (Chrome-free, ~22s) · `npm run test:e2e` (needs Chrome and a
-connected extension) · `npm run measure` (schema cost).
+connected extension; with a bridge already on 8765:
+`CHROME_BRIDGE_PORT=8799 node test/test-devtools.js --launch`, which opens
+its own Chromium with `extension/`) · `npm run measure` (schema cost).
 
 ## License
 

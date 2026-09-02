@@ -207,6 +207,17 @@ oltre quella normale dell'aggiornamento.
   umano. Trovato e corretto: `VERSION` in `protocol.js` era rimasto a 1.15.0
   (il bump di release non lo tocca), e il clic su una checkbox veniva
   descritto col suo `value` ("on") invece che con l'etichetta.
+- **E2E in launch mode**: `CHROME_BRIDGE_PORT=8799 node test/test-devtools.js
+  --launch` apre da sé un Chromium con `extension/` unpacked su una porta
+  libera — prima con una sessione primary sulla 8765 il test non partiva mai.
+  Sette casi nuovi (`read_form`, `keyboard_walk`, `list_assets` +
+  `resource_timing`, baseline da immagine, `watch`, `observe`, `handoff` a
+  timeout): **32/32**. Il primo giro ha trovato un difetto vero: `screenshot`
+  scala a ≤1568 px e `screenshot_diff` cattura a misura nativa, quindi una
+  baseline da file falliva con `size_mismatch`. Ora una baseline da immagine
+  viene riscalata alla cattura corrente e il risultato lo dichiara
+  (`baseline_scaled`, con `aspect_changed`); una baseline catturata che non
+  combacia resta un errore, perché lì è il viewport a essere cambiato.
 - **Costo dello schema, a fine ciclo**: `npm run measure` 57 362 B all'inizio
   (63 tool, 34 core) → **57 546 B** alla fine (59 tool, 38 core): +184 B,
   ~+46 token, con nove capacità nuove dentro. Pagato togliendo cinque tool a

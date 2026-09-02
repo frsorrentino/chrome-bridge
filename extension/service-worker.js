@@ -3644,8 +3644,9 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
       width, height,
       capturedAt: Date.now(),
       selector: selector || null,
+      from_image: !!image_b64,
     });
-    return { baseline: name, width, height, selector: selector || null };
+    return { baseline: name, width, height, selector: selector || null, from_image: !!image_b64 };
   }
 
   if (action === 'compare') {
@@ -3653,17 +3654,27 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
     if (!base) throw new Error(`No baseline named "${name}" — capture one first with action: baseline (note: baselines are lost if the extension service worker restarts)`);
 
     const { ctx, width, height } = await captureForDiff(tabId, selector ?? base.selector ?? undefined);
+    let baseData = base.bitmapData;
+    let scaled = null;
     if (width !== base.width || height !== base.height) {
-      return {
-        match: false,
-        reason: 'size_mismatch',
-        baseline: { width: base.width, height: base.height },
-        current: { width, height },
-      };
+      // Una baseline catturata che non combacia è un viewport cambiato: errore
+      // onesto. Una baseline da file (mockup, screenshot ridotto a 1568px) ha
+      // quasi sempre un'altra misura: si riscala alla cattura e lo si dice.
+      if (!base.from_image) {
+        return { match: false, reason: 'size_mismatch', baseline: { width: base.width, height: base.height }, current: { width, height } };
+      }
+      const src = new OffscreenCanvas(base.width, base.height);
+      src.getContext('2d').putImageData(base.bitmapData, 0, 0);
+      const dst = new OffscreenCanvas(width, height);
+      const dctx = dst.getContext('2d');
+      dctx.imageSmoothingQuality = 'high';
+      dctx.drawImage(src, 0, 0, base.width, base.height, 0, 0, width, height);
+      baseData = dctx.getImageData(0, 0, width, height);
+      scaled = { from: { width: base.width, height: base.height }, to: { width, height }, aspect_changed: Math.abs(base.width / base.height - width / height) > 0.01 };
     }
 
     const cur = ctx.getImageData(0, 0, width, height);
-    const a = base.bitmapData.data;
+    const a = baseData.data;
     const b = cur.data;
     const diffCanvas = new OffscreenCanvas(width, height);
     const diffCtx = diffCanvas.getContext('2d');
@@ -3689,6 +3700,7 @@ async function cmdScreenshotDiff({ action, name = 'default', selector, threshold
     return {
       match: changed === 0,
       diff_percent: Math.round(diffPercent * 100) / 100,
+      ...(scaled ? { baseline_scaled: scaled } : {}),
       changed_pixels: changed,
       total_pixels: totalPixels,
       ...(changed === 0 ? {} : { diff_image: await canvasToBase64Capped(diffCanvas) }),

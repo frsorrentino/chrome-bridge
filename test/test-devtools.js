@@ -4,15 +4,23 @@
  *
  * Prerequisiti:
  * - Estensione Chrome caricata e connessa
- * - Server MCP NON in esecuzione (questo script avvia il proprio WSManager)
+ * - Server MCP NON in esecuzione sulla stessa porta (questo script avvia il
+ *   proprio WSManager): con un primary attivo usa CHROME_BRIDGE_PORT=8799
  *
  * Uso: node test/test-devtools.js
+ *      CHROME_BRIDGE_PORT=8799 node test/test-devtools.js --launch [--headless]
  */
 
 import { WSManager } from '../server/ws-manager.js';
 import { MessageType } from '../server/protocol.js';
+import { launchBrowser } from '../server/launcher.js';
 
-const PORT = 8765;
+// Con un'altra sessione che tiene la 8765 il test non partiva mai: la porta
+// viene dall'ambiente, e con --launch il browser lo apre lo script stesso
+// (Chromium dedicato con extension/ unpacked), come fa il server.
+const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || '8765', 10);
+const LAUNCH = process.argv.includes('--launch');
+const HEADLESS = process.argv.includes('--headless');
 const TIMEOUT_CONNECT = 30000;
 
 let wsManager;
@@ -493,6 +501,95 @@ async function testPressKey(tabId) {
   }
 }
 
+// --- 1.16.0: comandi nuovi del service worker ---
+// Tutti su example.com: niente form, quindi read_form vuoto e keyboard_walk
+// con un solo link; il test verifica la FORMA della risposta e i casi limite
+// (timeout di handoff, watch che non spara), non l'esito su una pagina vera.
+
+async function testReadForm(tabId) {
+  const name = 'read_form';
+  try {
+    const data = await wsManager.sendCommand(MessageType.READ_FORM, { tab_id: tabId });
+    if (!Array.isArray(data.controls)) throw new Error('Missing controls');
+    if (typeof data.count !== 'number') throw new Error('Missing count');
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testKeyboardWalk(tabId) {
+  const name = 'keyboard_walk';
+  try {
+    const data = await wsManager.sendCommand(MessageType.KEYBOARD_WALK, { max_steps: 5, tab_id: tabId });
+    if (!Array.isArray(data.steps)) throw new Error('Missing steps');
+    if (data.total_focusable < 1) throw new Error('example.com has one link: expected ≥1 focusable');
+    if (!data.steps[0].selector) throw new Error('Step without selector');
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testListAssetsAndTiming(tabId) {
+  const name = 'list_assets + resource_timing';
+  try {
+    const assets = await wsManager.sendCommand(MessageType.LIST_ASSETS, { tab_id: tabId });
+    if (!/^https:\/\/example\.com/.test(assets.page)) throw new Error(`Unexpected page ${assets.page}`);
+    const timing = await wsManager.sendCommand(MessageType.RESOURCE_TIMING, { tab_id: tabId });
+    if (!Array.isArray(timing.entries) || !timing.navigation) throw new Error('Missing entries/navigation');
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testDiffFromFile(tabId) {
+  const name = 'screenshot_diff baseline from image';
+  try {
+    const shot = await wsManager.sendCommand(MessageType.SCREENSHOT, { tab_id: tabId });
+    await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action: 'baseline', name: 'e2e', image_b64: shot.image, tab_id: tabId });
+    const cmp = await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action: 'compare', name: 'e2e', tab_id: tabId });
+    if (cmp.reason === 'size_mismatch') throw new Error(`size mismatch: ${JSON.stringify(cmp)}`);
+    if (typeof cmp.diff_percent !== 'number') throw new Error('Missing diff_percent');
+    await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action: 'clear', name: 'e2e', tab_id: tabId });
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testWatch(tabId) {
+  const name = 'watch add/list/poll/remove';
+  try {
+    const add = await wsManager.sendCommand(MessageType.WATCH, { action: 'add', name: 'e2e', text: 'never-on-this-page', interval_s: 30, expires_min: 2, tab_id: tabId });
+    if (add.added !== 'e2e' || add.initial?.text_found !== false) throw new Error(`Unexpected add: ${JSON.stringify(add)}`);
+    const list = await wsManager.sendCommand(MessageType.WATCH, { action: 'list' });
+    if (!list.watches.some((w) => w.name === 'e2e')) throw new Error('Watch not listed');
+    const poll = await wsManager.sendCommand(MessageType.WATCH, { action: 'poll', name: 'e2e', since: 0 });
+    if (poll.events.length !== 0) throw new Error('Unexpected event before any check');
+    const rm = await wsManager.sendCommand(MessageType.WATCH, { action: 'remove', name: 'e2e' });
+    if (!rm.removed) throw new Error('Not removed');
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testObserve(tabId) {
+  const name = 'observe start/click/stop';
+  try {
+    await wsManager.sendCommand(MessageType.OBSERVE, { action: 'start', name: 'e2e', tab_id: tabId });
+    await wsManager.sendCommand(MessageType.CLICK, { selector: 'a', tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 1500));
+    const stop = await wsManager.sendCommand(MessageType.OBSERVE, { action: 'stop' });
+    if (stop.stopped !== 'e2e') throw new Error('Not stopped');
+    const cmds = stop.steps.map((st) => st.command);
+    if (cmds[0] !== 'navigate') throw new Error(`First step should be navigate, got ${cmds[0]}`);
+    if (!cmds.includes('click')) throw new Error(`Click not observed: ${cmds.join(',')}`);
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testHandoffTimeout(tabId) {
+  const name = 'handoff (timeout)';
+  try {
+    const data = await wsManager.sendCommand(MessageType.HANDOFF, { message: 'e2e', timeout: 1500, tab_id: tabId });
+    if (data.action !== 'timeout' || data.done !== false) throw new Error(`Expected timeout, got ${JSON.stringify(data)}`);
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
 // --- Main ---
 
 async function main() {
@@ -500,6 +597,8 @@ async function main() {
 
   wsManager = new WSManager(PORT);
   await wsManager.start();
+  let browser = null;
+  if (LAUNCH) browser = await launchBrowser({ port: PORT, headless: HEADLESS });
 
   try {
     await waitForConnection();
@@ -544,6 +643,15 @@ async function main() {
     await testHover(testTabId);
     await testPressKey(testTabId);
 
+    // 1.16.0
+    await testReadForm(testTabId);
+    await testKeyboardWalk(testTabId);
+    await testListAssetsAndTiming(testTabId);
+    await testDiffFromFile(testTabId);
+    await testWatch(testTabId);
+    await testObserve(testTabId);
+    await testHandoffTimeout(testTabId);
+
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {
       console.log('\nFailed tests:');
@@ -552,6 +660,7 @@ async function main() {
       }
     }
   } finally {
+    try { if (browser) await browser.stop(); } catch {}
     await wsManager.stop();
   }
 
