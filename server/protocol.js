@@ -70,6 +70,7 @@ export const MessageType = Object.freeze({
   SCROLL_UNTIL:          'scroll_until',
   DISMISS_OVERLAYS:      'dismiss_overlays',
   KEYBOARD_WALK:         'keyboard_walk',
+  HANDOFF:               'handoff',
   LIST_ASSETS:           'list_assets',
   RESOURCE_TIMING:       'resource_timing',
 
@@ -130,6 +131,7 @@ export function getTimeout(type) {
     || type === MessageType.ELEMENT_SCREENSHOT
     || type === MessageType.SCREENSHOT_DIFF) return SCREENSHOT_TIMEOUT_MS;
   if (type === MessageType.FULL_PAGE_SCREENSHOT) return 120000;
+  if (type === MessageType.HANDOFF) return 600000;
   if (type === MessageType.WAIT_FOR_ELEMENT
     || type === MessageType.WAIT_FOR_NAVIGATION
     || type === MessageType.WAIT_FOR_NETWORK_IDLE

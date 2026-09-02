@@ -267,6 +267,7 @@ export const TOOL_ANNOTATIONS = {
   wait_for: ro(),
   watch_dom: ro(),
   audit: ro(),
+  handoff: rw({ idempotent: true }),
   track_events: ro(),
   cookie_audit: rw({ idempotent: true }),
   keyboard_walk: ro(),
@@ -1491,6 +1492,29 @@ export function registerTools(server, wsManager, caps = 'all') {
       const requestsAfter = consent === 'none' ? [] : ((await send(MessageType.MONITOR_NETWORK, { source: 'browser', limit: 0, tab_id }))?.requests ?? []);
       const summary = summarizeConsent({ pageUrl, cookiesBefore, requestsBefore, cookiesAfter, requestsAfter, consent });
       return { content: [{ type: 'text', text: consentLines(summary) }] };
+    }
+  );
+
+  // --- handoff ---
+  server.tool(
+    'handoff',
+    'Hand the browser to the user for something only a person can do — 2FA, CAPTCHA, a login, a choice — and wait: a banner in the page shows '
+      + 'your message with Done/Cancel and the call returns when they click (or at timeout), after redirects too. With pick_element the user '
+      + 'clicks an element and you get its selector: "which button do you mean?" answered by pointing. Never type credentials yourself.',
+    {
+      message: z.string().describe('What the user should do, one line'),
+      pick_element: z.boolean().optional().default(false).describe('Ask the user to click an element; returns its selector, text and box'),
+      timeout: z.number().optional().default(300000).describe('ms to wait for the click, default 5 min'),
+      tab_id: tabId,
+    },
+    async ({ message, pick_element, timeout, tab_id }) => {
+      const d = await send(MessageType.HANDOFF, { message, pick_element, timeout, tab_id });
+      const lines = [`handoff ${d.action}${d.url ? ` url=${d.url}` : ''}`];
+      if (d.picked) {
+        lines.push(`picked ${d.picked.selector}\t${d.picked.tag}\t${d.picked.text}\t@${d.picked.rect.x},${d.picked.rect.y} ${d.picked.rect.width}x${d.picked.rect.height}`);
+      }
+      if (d.action === 'timeout') lines.push('the user did not click within the timeout: ask before retrying');
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
   );
 

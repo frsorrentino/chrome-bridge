@@ -79,6 +79,14 @@ resta agnostico sul modello: sono migliorie che aiutano qualunque client.
 - **`screenshot_diff from_file`** — «confronta la pagina con il mockup». La
   baseline può essere un PNG su disco: il mockup del designer o lo screenshot
   di produzione diventano il riferimento, il confronto è quello di sempre.
+- **`handoff`** — «c'è un CAPTCHA», «fai il login tu» (no: lo fa l'utente),
+  «quale bottone intendo? guardalo». Un banner nella pagina (shadow DOM,
+  nessun permesso nuovo) con il messaggio e Fatto/Annulla; il tool aspetta il
+  clic — anche attraverso i redirect del login, il banner viene reiniettato —
+  o il timeout (default 5 minuti, onorato dal trasporto). Con `pick_element`
+  il prossimo clic sulla pagina sceglie un elemento e torna selettore, testo
+  e box: il picker che chrome-devtools-mcp non può fare senza estensione.
+  Solo un browser con la persona davanti lo può fare.
 - **`audit`** — «fai un audit», «prepara il report del sito». Accessibilità,
   SEO, header di sicurezza, link rotti (verificati lato server), Core Web
   Vitals e CSS inutilizzato in **una** chiamata: una riga per kind in chat,

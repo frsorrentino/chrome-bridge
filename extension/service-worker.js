@@ -116,6 +116,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // --- Listener per popup ---
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'cb_handoff_done') {
+    const h = handoffs.get(sender.tab?.id);
+    if (h && h.id === msg.id) h.resolve({ ...msg.result, url: sender.tab?.url ?? null });
+    return;
+  }
   if (msg.type === 'getConnectionState') {
     sendResponse({ state: connectionState });
     return;
@@ -436,6 +441,8 @@ async function executeCommand(msg) {
       return await cmdHttpRequest(params);
     case 'keyboard_walk':
       return await cmdKeyboardWalk(params);
+    case 'handoff':
+      return await cmdHandoff(params);
     case 'list_assets':
       return await cmdListAssets(params);
     case 'resource_timing':
@@ -2066,6 +2073,116 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
     scrollHeight, viewportHeight, totalCaptures: shots.length,
     truncated: scrollHeight * dpr > fullH,
   };
+}
+
+// --- handoff ---
+// L'umano davanti al browser è la risorsa che un laboratorio headless non ha:
+// 2FA, CAPTCHA, "quale elemento intendi?". Un banner in pagina (shadow DOM,
+// nessun permesso nuovo) con il messaggio e un bottone Fatto; il comando
+// torna quando l'utente preme, o allo scadere del timeout. Se la pagina
+// naviga nel frattempo (login → redirect) il banner viene reiniettato.
+// Con pick_element il prossimo clic sulla pagina sceglie un elemento e ne
+// torna il selettore.
+
+const handoffs = new Map(); // tabId → { id, resolve, timer, onNav }
+
+function handoffBanner(id, message, pick) {
+  const old = document.getElementById('cb-handoff-host');
+  if (old) old.remove();
+  const host = document.createElement('div');
+  host.id = 'cb-handoff-host';
+  host.style.cssText = 'all:initial;position:fixed;top:0;left:0;right:0;z-index:2147483647;';
+  const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = `<style>
+    .bar{font:14px/1.4 system-ui,sans-serif;background:#1a1a1a;color:#fff;padding:10px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+    .bar b{color:#ffb454}.bar span{flex:1}
+    button{font:inherit;padding:6px 14px;border:0;border-radius:6px;cursor:pointer;background:#ffb454;color:#1a1a1a;font-weight:600}
+    button.sec{background:#444;color:#fff}
+  </style><div class="bar"><b>Claude</b><span></span>${pick ? '<button class="pick">Pick element</button>' : ''}<button class="done">Done</button><button class="sec cancel">Cancel</button></div>`;
+  root.querySelector('span').textContent = message;
+  document.documentElement.appendChild(host);
+  const finish = (result) => { host.remove(); cleanupPick(); chrome.runtime.sendMessage({ type: 'cb_handoff_done', id, result }); };
+  root.querySelector('.done').onclick = () => finish({ done: true, action: 'done' });
+  root.querySelector('.cancel').onclick = () => finish({ done: false, action: 'cancel' });
+  let box = null; let onMove = null; let onClick = null;
+  function cleanupPick() {
+    if (box) box.remove(); box = null;
+    if (onMove) document.removeEventListener('mousemove', onMove, true); onMove = null;
+    if (onClick) document.removeEventListener('click', onClick, true); onClick = null;
+  }
+  const selectorOf = (el) => {
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    const tag = el.tagName.toLowerCase();
+    const name = el.getAttribute('name');
+    if (name) return `${tag}[name="${name}"]`;
+    const parts = [];
+    let cur = el;
+    while (cur && cur !== document.body && parts.length < 4) {
+      const t = cur.tagName.toLowerCase();
+      const cls = [...cur.classList].filter((c) => !/^(active|hover|focus|selected|is-|js-)/.test(c)).slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
+      const p = cur.parentElement;
+      const idx = p ? [...p.children].filter((c) => c.tagName === cur.tagName).indexOf(cur) + 1 : 1;
+      parts.unshift(`${t}${cls}${p && [...p.children].filter((c) => c.tagName === cur.tagName).length > 1 ? `:nth-of-type(${idx})` : ''}`);
+      if (cur.id) { parts[0] = `#${CSS.escape(cur.id)}`; break; }
+      cur = p;
+    }
+    return parts.join(' > ');
+  };
+  const pickBtn = root.querySelector('.pick');
+  if (pickBtn) pickBtn.onclick = () => {
+    root.querySelector('span').textContent = `${message} — now click the element`;
+    box = document.createElement('div');
+    box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #ffb454;background:rgba(255,180,84,.15);transition:all .05s';
+    document.documentElement.appendChild(box);
+    onMove = (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (!el || el === host || host.contains(el)) return;
+      const r = el.getBoundingClientRect();
+      Object.assign(box.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    };
+    onClick = (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (!el || el === host || host.contains(el)) return;
+      e.preventDefault(); e.stopPropagation();
+      const r = el.getBoundingClientRect();
+      const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      finish({ done: true, action: 'picked', picked: { selector: selectorOf(el), tag: el.tagName.toLowerCase(), text, rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } } });
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('click', onClick, true);
+  };
+  return true;
+}
+
+async function cmdHandoff({ message, pick_element = false, timeout = 300000, tab_id }) {
+  if (!message) throw new Error('Missing required parameter: message');
+  const tabId = await resolveTabId(tab_id);
+  if (handoffs.has(tabId)) throw new Error('A handoff is already waiting on this tab');
+  const id = `h${Date.now()}`;
+  const inject = () => chrome.scripting.executeScript({ target: { tabId }, func: handoffBanner, args: [id, String(message), !!pick_element] });
+  try { await inject(); } catch (err) { throw new Error(`Cannot show the handoff banner on this page (${err.message}) — chrome:// and store pages are not injectable`); }
+  await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+  return await new Promise((resolve) => {
+    const finish = (result) => {
+      clearTimeout(entry.timer);
+      chrome.webNavigation.onCompleted.removeListener(entry.onNav);
+      handoffs.delete(tabId);
+      resolve(result);
+    };
+    const entry = {
+      id,
+      resolve: finish,
+      timer: setTimeout(async () => {
+        try { await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('cb-handoff-host')?.remove() }); } catch { /* tab chiusa */ }
+        finish({ done: false, action: 'timeout', url: null });
+      }, Math.max(1000, Number(timeout) || 300000)),
+      // Login → redirect: la pagina nuova non ha il banner, lo rimettiamo
+      onNav: (d) => { if (d.tabId === tabId && d.frameId === 0) inject().catch(() => {}); },
+    };
+    chrome.webNavigation.onCompleted.addListener(entry.onNav);
+    chrome.tabs.onRemoved.addListener(function onGone(closed) { if (closed === tabId) { chrome.tabs.onRemoved.removeListener(onGone); finish({ done: false, action: 'tab_closed', url: null }); } });
+    handoffs.set(tabId, entry);
+  });
 }
 
 // --- keyboard_walk ---

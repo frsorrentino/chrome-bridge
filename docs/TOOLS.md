@@ -1,20 +1,22 @@
 # Tool reference
 
-All 59 tools, by capability group. The group name is the value to pass to
+All 60 tools, by capability group. The group name is the value to pass to
 `--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
 `install.sh` registers the server with `all`.
 
 Check what is active in your session with `get_status` → `caps_active` /
 `caps_available`, and the schema cost of that set with `npm run measure`.
 
-## Core & Navigation (10) — group `core`
+## Core & Navigation (11) — group `core`
 
 `get_status`, `get_tabs`, `create_tab`, `navigate`, `tab_action`,
 `move_tab` (between windows), `tile_windows` (split one monitor evenly),
 `window_layout` (save/restore arrangements by name),
 `get_frames`, `screenshot`.
 `find_setting` follows the menu links of an unknown admin panel until a page
-contains the keyword and reports the menu path.
+contains the keyword and reports the menu path. `handoff` shows a banner in the
+page and waits for the user (2FA, CAPTCHA, a choice); with `pick_element` the
+user clicks an element and the tool returns its selector.
 
 `navigate` returns clickable element refs (`n1`, `n2`, …) with the page, so the
 agent can act without a separate discovery call.
