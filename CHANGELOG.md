@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- `chrome-bridge window_layout --action save|restore|list|delete --name X` from the
+  CLI: the tool existed only inline in the MCP server, and the CLI answered
+  «Unknown command». One implementation now (`server/layouts.js`) for both.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

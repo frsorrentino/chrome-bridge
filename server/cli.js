@@ -22,6 +22,7 @@ import { consoleLines, networkLines, interactivesLines, linksLines } from './for
 import { runAssert } from './assertions.js';
 import { checkLinksBatch } from './link-checker.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
+import { windowLayout } from './layouts.js';
 import { toHar } from './har.js';
 import { decodeTrackingRequests, trackingLines } from './trackers.js';
 import { parseRedirectCsv, checkRedirects, redirectLines } from './redirects.js';
@@ -36,7 +37,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence']);
+const VIRTUAL_COMMANDS = new Set(['status', 'window_layout', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -250,6 +251,10 @@ async function run(client, command, params, opts) {
     return JSON.stringify(await runAssert(client.sendCommand, params));
   }
   // Comandi virtuali
+  if (command === 'window_layout') {
+    if (!['save', 'restore', 'list', 'delete'].includes(params.action)) throw new Error('window_layout needs --action save|restore|list|delete (and --name for all but list)');
+    return JSON.stringify(await windowLayout(client.sendCommand, params));
+  }
   if (command === 'status') {
     const tabs = await client.sendCommand(MessageType.GET_TABS);
     return `server=ok extension=connected tabs=${Array.isArray(tabs) ? tabs.length : 0}`;
