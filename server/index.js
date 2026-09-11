@@ -31,6 +31,15 @@ const PORT = process.env.CHROME_BRIDGE_PORT
 
 // Capability: default = solo set core (30 tool). --caps audits,visual o
 // CHROME_BRIDGE_CAPS attivano i gruppi opt-in; "all" registra tutto.
+// Interruttori di sicurezza (README, «Configuration and security»).
+function parseSecurity() {
+  const on = (v) => v != null && v !== '' && v !== '0' && v.toLowerCase() !== 'false';
+  return {
+    noJs: process.argv.includes('--no-js') || on(process.env.CHROME_BRIDGE_NO_JS),
+    writeRoot: argValue('--write-root') ?? process.env.CHROME_BRIDGE_WRITE_ROOT ?? null,
+  };
+}
+
 function parseCaps() {
   const i = process.argv.indexOf('--caps');
   if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
@@ -94,7 +103,7 @@ async function main() {
   }
 
   // 3. Registra i tool MCP (filtrati per capability)
-  session.tools = registerTools(mcpServer, wsManager, parseCaps());
+  session.tools = registerTools(mcpServer, wsManager, parseCaps(), parseSecurity());
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();

@@ -7,7 +7,7 @@
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, extname, join } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import { runAssert } from './assertions.js';
@@ -31,6 +31,14 @@ const FIXTURES_DIR = process.env.CHROME_BRIDGE_FIXTURES_DIR || join(homedir(), '
 
 // Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
 const RECORD_EXCLUDE = new Set([MessageType.GET_TABS]);
+
+// CHROME_BRIDGE_NO_JS: i tool che eseguono codice arbitrario nella pagina.
+// inject_css non c'è: il CSS non esegue niente. wait_for(condition=function)
+// e le URL javascript:/data: sono rifiutate nel handler, non qui.
+const JS_TOOLS = new Set(['execute_js', 'modify_dom']);
+// Sotto CHROME_BRIDGE_WRITE_ROOT lo stato del server resta scrivibile: non è un
+// percorso scelto dal modello.
+const STATE_DIRS = [join(homedir(), '.config', 'chrome-bridge'), SESSIONS_DIR, RECORDINGS_DIR, FIXTURES_DIR];
 
 // `hint` è il parametro REALE del tool chiamante che riduce i dati. Suggerire
 // max_length quando 56 tool su 59 non lo espongono mandava il modello a
@@ -327,6 +335,7 @@ export const TOOL_ANNOTATIONS = {
  * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
  * @param {string} [caps='all'] - 'all', 'core', o lista di gruppi "audits,visual"
+ * @param {{noJs?: boolean, writeRoot?: string|null}} [options] - CHROME_BRIDGE_NO_JS / CHROME_BRIDGE_WRITE_ROOT
  */
 /** Procedura leggibile da un'osservazione: un passo per riga, i campi sensibili marcati come passo umano. */
 function observedProcedure(name, d) {
@@ -344,8 +353,20 @@ function observedProcedure(name, d) {
   return lines.join('\n') + '\n';
 }
 
-export function registerTools(server, wsManager, caps = 'all') {
+export function registerTools(server, wsManager, caps = 'all', options = {}) {
   const startedAt = Date.now();
+  const noJs = Boolean(options.noJs);
+  const WRITE_ROOT = options.writeRoot ? resolve(String(options.writeRoot)) : null;
+  // Rifiuta PRIMA del comando all'estensione: niente screenshot fatto per un
+  // file che non verrà scritto. Il percorso torna com'è, così i chiamanti
+  // possono usarlo inline.
+  const guardWrite = (p) => {
+    if (!WRITE_ROOT || p == null) return p;
+    const abs = resolve(String(p));
+    const inside = (root) => abs === root || abs.startsWith(root + sep);
+    if (inside(WRITE_ROOT) || STATE_DIRS.some((d) => inside(resolve(d)))) return p;
+    throw new Error(`Refusing to write ${abs}: outside CHROME_BRIDGE_WRITE_ROOT (${WRITE_ROOT})`);
+  };
   const activeCaps = caps === 'all'
     ? ['core', ...Object.keys(TOOL_CAPS)]
     : ['core', ...String(caps).split(',').map((s) => s.trim()).filter((s) => s && s !== 'core')];
@@ -361,6 +382,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       : null;
     server = {
       tool(name, desc, schema, handler) {
+        if (noJs && JS_TOOLS.has(name)) return;
         if (enabled) {
           const group = TOOL_TO_CAP.get(name);
           if (group && !enabled.has(group) && !enabled.has('all')) return;
@@ -492,6 +514,8 @@ export function registerTools(server, wsManager, caps = 'all') {
             extension_version: wsManager.extVersion ?? null,
             // Un agente che non trova accessibility_audit non aveva modo di
             // scoprire che esiste ma è in un gruppo disattivato.
+            js_evaluation: !noJs,
+            write_root: WRITE_ROOT,
             caps_active: activeCaps,
             caps_available: ['core', ...Object.keys(TOOL_CAPS)],
             session_tab_id: sessionTabId,
@@ -534,6 +558,9 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: tabId,
     },
     async ({ url, tab_id }) => {
+      if (noJs && /^\s*(javascript|data|vbscript):/i.test(url)) {
+        throw new Error(`Refusing to navigate to ${url.slice(0, 40)}: JavaScript evaluation is disabled (CHROME_BRIDGE_NO_JS)`);
+      }
       const data = await send(MessageType.NAVIGATE, { url, tab_id });
       // Il tab navigato diventa il default di sessione per i comandi successivi
       if (data?.tabId != null) sessionTabId = data.tabId;
@@ -559,6 +586,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       presets: z.array(z.enum(['mobile', 'tablet', 'desktop'])).optional().describe('One capture per preset, window restored; save_to = directory, one file each'),
     },
     async ({ tab_id, save_to, presets }) => {
+      guardWrite(save_to);
       // Matrice responsive: viewport_resize + screenshot per preset erano 2N
       // turni; qui è una chiamata, e la finestra torna com'era.
       if (presets?.length) {
@@ -707,6 +735,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       save_to:    saveToField('the page'),
     },
     async ({ mode, tab_id, frame_id, max_length, save_to }) => {
+      guardWrite(save_to);
       const data = await send(MessageType.READ_PAGE, { mode, tab_id, frame_id });
       const text = typeof data === 'string' ? data : JSON.stringify(data);
       if (save_to) return savedSummary(save_to, Buffer.from(text, 'utf8'), { mode: mode ?? 'text' });
@@ -962,6 +991,7 @@ export function registerTools(server, wsManager, caps = 'all') {
           text, selector, timeout: timeout ?? 10000, interval: interval ?? 200, tab_id, frame_id,
         });
       } else if (condition === 'function') {
+        if (noJs) throw new Error('wait_for condition=function evaluates JavaScript, which is disabled (CHROME_BRIDGE_NO_JS): use condition=element or text');
         data = await send(MessageType.WAIT_FOR_FUNCTION, {
           expression, timeout: timeout ?? 10000, polling_ms: interval ?? 100, tab_id, frame_id,
         });
@@ -1696,6 +1726,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: tabId,
     },
     async ({ kinds, save_to, scope, max_links, tab_id }) => {
+      guardWrite(save_to);
       const info = await send(MessageType.GET_PAGE_INFO, { tab_id });
       const results = await runAudit(send, { kinds, scope, max_links, tab_id });
       const summary = summarizeAudit(results);
@@ -1865,6 +1896,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: tabId,
     },
     async ({ output_path, tab_id }) => {
+      guardWrite(output_path);
       const data = await send(MessageType.SAVE_PAGE, { tab_id });
       await writeFile(output_path, Buffer.from(data.mhtml_b64, 'base64'));
       return { content: [{ type: 'text', text: jsonText({ saved: output_path, size: data.size }) }] };
@@ -1886,6 +1918,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       max_length: z.number().optional().default(DEFAULT_MAX_OUTPUT).describe('Max chars of body returned inline'),
     },
     async ({ url, method, headers, body, save_to, max_length }) => {
+      guardWrite(save_to);
       const data = await send(MessageType.HTTP_REQUEST, { url, method, headers, body, binary: Boolean(save_to) });
 
       if (save_to) {
@@ -2132,6 +2165,7 @@ export function registerTools(server, wsManager, caps = 'all') {
       save_to: saveToField('the records as JSON'),
     },
     async ({ item_selector, fields, max_items, format, tab_id, max_length , save_to }) => {
+      guardWrite(save_to);
       max_length = max_length ?? DEFAULT_MAX_OUTPUT;
       const html = await send(MessageType.READ_PAGE, { mode: 'html', tab_id });
       if (typeof html !== 'string') throw new Error('Could not read page HTML');
@@ -2200,6 +2234,8 @@ export function registerTools(server, wsManager, caps = 'all') {
       tab_id: tabId,
     },
     async ({ action, name, save_to, values, tab_id }) => {
+      guardWrite(save_to);
+      if (name && name.endsWith('.jsonl')) guardWrite(name);
       // "Guarda come faccio": la procedura la esegue l'umano nel suo browser,
       // noi la trascriviamo — mai i valori dei campi sensibili — nello stesso
       // jsonl che replay esegue, più un .md leggibile con i passi umani marcati.

@@ -149,6 +149,8 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_HOST` / `--host` | `127.0.0.1` | `0.0.0.0` **only** where the browser lives outside the container (ChromeOS/Crostini port-forward) — and only with a token |
 | `CHROME_BRIDGE_TOKEN` | unset | Required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind isn't loopback |
 | `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. `install.sh` uses `all` |
+| `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
+| `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
 
 The bridge binds loopback, accepts extension connections only from a
 `chrome-extension://` origin, and — when a token is set — requires it on both

@@ -21,6 +21,15 @@
   on 1 500 rows 108 ms; and `screenshot` twice within a second fails with
   Chrome's `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` quota instead of waiting
   for it (see Known).
+- `CHROME_BRIDGE_NO_JS` (`--no-js`) and `CHROME_BRIDGE_WRITE_ROOT` (`--write-root`):
+  no arbitrary JavaScript in the page (`execute_js` and `modify_dom` leave the
+  schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are
+  refused) and every model-chosen path (`save_to`, `output_path`, exports)
+  confined to one directory, refused before the browser does any work. The
+  server's own state under `~/.config/chrome-bridge` stays writable; the CLI
+  is the user's shell and is not restricted. Both show in `get_status`
+  (`js_evaluation`, `write_root`). For the browser you would not hand a
+  stranger, and to measure what actually breaks without the most used tool.
 
 ### Known
 
