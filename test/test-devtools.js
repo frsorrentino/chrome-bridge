@@ -614,6 +614,37 @@ async function testTypeTextReadback(tabId) {
   } catch (e) { fail(name, e.message); }
 }
 
+async function testHandoffAskViaBanner(tabId) {
+  const name = 'handoff ask (typed reply through the banner)';
+  try {
+    const p = wsManager.sendCommand(MessageType.HANDOFF, { message: 'e2e ask', ask: true, timeout: 8000, tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 600));
+    await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector: '#cb-handoff-host >>> input.ask', text: 'the blue one', tab_id: tabId });
+    // force: dal documento il bottone nello shadow root risulta coperto dal suo host
+    await wsManager.sendCommand(MessageType.CLICK, { selector: '#cb-handoff-host >>> button.done', force: true, tab_id: tabId });
+    const data = await p;
+    if (data.action !== 'done' || data.answer !== 'the blue one') throw new Error(JSON.stringify(data));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testHandoffMultiPick(tabId) {
+  const name = 'handoff pick_max=2 (two elements, then done)';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { for (const id of ['__cb_p1', '__cb_p2']) { const b = document.createElement('button'); b.id = id; b.textContent = id; b.style.cssText = 'position:fixed;left:20px;top:' + (id.endsWith('1') ? 300 : 360) + 'px;z-index:2147483000'; document.body.appendChild(b); } return true; })()", tab_id: tabId });
+    const p = wsManager.sendCommand(MessageType.HANDOFF, { message: 'e2e pick', pick_element: true, pick_max: 2, timeout: 8000, tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 600));
+    await wsManager.sendCommand(MessageType.CLICK, { selector: '#cb-handoff-host >>> button.pick', force: true, tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 200));
+    // Clic con coordinate vere: il picker legge elementFromPoint(clientX, clientY)
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { for (const id of ['__cb_p1', '__cb_p2']) { const el = document.getElementById(id); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: r.x + 5, clientY: r.y + 5 })); } return true; })()", tab_id: tabId });
+    const data = await p;
+    if (data.action !== 'picked' || !Array.isArray(data.picked_all) || data.picked_all.length !== 2) throw new Error(JSON.stringify(data));
+    if (data.picked_all[1].selector !== '#__cb_p2' || data.picked.selector !== '#__cb_p1') throw new Error(JSON.stringify(data.picked_all));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
 // --- Main ---
 
 async function main() {
@@ -679,6 +710,8 @@ async function main() {
     // Unreleased
     await testPageFingerprintClickEffect(testTabId);
     await testTypeTextReadback(testTabId);
+    await testHandoffAskViaBanner(testTabId);
+    await testHandoffMultiPick(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

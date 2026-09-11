@@ -1660,18 +1660,25 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'handoff',
     'Hand the browser to the user for what only a person can do — 2FA, CAPTCHA, login, a choice — and wait: a banner in the page shows your '
       + 'message with Done/Cancel, the call returns on click or timeout, redirects included. pick_element: the user clicks an element and you get '
-      + 'its selector. Never type credentials yourself.',
+      + 'its selector. Never type credentials yourself. ask: the user types a reply in the banner ("which of the three?") and you get it as answer. '
+      + 'pick_max: with pick_element, up to N elements; the user presses Done when finished.',
     {
       message: z.string().describe('What the user should do, one line'),
       pick_element: z.boolean().optional().default(false).describe('Ask the user to click an element; returns its selector, text and box'),
+      ask: z.boolean().optional().default(false).describe('Show a text box in the banner; the reply comes back as answer'),
+      pick_max: z.number().optional().default(1).describe('With pick_element: up to N elements, the user presses Done when finished'),
       timeout: z.number().optional().default(300000).describe('ms to wait for the click, default 5 min'),
       tab_id: tabId,
     },
-    async ({ message, pick_element, timeout, tab_id }) => {
-      const d = await send(MessageType.HANDOFF, { message, pick_element, timeout, tab_id });
+    async ({ message, pick_element, ask, pick_max, timeout, tab_id }) => {
+      const d = await send(MessageType.HANDOFF, { message, pick_element, ask, pick_max, timeout, tab_id });
       const lines = [`handoff ${d.action}${d.url ? ` url=${d.url}` : ''}`];
-      if (d.picked) {
-        lines.push(`picked ${d.picked.selector}\t${d.picked.tag}\t${d.picked.text}\t@${d.picked.rect.x},${d.picked.rect.y} ${d.picked.rect.width}x${d.picked.rect.height}`);
+      if (ask && typeof d.answer === 'string' && d.answer.trim()) lines.push(`answer: ${d.answer.trim()}`);
+      const fmt = (p) => `${p.selector}\t${p.tag}\t${p.text}\t@${p.rect.x},${p.rect.y} ${p.rect.width}x${p.rect.height}`;
+      if (Array.isArray(d.picked_all) && d.picked_all.length) {
+        d.picked_all.forEach((p, i) => lines.push(`picked ${i + 1}/${d.picked_all.length} ${fmt(p)}`));
+      } else if (d.picked) {
+        lines.push(`picked ${fmt(d.picked)}`);
       }
       if (d.action === 'timeout') lines.push('the user did not click within the timeout: ask before retrying');
       return { content: [{ type: 'text', text: lines.join('\n') }] };

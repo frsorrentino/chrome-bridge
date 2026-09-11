@@ -39,6 +39,12 @@
   the url/title delta. New extension command `page_fingerprint`; `click` waits
   150 ms before the second fingerprint when `wait_after` is none, the time a
   framework takes to re-render.
+- `handoff` learns two things a person can do that a model cannot: `ask: true`
+  shows a text box in the banner and returns what the user typed as `answer`
+  ("which of the three?" answered in words, Enter = Done); `pick_max: N` lets
+  the user click up to N elements, outlined as they go, before pressing Done
+  (`picked_all`, numbered in the reply). Banner, Done and Cancel are unchanged
+  for everyone else.
 
 ### Known
 

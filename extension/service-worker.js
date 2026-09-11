@@ -2402,7 +2402,7 @@ async function cmdWatch({ action = 'add', name, selector, text, value_of, until,
 
 const handoffs = new Map(); // tabId → { id, resolve, timer, onNav }
 
-function handoffBanner(id, message, pick) {
+function handoffBanner(id, message, pick, ask, pickMax) {
   const old = document.getElementById('cb-handoff-host');
   if (old) old.remove();
   const host = document.createElement('div');
@@ -2414,11 +2414,27 @@ function handoffBanner(id, message, pick) {
     .bar b{color:#ffb454}.bar span{flex:1}
     button{font:inherit;padding:6px 14px;border:0;border-radius:6px;cursor:pointer;background:#ffb454;color:#1a1a1a;font-weight:600}
     button.sec{background:#444;color:#fff}
-  </style><div class="bar"><b>Claude</b><span></span>${pick ? '<button class="pick">Pick element</button>' : ''}<button class="done">Done</button><button class="sec cancel">Cancel</button></div>`;
+    input.ask{font:inherit;padding:6px 10px;border:0;border-radius:6px;min-width:220px;background:#fff;color:#1a1a1a}
+  </style><div class="bar"><b>Claude</b><span></span>${ask ? '<input class="ask" type="text" placeholder="Your reply">' : ''}${pick ? '<button class="pick">Pick element</button>' : ''}<button class="done">Done</button><button class="sec cancel">Cancel</button></div>`;
   root.querySelector('span').textContent = message;
   document.documentElement.appendChild(host);
-  const finish = (result) => { host.remove(); cleanupPick(); chrome.runtime.sendMessage({ type: 'cb_handoff_done', id, result }); };
-  root.querySelector('.done').onclick = () => finish({ done: true, action: 'done' });
+  // ask: la risposta scritta; pick_max: gli elementi indicati, con contorno
+  // finché il banner resta. Done chiude in entrambi i casi (Invio nella casella).
+  const picks = []; const marked = [];
+  const askInput = root.querySelector('input.ask');
+  const answerOf = () => (askInput ? askInput.value : undefined);
+  const finish = (result) => { host.remove(); cleanupPick(); for (const m of marked) m.style.outline = m.__cbOutline ?? ''; chrome.runtime.sendMessage({ type: 'cb_handoff_done', id, result }); };
+  const done = () => finish(picks.length
+    ? { done: true, action: 'picked', answer: answerOf(), picked: picks[0], picked_all: picks }
+    : { done: true, action: 'done', answer: answerOf() });
+  const addPick = (el, p) => {
+    picks.push(p);
+    if (!marked.includes(el)) { el.__cbOutline = el.style.outline; el.style.outline = '2px solid #ffb454'; marked.push(el); }
+    if (picks.length >= pickMax) { done(); return; }
+    root.querySelector('span').textContent = `${message} — ${picks.length}/${pickMax} picked, click more or Done`;
+  };
+  root.querySelector('.done').onclick = done;
+  if (askInput) { askInput.onkeydown = (e) => { if (e.key === 'Enter') done(); }; setTimeout(() => askInput.focus(), 0); }
   root.querySelector('.cancel').onclick = () => finish({ done: false, action: 'cancel' });
   let box = null; let onMove = null; let onClick = null;
   function cleanupPick() {
@@ -2446,7 +2462,7 @@ function handoffBanner(id, message, pick) {
   };
   const pickBtn = root.querySelector('.pick');
   if (pickBtn) pickBtn.onclick = () => {
-    root.querySelector('span').textContent = `${message} — now click the element`;
+    root.querySelector('span').textContent = `${message} — ${pickMax > 1 ? `click up to ${pickMax} elements, then Done` : 'now click the element'}`;
     box = document.createElement('div');
     box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #ffb454;background:rgba(255,180,84,.15);transition:all .05s';
     document.documentElement.appendChild(box);
@@ -2466,7 +2482,7 @@ function handoffBanner(id, message, pick) {
       const isToggle = el.tagName === 'INPUT' && /^(checkbox|radio)$/.test(el.type);
       const label = (labelFor?.textContent || el.closest('label')?.textContent || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
       const text = (isToggle ? label || el.name : (el.innerText || el.value || el.getAttribute('aria-label') || label || '')).trim().replace(/\s+/g, ' ').slice(0, 80);
-      finish({ done: true, action: 'picked', picked: { selector: selectorOf(el), tag: el.tagName.toLowerCase(), text, rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } } });
+      addPick(el, { selector: selectorOf(el), tag: el.tagName.toLowerCase(), text, rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } });
     };
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onClick, true);
@@ -2474,12 +2490,12 @@ function handoffBanner(id, message, pick) {
   return true;
 }
 
-async function cmdHandoff({ message, pick_element = false, timeout = 300000, tab_id }) {
+async function cmdHandoff({ message, pick_element = false, ask = false, pick_max = 1, timeout = 300000, tab_id }) {
   if (!message) throw new Error('Missing required parameter: message');
   const tabId = await resolveTabId(tab_id);
   if (handoffs.has(tabId)) throw new Error('A handoff is already waiting on this tab');
   const id = `h${Date.now()}`;
-  const inject = () => chrome.scripting.executeScript({ target: { tabId }, func: handoffBanner, args: [id, String(message), !!pick_element] });
+  const inject = () => chrome.scripting.executeScript({ target: { tabId }, func: handoffBanner, args: [id, String(message), !!pick_element, !!ask, Math.max(1, Number(pick_max) || 1)] });
   try { await inject(); } catch (err) { throw new Error(`Cannot show the handoff banner on this page (${err.message}) — chrome:// and store pages are not injectable`); }
   await chrome.tabs.update(tabId, { active: true }).catch(() => {});
   return await new Promise((resolve) => {
