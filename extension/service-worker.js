@@ -8,6 +8,7 @@
 import './telemetry.js';
 import { buildMarkdown } from './lib/page-markdown.js';
 import { pageFingerprint } from './lib/page-fingerprint.js';
+import { createPacer } from './lib/capture-pacing.js';
 import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 const { pushError } = globalThis.__cbTelemetry;
@@ -589,8 +590,13 @@ async function runViaFunction(target, code) {
 // Su ChromeOS una finestra totalmente occlusa/congelata può non produrre mai
 // un frame: la promise di captureVisibleTab resterebbe pendente per sempre.
 // Meglio un errore parlante dopo 10s che un comando appeso.
+// Quota Chrome: 2 catture al secondo. Il pacer distanzia le chiamate di
+// 520 ms invece di far comparire MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND al
+// secondo screenshot ravvicinato (trovato dal bench di latenza, 2026-09-11).
+const paceCapture = createPacer();
 
-function captureVisible(windowId, options = { format: 'png' }) {
+async function captureVisible(windowId, options = { format: 'png' }) {
+  await paceCapture();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error('Capture timed out after 10s: the window is not rendering frames (fully occluded, minimized, or frozen). Bring the Chrome window at least partially on screen and retry.'));

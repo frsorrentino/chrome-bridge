@@ -51,12 +51,13 @@
   checks (Codex for Chrome named, Claude in Chrome on Linux); `docs/TOOLS.md`
   said 34 core tools, they are 38.
 
-### Known
+### Fixed
 
 - Two `screenshot`/`element_screenshot` calls closer than ~500 ms: the second
-  fails with `This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND
+  failed with `This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND
   quota` (Chrome allows 2 captures per second). Found by the latency bench.
-  Fix to decide: pace captures in the extension instead of surfacing the quota.
+  Every capture now waits for 520 ms since the previous one
+  (`extension/lib/capture-pacing.js`), so the quota never reaches the model.
 
 ### Fixed
 
