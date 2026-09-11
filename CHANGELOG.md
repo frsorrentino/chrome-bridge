@@ -45,6 +45,11 @@
   the user click up to N elements, outlined as they go, before pressing Done
   (`picked_all`, numbered in the reply). Banner, Done and Cancel are unchanged
   for everyone else.
+- `docs/CAPABILITIES.md`: what the bridge gets past and what it does not, one
+  row per wall with a state (Measured with a date, By design, Not yet, Won't).
+  README competitor columns refreshed from the 2026-09-01 and 2026-09-11
+  checks (Codex for Chrome named, Claude in Chrome on Linux); `docs/TOOLS.md`
+  said 34 core tools, they are 38.
 
 ### Known
 

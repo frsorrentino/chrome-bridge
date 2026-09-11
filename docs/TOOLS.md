@@ -1,7 +1,7 @@
 # Tool reference
 
 All 59 tools, by capability group. The group name is the value to pass to
-`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (34 tools);
+`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (38 tools);
 `install.sh` registers the server with `all`.
 
 Check what is active in your session with `get_status` → `caps_active` /
@@ -16,7 +16,11 @@ Check what is active in your session with `get_status` → `caps_active` /
 `find_setting` follows the menu links of an unknown admin panel until a page
 contains the keyword and reports the menu path. `handoff` shows a banner in the
 page and waits for the user (2FA, CAPTCHA, a choice); with `pick_element` the
-user clicks an element and the tool returns its selector. `watch` keeps checking
+user clicks an element and the tool returns its selector; with `ask` the user
+types a reply (`answer`), with `pick_max` up to N elements (`picked_all`).
+`click` and `fill_form` return `page_changed`, the DOM delta before and after
+the action; `type_text` and each `fill_form` field return `value_after` and
+`mismatch`. `watch` keeps checking
 a page in the background (element/text appears or disappears, a value changes)
 and collects events for `poll` or `chrome-bridge watch --wait`. `read_form` reads a form as
 the user filled it (values, required-but-empty, validity; passwords redacted) to review it

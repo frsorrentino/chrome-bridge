@@ -53,14 +53,20 @@ register the same server twice.
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **59** (38 core) | ~20 | ~50 | 23 core (71 total) |
+| **Tools** | **59** (38 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
-| **Audits (a11y/SEO/sec)** | **Yes** (one call, report on disk) | No | Partial | No |
+| **Audits (a11y/SEO/sec)** | **Yes** (one call, report on disk) | No | Lighthouse | No |
 | **Headless / CI** | **Yes** | No | Yes | Yes |
 | **GIF / video** | No | **Yes** | Partial | No |
 | **Breakpoints / heap** | No | No | **Yes** | No |
+
+Codex for Chrome (OpenAI, May 2026) sits in the Claude in Chrome column: an
+official extension with the `debugger` permission, macOS and Windows only,
+the ChatGPT app required. Claude in Chrome documents Linux desktop since
+September 2026; ChromeOS and WSL stay out. Competitor figures measured on
+2026-09-01 and 2026-09-11 (`docs/analisi-2026-09-11-concorrenti.md`).
 
 It wins on **round trips, not payload size**: short element refs instead of the
 screenshot-and-click loop, `fill_form` filling N fields in one call, table
@@ -182,6 +188,7 @@ paste into a chat.
 ## Documentation
 
 - [docs/TOOLS.md](docs/TOOLS.md) — all 59 tools, by group
+- [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`
 - [bench/RESULTS.md](bench/RESULTS.md) — raw runs and inclusion rule
