@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "chrome-bridge",
+  "description": "Your real, logged-in Chrome for Claude Code: MCP server, recipes skill and zero-token CLI. Works on ChromeOS, needs no debugger permission.",
+  "owner": {
+    "name": "frsorrentino",
+    "url": "https://github.com/frsorrentino"
+  },
+  "plugins": [
+    {
+      "name": "chrome-bridge",
+      "description": "Drive the Chrome you are already logged into: navigate, read, fill forms, audit, visual diff, network mocking, record what the user does. ChromeOS included, no debugger permission.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

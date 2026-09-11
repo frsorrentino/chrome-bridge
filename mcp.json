@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "chrome-bridge": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--prefix",
+        "${PLUGIN_DATA}",
+        "-y",
+        "chrome-bridge-mcp@1.16.1"
+      ],
+      "env": {
+        "CHROME_BRIDGE_CAPS": "all"
+      }
+    }
+  }
+}

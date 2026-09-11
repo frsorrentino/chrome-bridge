@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Plugin manifests, for installs without a clone: `.claude-plugin/` (Claude
+  Code marketplace: `/plugin marketplace add frsorrentino/chrome-bridge`, then
+  `/plugin install chrome-bridge@chrome-bridge`) and Agent Plugins 1.0
+  (`plugin.json` + `mcp.json`, the vendor-neutral format chrome-devtools-mcp
+  and real-browser-mcp ship). Both start `chrome-bridge-mcp` from npm with all
+  capabilities and carry the recipes skill. `test/unit/plugin-manifests.test.js`
+  pins their version to `package.json`: a release that bumps one file and not
+  the others fails the suite before publishing.
+
 ### Fixed
 
 - `chrome-bridge window_layout --action save|restore|list|delete --name X` from the
