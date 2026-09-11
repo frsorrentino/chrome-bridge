@@ -15,7 +15,8 @@
     "test:unit": "node --test test/unit/*.test.js",
     "test:e2e": "node test/test-devtools.js",
     "test:e2e:launch": "CHROME_BRIDGE_PORT=8799 node test/test-devtools.js --launch",
-    "measure": "node tools/measure-schema.mjs"
+    "measure": "node tools/measure-schema.mjs",
+    "bench:latency": "node bench/latency.mjs"
   },
   "keywords": [
     "mcp",

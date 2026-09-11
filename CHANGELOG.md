@@ -12,6 +12,22 @@
   capabilities and carry the recipes skill. `test/unit/plugin-manifests.test.js`
   pins their version to `package.json`: a release that bumps one file and not
   the others fails the suite before publishing.
+- `npm run bench:latency`: milliseconds per tool on the real path (stdio MCP
+  client → server → WebSocket → extension → page), five rounds each on the
+  local bench pages in headless launch mode, written to `docs/PERFORMANCE.md`
+  with the raw samples in `bench/results/`. A tool that sits on a timeout is a
+  bug of its own class, and until now nothing measured it. First run
+  (2026-09-11): every DOM tool under 50 ms, `navigate` 158 ms, `extract_table`
+  on 1 500 rows 108 ms; and `screenshot` twice within a second fails with
+  Chrome's `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` quota instead of waiting
+  for it (see Known).
+
+### Known
+
+- Two `screenshot`/`element_screenshot` calls closer than ~500 ms: the second
+  fails with `This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND
+  quota` (Chrome allows 2 captures per second). Found by the latency bench.
+  Fix to decide: pace captures in the extension instead of surfacing the quota.
 
 ### Fixed
 

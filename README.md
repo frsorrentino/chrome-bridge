@@ -181,6 +181,7 @@ paste into a chat.
 
 - [docs/TOOLS.md](docs/TOOLS.md) — all 59 tools, by group
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`
 - [bench/RESULTS.md](bench/RESULTS.md) — raw runs and inclusion rule
 - [CHANGELOG.md](CHANGELOG.md)
 
@@ -189,7 +190,9 @@ paste into a chat.
 `npm test` (Chrome-free, ~22s) · `npm run test:e2e` (needs Chrome and a
 connected extension; with a bridge already on 8765:
 `CHROME_BRIDGE_PORT=8799 node test/test-devtools.js --launch`, which opens
-its own Chromium with `extension/`) · `npm run measure` (schema cost).
+its own Chromium with `extension/`) · `npm run measure` (schema cost) ·
+`npm run bench:latency` (milliseconds per tool, launches its own Chromium,
+writes `docs/PERFORMANCE.md`).
 
 ## License
 
