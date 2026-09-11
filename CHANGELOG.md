@@ -30,6 +30,15 @@
   is the user's shell and is not restricted. Both show in `get_status`
   (`js_evaluation`, `write_root`). For the browser you would not hand a
   stranger, and to measure what actually breaks without the most used tool.
+- `click` and `fill_form` report the effect, not just the action: `page_changed`
+  now carries DOM deltas from a page fingerprint taken before and after
+  (nodes, text, open, expanded, checked, selected, dialogs, focus) besides
+  url/title, so "did the menu open?" needs no screenshot; `type_text` and
+  every `fill_form` field return `value_after` and `mismatch`, so a controlled
+  field that dropped the value says so, with the remedy. Older extensions keep
+  the url/title delta. New extension command `page_fingerprint`; `click` waits
+  150 ms before the second fingerprint when `wait_after` is none, the time a
+  framework takes to re-render.
 
 ### Known
 

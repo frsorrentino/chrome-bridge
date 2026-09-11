@@ -7,6 +7,7 @@
 
 import './telemetry.js';
 import { buildMarkdown } from './lib/page-markdown.js';
+import { pageFingerprint } from './lib/page-fingerprint.js';
 import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 const { pushError } = globalThis.__cbTelemetry;
@@ -448,6 +449,8 @@ async function executeCommand(msg) {
       return await cmdKeyboardWalk(params);
     case 'handoff':
       return await cmdHandoff(params);
+    case 'page_fingerprint':
+      return await cmdPageFingerprint(params);
     case 'watch':
       return await cmdWatch(params);
     case 'observe':
@@ -896,19 +899,35 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
           await sleep(10);
         }
         el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { typed: true, tagName: tag, mode: 'keys' };
+        const afterKeys = String(getValue() ?? '');
+        return { typed: true, tagName: tag, mode: 'keys', value_after: afterKeys, mismatch: !afterKeys.endsWith(txt) };
       }
 
       setValue(txt);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { typed: true, tagName: tag };
+      // Rilettura: un campo controllato che scarta il valore risponde
+      // «ok» uguale, e il modello non ha modo di saperlo senza questo.
+      const after = String(getValue() ?? '');
+      return { typed: true, tagName: tag, value_after: after, mismatch: after !== txt };
     },
     args: [selector, text, mode],
     world: 'MAIN',
   });
 
   return results?.[0]?.result ?? { typed: true };
+}
+
+// Impronta per page_changed: pochi interi letti nell'ISOLATED world (nessuna
+// CSP di mezzo), prima e dopo un'azione. Vedi lib/page-fingerprint.js.
+async function cmdPageFingerprint({ tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: pageFingerprint,
+    args: [null],
+  });
+  return results?.[0]?.result ?? null;
 }
 
 async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
@@ -1879,6 +1898,7 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
           const type = (el.type || '').toLowerCase();
           const disabled = el.disabled;
           const readOnly = el.readOnly;
+          let chosen = null;
 
           if (disabled || readOnly) {
             report.push({ selector, success: true, tagName: tag, type, warning: disabled ? 'disabled' : 'readonly' });
@@ -1891,6 +1911,7 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
             for (const opt of el.options) {
               if (opt.value === value || opt.textContent.trim() === value) {
                 el.value = opt.value;
+                chosen = opt.value;
                 found = true;
                 break;
               }
@@ -1916,7 +1937,17 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
           el.dispatchEvent(new Event('focus', { bubbles: true }));
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
-          report.push({ selector, success: true, tagName: tag, type: type || tag });
+          // Rilettura per campo: l'effetto, non l'azione
+          const entry = { selector, success: true, tagName: tag, type: type || tag };
+          if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+            const want = value === 'true' || value === '1';
+            entry.checked_after = el.checked; entry.mismatch = el.checked !== want;
+          } else if (tag === 'select') {
+            entry.value_after = el.value; entry.mismatch = el.value !== chosen;
+          } else {
+            entry.value_after = String(el.value ?? ''); entry.mismatch = String(el.value ?? '') !== String(value);
+          }
+          report.push(entry);
         } catch (e) {
           report.push({ selector, success: false, error: e.message });
         }

@@ -71,6 +71,7 @@ export const MessageType = Object.freeze({
   DISMISS_OVERLAYS:      'dismiss_overlays',
   KEYBOARD_WALK:         'keyboard_walk',
   HANDOFF:               'handoff',
+  PAGE_FINGERPRINT:      'page_fingerprint',
   WATCH:                 'watch',
   OBSERVE:               'observe',
   READ_FORM:             'read_form',

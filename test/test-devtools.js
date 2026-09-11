@@ -590,6 +590,30 @@ async function testHandoffTimeout(tabId) {
   } catch (e) { fail(name, e.message); }
 }
 
+async function testPageFingerprintClickEffect(tabId) {
+  const name = 'page_fingerprint + click effect (details opens)';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { const d = document.createElement('details'); d.id = '__cb_fp'; d.innerHTML = '<summary>toggle</summary><p>body</p>'; document.body.appendChild(d); return true; })()", tab_id: tabId });
+    const before = await wsManager.sendCommand(MessageType.PAGE_FINGERPRINT, { tab_id: tabId });
+    for (const k of ['nodes', 'text', 'open', 'expanded', 'checked', 'dialogs']) if (typeof before[k] !== 'number') throw new Error(`Missing ${k}: ${JSON.stringify(before)}`);
+    await wsManager.sendCommand(MessageType.CLICK, { selector: '#__cb_fp summary', tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 150));
+    const after = await wsManager.sendCommand(MessageType.PAGE_FINGERPRINT, { tab_id: tabId });
+    if (after.open !== before.open + 1) throw new Error(`open ${before.open} -> ${after.open}`);
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testTypeTextReadback(tabId) {
+  const name = 'type_text value_after/mismatch';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { const i = document.createElement('input'); i.id = '__cb_rb'; document.body.appendChild(i); return true; })()", tab_id: tabId });
+    const data = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector: '#__cb_rb', text: 'Mario Rossi', tab_id: tabId });
+    if (data.value_after !== 'Mario Rossi' || data.mismatch !== false) throw new Error(JSON.stringify(data));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
 // --- Main ---
 
 async function main() {
@@ -651,6 +675,10 @@ async function main() {
     await testWatch(testTabId);
     await testObserve(testTabId);
     await testHandoffTimeout(testTabId);
+
+    // Unreleased
+    await testPageFingerprintClickEffect(testTabId);
+    await testTypeTextReadback(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

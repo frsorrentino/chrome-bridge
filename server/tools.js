@@ -22,6 +22,7 @@ import { toPlaywrightTest } from './playwright-export.js';
 import { createResolver } from './sourcemaps.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { windowLayout } from './layouts.js';
+import { fingerprintDelta } from './effect.js';
 import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
@@ -30,7 +31,7 @@ const RECORDINGS_DIR = process.env.CHROME_BRIDGE_RECORD_DIR || join(homedir(), '
 const FIXTURES_DIR = process.env.CHROME_BRIDGE_FIXTURES_DIR || join(homedir(), '.config', 'chrome-bridge', 'fixtures');
 
 // Comandi rumore per un replay: letture interne (tabSnapshot) o senza effetto
-const RECORD_EXCLUDE = new Set([MessageType.GET_TABS]);
+const RECORD_EXCLUDE = new Set([MessageType.GET_TABS, MessageType.PAGE_FINGERPRINT]);
 
 // CHROME_BRIDGE_NO_JS: i tool che eseguono codice arbitrario nella pagina.
 // inject_css non c'è: il CSS non esegue niente. wait_for(condition=function)
@@ -459,8 +460,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     throw new Error('Either selector or ref is required');
   }
 
-  // Snapshot url/title del tab target, per il delta post-azione.
+  // Impronta della pagina per il delta post-azione (page_changed): DOM in
+  // pochi interi più url/title. Un'estensione vecchia o una pagina non
+  // iniettabile (chrome://) tornano a url/title da get_tabs: nessun errore,
+  // solo meno dettaglio.
   async function tabSnapshot(tab_id) {
+    try {
+      const fp = await send(MessageType.PAGE_FINGERPRINT, { tab_id });
+      if (fp && typeof fp === 'object') return fp;
+    } catch { /* fallback sotto */ }
     try {
       const tabs = await send(MessageType.GET_TABS);
       const list = Array.isArray(tabs) ? tabs : [];
@@ -470,16 +478,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     } catch { return null; }
   }
 
-  // Delta compatto dopo un'azione: presente solo se url/title sono cambiati.
-  // Costa pochi token quando scatta, zero quando la pagina è stabile, e
-  // risparmia al client un giro di ispezione per capire "cosa è successo".
-  function pageDelta(before, after) {
-    if (!before || !after) return null;
-    const delta = {};
-    if (after.url !== before.url) delta.url = after.url;
-    if (after.title !== before.title) delta.title = after.title;
-    return Object.keys(delta).length ? delta : null;
-  }
+  // Delta compatto dopo un'azione: solo ciò che è cambiato (url, title, conteggi
+  // DOM con segno, fuoco). Costa pochi token quando scatta, zero quando la
+  // pagina è stabile, e risparmia al client lo screenshot per capire "cosa è
+  // successo".
+  const pageDelta = fingerprintDelta;
 
   // Anteprima compatta dei primi interactives (con ref), allegata a navigate:
   // il client può agire subito senza un giro di discovery. Cappata e best-effort.
@@ -664,7 +667,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'click',
     'Click an element by CSS selector or by a ref (n1, n2…) from get_interactives or navigate. A real pointer sequence: it can submit, '
-      + 'open a dialog or navigate — use wait_after. Not idempotent; a native confirm() blocks the bridge: handle_dialogs first.',
+      + 'open a dialog or navigate — use wait_after. Not idempotent; a native confirm() blocks the bridge: handle_dialogs first. '
+      + 'Returns page_changed (url, title and DOM deltas: nodes, text, open, expanded, checked, dialogs, focus): the effect, without a screenshot.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -681,6 +685,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id);
+      // Senza wait_after un breve settle: i framework aggiornano il DOM dopo il
+      // click, non dentro; senza, l'impronta "dopo" vedrebbe quella "prima".
+      if (!data?.occluded && (wait_after ?? 'none') === 'none') await new Promise((r) => setTimeout(r, 150));
       const changed = data?.occluded ? null : pageDelta(before, await tabSnapshot(tab_id));
       const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
@@ -697,7 +704,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'type_text',
     'Put text into an input, textarea or contenteditable, by selector or ref. Replaces the whole value through the '
       + 'native setter (React/Vue controlled inputs register it) and fires input and change. mode=keys emits '
-      + 'keydown/input/keyup per character for autocomplete and masked fields: slower, use it only when mode=set leaves the field empty.',
+      + 'keydown/input/keyup per character for autocomplete and masked fields: slower, use it only when mode=set leaves the field empty. '
+      + 'Returns value_after; mismatch=true means the field did not keep the value: retry with mode=keys.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -712,10 +720,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const data = await send(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id });
       const waited = await applyWaitAfter(send, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
+      const warn = data?.mismatch
+        ? `\nthe field did not keep the value (value_after=${JSON.stringify(data.value_after ?? null)}): retry with mode=keys; if it still differs, the page rewrites it`
+        : '';
       return {
         content: [{
           type: 'text',
-          text: jsonText(out),
+          text: jsonText(out) + warn,
         }],
       };
     }
@@ -1068,7 +1079,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'fill_form',
     'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea. '
-    + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly.',
+    + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly. '
+    + 'Each field reports value_after and mismatch; page_changed carries the DOM delta.',
     {
       fields: z.array(z.object({
         selector: z.string(),
@@ -1085,10 +1097,14 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const waited = await applyWaitAfter(send, wait_after, tab_id);
       const changed = pageDelta(before, await tabSnapshot(tab_id));
       const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
+      // I campi che non hanno tenuto il valore in testa, in chiaro: sono la
+      // riga che il modello deve leggere prima del JSON.
+      const mism = (data?.fields ?? []).filter((f) => f && f.mismatch);
+      const head = mism.length ? mism.map((f) => `mismatch: ${f.selector} (${'checked_after' in f ? `checked_after=${f.checked_after}` : `value_after=${JSON.stringify(f.value_after ?? null)}`})`).join('\n') + '\n' : '';
       return {
         content: [{
           type: 'text',
-          text: jsonText(out),
+          text: head + jsonText(out),
         }],
       };
     }
