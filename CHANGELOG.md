@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Difetto aperto, riproducibile, senza rimedio deciso
+
+`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
+finestra con dentro sessioni terminale vive:
+
+    -> Command tab_action timed out after 30000ms
+    -> la scheda NON viene chiusa
+
+Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
+sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
+aspettarla — **non verificato**: al momento della scoperta nessuno poteva
+guardare lo schermo, e non si progetta un rimedio partendo da una causa non
+osservata.
+
+La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
+quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
+esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
+uno che rifiuta subito.
+
+## 1.17.0 — 2026-09-11
+
+Il ciclo nato dalla verifica concorrenti del 2026-09-11
+(`docs/analisi-2026-09-11-concorrenti.md`): sei proposte, tutte piccole, tutte
+misurate. Le azioni riportano l'effetto invece di dichiarare la riuscita, la
+persona davanti al browser può rispondere e indicare più elementi, due
+interruttori di sicurezza per chi mette il bridge davanti a un team, i manifest
+per installarlo come plugin, una tabella di latenza per tool e una matrice di
+capacità con le date. Nessun permesso Chrome nuovo; l'estensione cambia
+(impronta di pagina, rilettura dei campi, banner, pacing delle catture) e passa
+dalla review normale dello Store.
+
 ### Added
 
 - Plugin manifests, for installs without a clone: `.claude-plugin/` (Claude
@@ -20,7 +51,7 @@
   (2026-09-11): every DOM tool under 50 ms, `navigate` 158 ms, `extract_table`
   on 1 500 rows 108 ms; and `screenshot` twice within a second fails with
   Chrome's `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` quota instead of waiting
-  for it (see Known).
+  for it (fixed below).
 - `CHROME_BRIDGE_NO_JS` (`--no-js`) and `CHROME_BRIDGE_WRITE_ROOT` (`--write-root`):
   no arbitrary JavaScript in the page (`execute_js` and `modify_dom` leave the
   schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are
@@ -59,30 +90,9 @@
   Every capture now waits for 520 ms since the previous one
   (`extension/lib/capture-pacing.js`), so the quota never reaches the model.
 
-### Fixed
-
 - `chrome-bridge window_layout --action save|restore|list|delete --name X` from the
   CLI: the tool existed only inline in the MCP server, and the CLI answered
   «Unknown command». One implementation now (`server/layouts.js`) for both.
-
-### Difetto aperto, riproducibile, senza rimedio deciso
-
-`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
-finestra con dentro sessioni terminale vive:
-
-    -> Command tab_action timed out after 30000ms
-    -> la scheda NON viene chiusa
-
-Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
-sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
-aspettarla — **non verificato**: al momento della scoperta nessuno poteva
-guardare lo schermo, e non si progetta un rimedio partendo da una causa non
-osservata.
-
-La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
-quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
-esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
-uno che rifiuta subito.
 
 ## 1.16.0 — 2026-09-02
 
