@@ -50,6 +50,7 @@ A list that only says yes is a brochure; this one is for planning against.
 | macOS, Windows | **By design** | Node + Chrome, nothing platform-specific in the server; no dated run. |
 | Headless / CI | **Measured** 2026-09-11 | `--launch --headless` opens a dedicated Chromium with the unpacked extension; the e2e and the bench use it. |
 | A second MCP session on the same browser | **Measured** (daily use) | The second server becomes a relay through the first; the two still share tabs and refs, so two agents on the same tab step on each other. |
+| ChromeOS Terminal: a window of session tabs without the «Terminale» home tab | **Measured** 2026-09-11 (live, 8 sessions) | The home tab cannot be closed while other tabs exist and cannot be moved between app windows, but it can be pulled out: `move_tab {tab_id: home, new_window: true, window_type: popup}` leaves the app window with the sessions only, then `tab_action close` on the home (alone in its popup) closes it. `tab_action duplicate` on a session tab adds tabs to the home-less app window. No new code: three existing tools. |
 | Two Chrome profiles | **Not yet** | One extension connection per server. Not scheduled. |
 | No arbitrary JavaScript, confined file writes | **Measured** 2026-09-11 (unit) | `CHROME_BRIDGE_NO_JS`, `CHROME_BRIDGE_WRITE_ROOT`; both visible in `get_status`. |
 | Latency | **Measured** 2026-09-11 | `docs/PERFORMANCE.md`: DOM tools under 50 ms, `navigate` 158 ms, `extract_table` on 1 500 rows 108 ms, cold start 11 s in launch mode. |

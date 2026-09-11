@@ -21,6 +21,13 @@ quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
 esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
 uno che rifiuta subito.
 
+**Rimedio misurato il 2026-09-11 (dal vivo, finestra con 8 sessioni):** la
+home non si chiude finché ha compagnia, ma si può portare via da sola:
+`move_tab {tab_id: home, new_window: true, window_type: popup}` lascia la
+finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
+suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
+nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
 ## 1.17.0 — 2026-09-11
 
 Il ciclo nato dalla verifica concorrenti del 2026-09-11
