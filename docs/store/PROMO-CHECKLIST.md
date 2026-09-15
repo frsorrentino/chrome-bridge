@@ -3,7 +3,7 @@
 ## Fatto (automatico)
 
 - [x] Link CWS trovato e aggiunto a README + docs/index.md: https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb (1.7.0 live sullo store al 2026-07-30; 1.9.0 da caricare, richiede il TOTP)
-- [x] PR su punkpeye/awesome-mcp-servers (sezione Browser Automation, fast-track agent PR): https://github.com/punkpeye/awesome-mcp-servers/pull/10534
+- [x] PR su punkpeye/awesome-mcp-servers (sezione Browser Automation, fast-track agent PR): https://github.com/punkpeye/awesome-mcp-servers/pull/10534 — **unita il 16/09/2026 alle 01:07** dopo il rebase su main (conflitti segnalati dal triage alle 00:14)
 - [x] `server.json` + campo `mcpName` in package.json — pubblicati sul registry ufficiale il 30 lug (vedi punto 1)
 - [x] Doc submission Edge Add-ons: `EDGE-SUBMISSION.md` (zip 1.9.0 riutilizzabile tal quale)
 
