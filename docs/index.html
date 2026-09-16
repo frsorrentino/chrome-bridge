@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chrome Bridge for Claude Code — your real, logged-in Chrome</title>
+<meta name="description" content="An MCP server that gives Claude Code your real, logged-in Chrome: 59 browser automation tools over a local WebSocket. Measured 2.75× fewer turns than the official Claude in Chrome extension. Self-hosted, no accounts, ChromeOS included.">
+<link rel="canonical" href="https://frsorrentino.github.io/chrome-bridge/">
+<meta property="og:title" content="Chrome Bridge for Claude Code">
+<meta property="og:description" content="59 browser automation tools over a local WebSocket. Your real Chrome, where you are already logged in. Self-hosted, no accounts.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://frsorrentino.github.io/chrome-bridge/">
+<style>
+@font-face {
+    font-family: 'Geist';
+    src: url('./fonts/geist-latin.woff2') format('woff2');
+    font-weight: 300 800;
+    font-style: normal;
+    font-display: optional;
+}
+
+@font-face {
+    font-family: 'Geist Mono';
+    src: url('./fonts/geist-mono-latin.woff2') format('woff2');
+    font-weight: 400 600;
+    font-style: normal;
+    font-display: optional;
+}
+
+/* Stessi token di francescosorrentino.com (css/style.css), tema scuro */
+:root {
+    --font-sans: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+    --color-bg: #0e0e0e;
+    --color-bg-deep: #080808;
+    --color-surface: #1c1c1c;
+    --color-border: #3d3d3d;
+    --color-border-subtle: #2a2a2a;
+    --color-text: #e8eaed;
+    --color-text-muted: #9aa0a6;
+    --accent: hsl(106 75% 42%);
+    --accent-text: hsl(106 75% 52%);
+    --on-accent: #07130a;
+    --glow: hsla(106, 75%, 42%, 0.18);
+    --grid-line: rgba(255, 255, 255, 0.03);
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --text-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.8125rem);
+    --text-sm: clamp(0.875rem, 0.8rem + 0.35vw, 0.9375rem);
+    --text-lg: clamp(1.125rem, 1rem + 0.5vw, 1.25rem);
+    --space-sm: 1rem;
+    --space-md: 1.5rem;
+    --space-lg: 2rem;
+    --space-xl: 3rem;
+    --space-2xl: 5rem;
+}
+
+*, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: clamp(1rem, 0.95rem + 0.25vw, 1.0625rem);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+.container { width: min(100% - 2.5rem, 68rem); margin-inline: auto; }
+section { padding: var(--space-2xl) 0; }
+h1, h2, h3 { line-height: 1.15; text-wrap: balance; }
+a { color: var(--accent-text); }
+code, kbd { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* --- Prima schermata --- */
+.hero {
+    padding: var(--space-2xl) 0;
+    background:
+        radial-gradient(900px 420px at 12% 0%, var(--glow), transparent 60%),
+        linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 32px 32px;
+}
+
+.hero__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr); gap: var(--space-xl); align-items: center; }
+.eyebrow { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-text); }
+.hero h1 { margin: 0.5rem 0 0; font-size: clamp(2.1rem, 1.4rem + 3.2vw, 3.4rem); font-weight: 800; letter-spacing: -0.025em; }
+.hero__lead { max-width: 54ch; margin-top: var(--space-sm); font-size: var(--text-lg); color: var(--color-text-muted); }
+.hero__meta { margin-top: var(--space-sm); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: var(--space-md); }
+
+.btn {
+    display: inline-block;
+    padding: 0.7rem 1.15rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--color-text);
+    transition: transform 150ms ease, border-color 150ms ease;
+}
+
+.btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* --- Schemi a linee, stessa famiglia della home --- */
+.sk { display: block; width: 100%; height: auto; overflow: visible; }
+.sk-node { fill: var(--color-surface); stroke: var(--color-border); stroke-width: 1.2; }
+.sk-node--acc { stroke: var(--accent-text); stroke-width: 1.6; }
+.sk-line { fill: none; stroke: var(--color-border); stroke-width: 1.2; }
+.sk-line--acc { stroke: var(--accent-text); }
+.sk-flow { fill: none; stroke: var(--accent-text); stroke-width: 1.6; stroke-dasharray: 5 5; }
+.sk-dot { fill: var(--color-border); }
+.sk-label { fill: var(--color-text-muted); font-family: var(--font-mono); font-size: 9.5px; }
+.sk-label--acc { fill: var(--accent-text); }
+.sk-bar { fill: var(--color-surface); stroke: var(--color-border); stroke-width: 1; }
+.sk-bar--acc { fill: hsla(106, 75%, 42%, 0.25); stroke: var(--accent-text); }
+.sk-num { fill: var(--color-text); font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.sk-num--acc { fill: var(--accent-text); }
+
+.art {
+    padding: var(--space-sm);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(var(--glow), transparent 70%), var(--color-bg-deep);
+}
+
+/* --- Blocchi --- */
+.section-title { font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.1rem); font-weight: 800; letter-spacing: -0.02em; }
+.section-lead { max-width: 62ch; margin-top: 0.6rem; color: var(--color-text-muted); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-xl); align-items: center; margin-top: var(--space-lg); }
+.alt { background: var(--color-bg-deep); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: var(--space-sm); margin-top: var(--space-lg); }
+
+.card {
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-xl);
+}
+
+.card h3 { font-size: var(--text-lg); font-weight: 700; }
+.card p { margin-top: 0.4rem; font-size: var(--text-sm); color: var(--color-text-muted); }
+.card__n { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--accent-text); }
+
+table { width: 100%; border-collapse: collapse; margin-top: var(--space-lg); font-size: var(--text-sm); }
+th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--color-border-subtle); vertical-align: top; }
+thead th { font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); }
+td:first-child { font-weight: 600; }
+.yes { color: var(--accent-text); font-weight: 600; }
+.wrap { overflow-x: auto; }
+
+pre {
+    margin-top: var(--space-sm);
+    padding: var(--space-sm);
+    overflow-x: auto;
+    background: var(--color-bg-deep);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+}
+
+.steps { margin: var(--space-lg) 0 0; padding-left: 1.2rem; display: grid; gap: var(--space-sm); }
+.steps li::marker { color: var(--accent-text); font-family: var(--font-mono); }
+.note { margin-top: var(--space-md); padding: var(--space-sm) var(--space-md); border-left: 2px solid var(--accent); border-radius: 0 var(--radius-md) var(--radius-md) 0; background: var(--color-surface); font-size: var(--text-sm); color: var(--color-text-muted); }
+.links { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: var(--space-md); font-size: var(--text-sm); }
+
+footer { padding: var(--space-xl) 0; border-top: 1px solid var(--color-border-subtle); font-size: var(--text-sm); color: var(--color-text-muted); }
+footer .container { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-content: space-between; }
+
+@media (max-width: 899px) {
+    .hero__grid, .split { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+    <div class="container hero__grid">
+        <div>
+            <p class="eyebrow">MCP server + Chrome extension</p>
+            <h1>Claude Code drives the Chrome you are already logged into.</h1>
+            <p class="hero__lead">No robot browser, no empty profile, no paid plan: your real tabs, sessions and extensions, through a WebSocket bridge that never leaves your machine.</p>
+            <p class="hero__meta">59 tools · Chrome 135+ · Node 18+ · Windows, macOS, Linux, ChromeOS · MIT</p>
+            <div class="actions">
+                <a class="btn btn--primary" href="https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb">Install from the Chrome Web Store</a>
+                <a class="btn" href="https://github.com/frsorrentino/chrome-bridge">Source on GitHub</a>
+            </div>
+        </div>
+        <div class="art">
+            <!-- Tela 360×160: la finestra è larga 180, perché "tabs · cookies · extensions" in mono a 8px misura
+                 circa 130 px e in un riquadro da 120 sbordava -->
+            <svg class="sk" viewBox="0 0 360 160" width="360" height="160" role="img" aria-label="Diagram: Claude Code talks over a local WebSocket to the Chrome you are already logged into">
+                <g>
+                    <rect class="sk-node sk-node--acc" x="8" y="56" width="92" height="46" rx="10"/>
+                    <text class="sk-label sk-label--acc" x="54" y="75" text-anchor="middle">Claude Code</text>
+                    <text class="sk-label" x="54" y="90" text-anchor="middle">stdio</text>
+                </g>
+                <path class="sk-line" d="M100 86 H170"/>
+                <path class="sk-flow" d="M100 72 H170"/>
+                <!-- Misurato: fra il nodo (finisce a 100) e la finestra (inizia a 170) restano 70 px.
+                     "local WebSocket" ne misurava 86 e sbordava: tre righe corte ci stanno -->
+                <text class="sk-label" x="135" y="100" text-anchor="middle">local</text>
+                <text class="sk-label" x="135" y="112" text-anchor="middle">WebSocket</text>
+                <text class="sk-label sk-label--acc" x="135" y="124" text-anchor="middle">:8765</text>
+                <g>
+                    <rect class="sk-node" x="170" y="18" width="180" height="124" rx="8"/>
+                    <path class="sk-line" d="M170 38 H350"/>
+                    <circle class="sk-dot" cx="182" cy="28" r="2.5"/><circle class="sk-dot" cx="191" cy="28" r="2.5"/><circle class="sk-dot" cx="200" cy="28" r="2.5"/>
+                    <path class="sk-line" d="M184 56 H322"/>
+                    <path class="sk-line" d="M184 68 H290"/>
+                    <rect class="sk-node sk-node--acc" x="184" y="86" width="13" height="11" rx="2"/>
+                    <path class="sk-line sk-line--acc" d="M187.5 86 v-4 a3.2 3.2 0 0 1 6.4 0 v4"/>
+                    <text class="sk-label" x="204" y="95">you, already logged in</text>
+                    <text class="sk-label" x="260" y="122" text-anchor="middle" font-size="8">tabs · cookies · extensions</text>
+                </g>
+            </svg>
+        </div>
+    </div>
+</header>
+
+<main>
+
+<section class="alt">
+    <div class="container">
+        <h2 class="section-title">The same form, in 6 turns instead of 16.5.</h2>
+        <p class="section-lead">Measured against the official “Claude in Chrome” extension — same model, same task. It wins on round trips, not payload size: <code>navigate</code> already returns element refs, so <code>click(ref="n1")</code> follows with no discovery turn in between, and <code>fill_form</code> fills N fields in one call.</p>
+        <div class="split">
+            <div class="art">
+                <svg class="sk" viewBox="0 0 300 150" width="300" height="150" role="img" aria-label="Chart: Claude in Chrome 16.5 turns and $0.481; Chrome Bridge 6 turns and $0.211">
+                    <text class="sk-label" x="0" y="16">Claude in Chrome</text>
+                    <rect class="sk-bar" x="0" y="24" width="220" height="20" rx="4"/>
+                    <text class="sk-num" x="228" y="39">16.5</text>
+                    <text class="sk-label" x="0" y="62">turns · $0.481</text>
+                    <text class="sk-label sk-label--acc" x="0" y="96">Chrome Bridge</text>
+                    <rect class="sk-bar sk-bar--acc" x="0" y="104" width="80" height="20" rx="4"/>
+                    <text class="sk-num sk-num--acc" x="88" y="119">6</text>
+                    <text class="sk-label" x="0" y="142">turns · $0.211</text>
+                </svg>
+            </div>
+            <div class="cards">
+                <div class="card"><p class="card__n">turns</p><h3>2.75× fewer</h3><p>Round trips between the model and the browser, on the same form-filling task.</p></div>
+                <div class="card"><p class="card__n">cost</p><h3>2.28× lower</h3><p>Per task. Per single turn it actually costs slightly more — the saving is in not needing the turn.</p></div>
+            </div>
+        </div>
+        <p class="note">Method, every raw run including the unfavourable ones, and what the harness cannot measure: <a href="https://github.com/frsorrentino/chrome-bridge/blob/main/docs/EFFICIENCY.md">docs/EFFICIENCY.md</a>. Competitor figures measured on 2026-09-01 and 2026-09-11.</p>
+    </div>
+</section>
+
+<section>
+    <div class="container">
+        <h2 class="section-title">59 tools, in seven groups</h2>
+        <p class="section-lead">Only <code>core</code> (38 tools) loads by default; the rest are opt-in with <code>--caps</code>, so the schema you pay for stays small.</p>
+        <div class="wrap">
+            <table>
+                <thead><tr><th>Group</th><th>N</th><th>What’s in it</th></tr></thead>
+                <tbody>
+                    <tr><td>Core &amp; Navigation</td><td>13</td><td>tabs, windows, <code>navigate</code>, <code>screenshot</code>, <code>tile_windows</code></td></tr>
+                    <tr><td>Interaction</td><td>11</td><td><code>click</code>, <code>fill_form</code>, <code>upload_file</code>, dialogs, clipboard</td></tr>
+                    <tr><td>DOM &amp; Inspection</td><td>10</td><td><code>read_page</code>, <code>extract</code>, <code>query_dom</code>, <code>watch_dom</code></td></tr>
+                    <tr><td>Debugging &amp; Network</td><td>8</td><td><code>execute_js</code>, console, network log, mocking, <code>track_events</code></td></tr>
+                    <tr><td>Visual &amp; Responsive</td><td>5</td><td><code>screenshot_diff</code>, viewport and zoom, media emulation</td></tr>
+                    <tr><td>Audits</td><td>2</td><td><code>audit</code> (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), <code>cookie_audit</code></td></tr>
+                    <tr><td>State, Storage &amp; Files</td><td>9</td><td>storage, fixtures, MHTML, recording, <code>assert</code></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="links"><a href="https://github.com/frsorrentino/chrome-bridge/blob/main/docs/TOOLS.md">Every tool, with the notes that matter</a></p>
+    </div>
+</section>
+
+<section class="alt">
+    <div class="container">
+        <h2 class="section-title">Some jobs never touch the model</h2>
+        <div class="split">
+            <div>
+                <p class="section-lead">The same tools run from your shell at zero tokens, piped through <code>grep</code> or <code>jq</code> before anything reaches the context. Pair <code>session_record</code> with <code>replay</code> for smoke tests with no model in the loop.</p>
+<pre>chrome-bridge navigate --url https://example.com
+chrome-bridge read_console --level error | head -20
+chrome-bridge assert --selector "#success" --text "Done"
+chrome-bridge replay --file ./recordings/login.jsonl</pre>
+                <p class="note">Launch mode gives you a dedicated Chromium with an ephemeral profile, for isolated sessions or CI: <code>node server/index.js --launch --headless</code>.</p>
+            </div>
+            <div class="art">
+                <svg class="sk" viewBox="0 0 280 150" width="280" height="150" role="img" aria-label="Diagram: the CLI lane runs the same tools without the model, the MCP lane goes through Claude Code">
+                    <g><rect class="sk-node" x="8" y="18" width="94" height="34" rx="8"/><text class="sk-label" x="55" y="39" text-anchor="middle">your shell</text></g>
+                    <g><rect class="sk-node sk-node--acc" x="8" y="96" width="94" height="34" rx="8"/><text class="sk-label sk-label--acc" x="55" y="117" text-anchor="middle">Claude Code</text></g>
+                    <path class="sk-line" d="M102 35 H180"/>
+                    <path class="sk-flow" d="M102 113 H180"/>
+                    <text class="sk-label" x="141" y="28" text-anchor="middle">0 tokens</text>
+                    <text class="sk-label sk-label--acc" x="141" y="106" text-anchor="middle">tools + refs</text>
+                    <g><rect class="sk-node" x="180" y="50" width="92" height="48" rx="8"/><text class="sk-label" x="226" y="70" text-anchor="middle">bridge</text><text class="sk-label" x="226" y="84" text-anchor="middle">:8765</text></g>
+                    <path class="sk-line" d="M180 35 C210 35 226 40 226 50"/>
+                    <path class="sk-line" d="M180 113 C210 113 226 108 226 98"/>
+                </svg>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="container">
+        <h2 class="section-title">Against the alternatives</h2>
+        <p class="section-lead">Figures measured on 2026-09-01 and 2026-09-11. Codex for Chrome (OpenAI) sits in the Claude in Chrome column: official extension, macOS and Windows only.</p>
+        <div class="wrap">
+            <table>
+                <thead><tr><th></th><th>Chrome Bridge</th><th>Claude in Chrome</th><th>DevTools MCP</th><th>Playwright MCP</th></tr></thead>
+                <tbody>
+                    <tr><td>ChromeOS / Crostini</td><td class="yes">Yes (real host)</td><td>No</td><td>Container only</td><td>Container only</td></tr>
+                    <tr><td>Tools</td><td class="yes">59 (38 core)</td><td>22</td><td>29 default</td><td>24 core</td></tr>
+                    <tr><td>Requires paid plan</td><td class="yes">No</td><td>Yes (Pro+)</td><td>No</td><td>No</td></tr>
+                    <tr><td>Network mocking</td><td class="yes">Yes</td><td>No</td><td>No</td><td>Yes</td></tr>
+                    <tr><td>Visual regression</td><td class="yes">Yes</td><td>No</td><td>No</td><td>No</td></tr>
+                    <tr><td>Audits (a11y/SEO/sec)</td><td class="yes">Yes, one call</td><td>No</td><td>Lighthouse</td><td>No</td></tr>
+                    <tr><td>Headless / CI</td><td class="yes">Yes</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="alt">
+    <div class="container">
+        <h2 class="section-title">Install it in three steps</h2>
+        <p class="section-lead">Requires Node.js 18+ and Chrome 135+.</p>
+        <ol class="steps">
+            <li>Install the extension from the <a href="https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb">Chrome Web Store</a>.
+<pre>git clone git@github.com:frsorrentino/chrome-bridge.git
+cd chrome-bridge &amp;&amp; ./install.sh</pre></li>
+            <li>Restart Claude Code. <code>install.sh</code> registers the MCP server with <code>--scope user</code>; by hand it is <code>claude mcp add --scope user chrome-bridge node /path/to/server/index.js</code>.</li>
+            <li>Ask for something real: <em>“open localhost:3000, run an accessibility audit and find the Sign Up button”</em>.</li>
+        </ol>
+        <p class="note"><strong>Without a clone:</strong> in Claude Code, <code>/plugin marketplace add frsorrentino/chrome-bridge</code> then <code>/plugin install chrome-bridge@chrome-bridge</code> registers the server from npm together with the recipes skill. Pick one path: the plugin and <code>install.sh</code> would register the same server twice.</p>
+        <p class="note"><strong>On ChromeOS/Crostini</strong> install from the Web Store rather than Load unpacked: an unpacked extension is dropped on every reboot, because the container is not mounted when Chrome starts.</p>
+    </div>
+</section>
+
+<section>
+    <div class="container">
+        <h2 class="section-title">What it does not protect</h2>
+        <p class="section-lead">The bridge binds loopback, accepts connections only from a <code>chrome-extension://</code> origin, and requires a token on both handshakes when one is set. Beyond that, be deliberate:</p>
+        <div class="cards">
+            <div class="card"><h3>Page content is untrusted</h3><p>Whatever a page says reaches the model unfiltered. A hostile page’s text is input, never instructions.</p></div>
+            <div class="card"><h3>Exports are not redacted</h3><p><code>get_storage</code>, fixtures, HAR exports and screenshots may carry cookies, tokens or personal data.</p></div>
+            <div class="card"><h3>Two switches worth knowing</h3><p><code>--no-js</code> refuses arbitrary JavaScript in the page; <code>--write-root</code> confines every path the model chooses.</p></div>
+        </div>
+        <p class="links">
+            <a href="https://github.com/frsorrentino/chrome-bridge/blob/main/docs/CAPABILITIES.md">What it gets past, and what it does not</a>
+            <a href="https://github.com/frsorrentino/chrome-bridge/blob/main/docs/PERFORMANCE.md">Latency per tool</a>
+            <a href="./privacy">Privacy policy</a>
+            <a href="./support">Support</a>
+        </p>
+    </div>
+</section>
+
+</main>
+
+<footer>
+    <div class="container">
+        <span>Chrome Bridge — MIT. Built by <a href="https://www.francescosorrentino.com/">Francesco Sorrentino</a>.</span>
+        <span>Self-hosted: no remote servers, no accounts, no data collection.</span>
+    </div>
+</footer>
+
+</body>
+</html>
