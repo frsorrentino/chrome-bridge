@@ -28,6 +28,15 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.18.0 — 2026-09-22
+
+Tre difetti visti sul campo il 2026-09-22, durante una ricerca su Pixabay
+guidata da un'altra sessione: `execute_js` senza modo di aspettare più di 30 s,
+un taglio dell'output che rompeva il JSON, una scheda di sessione sparita senza
+spiegazione. Nessun permesso Chrome nuovo; l'estensione cambia (registro delle
+schede chiuse, `discarded` in `get_tabs`) e passa dalla review normale dello
+Store: fino ad allora `closed_session_tabs` dà il motivo `unknown`.
+
 ### Added
 
 - `execute_js` takes `timeout` (ms, default 30000): a promise is awaited up to

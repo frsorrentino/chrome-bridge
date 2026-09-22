@@ -8,7 +8,7 @@
         "--prefix",
         "${PLUGIN_DATA}",
         "-y",
-        "chrome-bridge-mcp@1.17.0"
+        "chrome-bridge-mcp@1.18.0"
       ],
       "env": {
         "CHROME_BRIDGE_CAPS": "all"
