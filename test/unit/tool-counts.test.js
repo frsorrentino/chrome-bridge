@@ -34,7 +34,7 @@ test('il conteggio misurato è quello dichiarato nei metadati', () => {
 });
 
 test('README e listing non citano un conteggio diverso da quello misurato', () => {
-  for (const file of ['README.md', 'docs/index.md', 'docs/store/listing.md']) {
+  for (const file of ['README.md', 'docs/index.html', 'docs/store/listing.md']) {
     const text = read(file);
     // Qualunque "<numero> tools" nel testo deve essere il conteggio reale
     // (totale) o quello del set core.

@@ -113,6 +113,34 @@ function fitArray(items, max, serialize) {
   return items.slice(0, lo);
 }
 
+/**
+ * Output di execute_js sotto `max` senza rompere il JSON: tagliare la
+ * serializzazione a metà stringa dava «Invalid control character» a chi la
+ * parsava. Una stringa si accorcia dentro il suo valore, un array per elementi
+ * (jsonText), il resto diventa un prefisso dichiarato come tale.
+ */
+export function jsResultText(data, max) {
+  const text = JSON.stringify(data);
+  if (text == null || text.length <= max) return text;
+  const hint = 'raise max_length, or save_to for the whole result';
+  const value = data?.result;
+  const wrap = (field, cut, total) => JSON.stringify({ [field]: cut, truncated: true, total_chars: total, hint });
+  const fitString = (field, full) => {
+    // Gli escape JSON allungano la stringa: il prefisso più lungo che sta nel
+    // tetto si cerca sulla serializzazione, non sui caratteri grezzi.
+    let lo = 0;
+    let hi = Math.min(full.length, max);
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (wrap(field, full.slice(0, mid), full.length).length <= max) lo = mid; else hi = mid - 1;
+    }
+    return wrap(field, full.slice(0, lo), full.length);
+  };
+  if (typeof value === 'string') return fitString('result', value);
+  if (Array.isArray(value)) return jsonText(data, max, hint);
+  return fitString('result_json_prefix', JSON.stringify(value));
+}
+
 /** Una riga (oggetto colonna→valore o array di celle) soddisfa il filtro where. */
 function tableRowMatches(row, where) {
   return Object.entries(where).every(([col, needle]) => {
@@ -534,21 +562,38 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'get_tabs',
     'List every open tab with id, url, title, active flag and mine (created by this session). Read-only. Find a tab_id when the implicit '
-      + 'target is not the one you mean. include_windows adds position, size, state and type of each window — needed before moving or tiling.',
+      + 'target is not the one you mean. include_windows adds position, size, state and type of each window — needed before moving or tiling. '
+      + 'Session tabs gone since the last call come back once in closed_session_tabs with the reason (closed, window_closed, replaced, closed_by_bridge).',
     {
       include_windows: z.boolean().optional().default(false)
         .describe('Also return the windows with bounds, state, type and tab count'),
     },
     async ({ include_windows }) => {
-      const data = await send(MessageType.GET_TABS, { include_windows: include_windows === true });
+      // `ended` = le schede che il server sa sue: l'estensione dà il motivo di
+      // quelle che non trova più. Senza schede di sessione la risposta resta
+      // quella di sempre.
+      const data = await send(MessageType.GET_TABS, {
+        include_windows: include_windows === true,
+        ...(ownedTabs.size ? { ended: [...ownedTabs] } : {}),
+      });
       const list = Array.isArray(data) ? data : (data?.tabs ?? []);
+      const windows = Array.isArray(data) ? null : data?.windows;
       for (const t of list) if (ownedTabs.has(t.id)) t.mine = true;
-      return {
-        content: [{
-          type: 'text',
-          text: jsonText(data),
-        }],
-      };
+      const missing = [...ownedTabs].filter((id) => !list.some((t) => t.id === id));
+      const shaped = windows ? { tabs: list, windows } : list;
+      if (!missing.length) return { content: [{ type: 'text', text: jsonText(shaped) }] };
+
+      // Un'estensione precedente ignora `ended` e risponde con l'array: motivo ignoto.
+      const ended = (!Array.isArray(data) && data?.ended) || {};
+      const closed = missing.map((id) => ({ id, ...(ended[id] ?? { reason: 'unknown' }) }));
+      for (const c of closed) {
+        ownedTabs.delete(c.id);
+        const successor = c.replaced_by != null ? list.find((t) => t.id === c.replaced_by) : null;
+        // Scheda sostituita da Chrome: resta della sessione con il nuovo id.
+        if (successor) { ownedTabs.add(successor.id); successor.mine = true; }
+        if (sessionTabId === c.id) sessionTabId = successor?.id ?? null;
+      }
+      return { content: [{ type: 'text', text: jsonText({ tabs: list, ...(windows ? { windows } : {}), closed_session_tabs: closed }) }] };
     }
   );
 
@@ -645,21 +690,25 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- execute_js ---
   server.tool(
     'execute_js',
-    'Run JavaScript in the page (MAIN world). Requires the extension\'s "Allow user scripts" toggle; errors explain setup if disabled.',
+    'Run JavaScript in the page (MAIN world). Requires the extension\'s "Allow user scripts" toggle; errors explain setup if disabled. '
+      + 'A promise is awaited up to timeout. A cut result stays valid JSON and says truncated; save_to writes the whole result to disk.',
     {
       code:       z.string().describe('JS evaluated in the page; the value of the last expression is returned'),
       tab_id:     tabId,
       frame_id:   frameId,
       max_length: z.number().optional().default(20000).describe('Max output chars'),
+      timeout:    z.number().optional().describe('Max ms to wait for the result (default 30000); raise it for long async work'),
+      save_to:    saveToField('the result (a string as is, anything else as JSON)'),
     },
-    async ({ code, tab_id, frame_id, max_length }) => {
-      const data = await send(MessageType.EXECUTE_JS, { code, tab_id, frame_id });
-      return {
-        content: [{
-          type: 'text',
-          text: truncateText(JSON.stringify(data), max_length ?? DEFAULT_MAX_OUTPUT, 'max_length'),
-        }],
-      };
+    async ({ code, tab_id, frame_id, max_length, timeout, save_to }) => {
+      guardWrite(save_to);
+      const data = await send(MessageType.EXECUTE_JS, { code, tab_id, frame_id, ...(timeout ? { timeout } : {}) });
+      if (save_to) {
+        const value = data?.result;
+        const isString = typeof value === 'string';
+        return savedSummary(save_to, Buffer.from(isString ? value : JSON.stringify(value ?? null), 'utf8'), { format: isString ? 'text' : 'json' });
+      }
+      return { content: [{ type: 'text', text: jsResultText(data, max_length ?? DEFAULT_MAX_OUTPUT) }] };
     }
   );
 
@@ -1367,6 +1416,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         return { content: [{ type: 'text', text: jsonText({ closed }) }] };
       }
       const data = await send(MessageType.TAB_ACTION, { action, bypass_cache, tab_id });
+      if (action === 'close') ownedTabs.delete(data?.closed ?? tab_id ?? sessionTabId);
       if (action === 'close' && (tab_id == null || tab_id === sessionTabId)) sessionTabId = null;
       if (action === 'activate' && tab_id != null) sessionTabId = tab_id;
       return { content: [{ type: 'text', text: jsonText(data) }] };

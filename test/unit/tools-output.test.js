@@ -117,7 +117,9 @@ test('execute_js: max_length esplicito rispettato', async () => {
   const handlers = setup({ execute_js: { result: 'y'.repeat(5000) } });
   const text = textOf(await handlers.get('execute_js')({ code: '1', max_length: 100 }));
   assert.ok(text.length < 300, `output ${text.length} char, atteso troncato a ~100`);
-  assert.ok(text.includes('[truncated'));
+  // Il taglio resta JSON valido e lo dichiara: prima era un marcatore testuale
+  // appeso a metà stringa, che rompeva JSON.parse a chi leggeva il risultato.
+  assert.equal(JSON.parse(text).truncated, true);
 });
 
 test('full_page_screenshot: emette un blocco immagine per segmento', async () => {

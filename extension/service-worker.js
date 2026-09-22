@@ -683,7 +683,7 @@ async function bitmapToBase64Capped(bitmap, maxSide = MAX_IMAGE_SIDE) {
 
 // --- Implementazione comandi ---
 
-async function cmdGetTabs({ include_windows = false } = {}) {
+async function cmdGetTabs({ include_windows = false, ended } = {}) {
   const tabs = await chrome.tabs.query({});
   const list = tabs.map((t) => ({
     id: t.id,
@@ -691,8 +691,17 @@ async function cmdGetTabs({ include_windows = false } = {}) {
     title: t.title,
     active: t.active,
     windowId: t.windowId,
+    // Una scheda scartata da Chrome (memory saver) esiste ancora ma non ha un
+    // renderer: execute_js e compagni falliscono finché non torna in primo piano.
+    ...(t.discarded ? { discarded: true } : {}),
   }));
-  if (!include_windows) return list;
+  // ended = id che il server sa suoi e non trova più: la forma ad array resta
+  // quella di sempre per chi non lo chiede.
+  const open = new Set(list.map((t) => t.id));
+  const endings = Array.isArray(ended) && ended.length
+    ? Object.fromEntries(ended.filter((id) => !open.has(id)).map((id) => [id, tabEndings.get(id) ?? { reason: 'unknown' }]))
+    : null;
+  if (!include_windows) return endings ? { tabs: list, ended: endings } : list;
 
   // Senza geometria e stato non si può decidere dove mettere una finestra: si
   // può solo indovinare. `left` in particolare è ciò che identifica il monitor
@@ -712,7 +721,7 @@ async function cmdGetTabs({ include_windows = false } = {}) {
     // provarci.
     scriptable: (w.tabs || []).some((t) => /^(https?|file):/i.test(t.url || '')),
   }));
-  return { tabs: list, windows };
+  return endings ? { tabs: list, windows, ended: endings } : { tabs: list, windows };
 }
 
 async function cmdNavigate({ url, tab_id }) {
@@ -1189,12 +1198,26 @@ async function cmdMoveTab({ tab_id, window_id, new_window = false, window_type, 
   };
 }
 
+// Perché una scheda non c'è più: «No tab with id» da solo non distingue una
+// chiusura a mano da una sostituzione. In memoria e limitato: se il service
+// worker riparte il registro si svuota e il motivo torna 'unknown'.
+const tabEndings = new Map();
+const TAB_ENDINGS_MAX = 200;
+const bridgeClosing = new Set();
+
+function recordTabEnding(tabId, ending) {
+  if (bridgeClosing.delete(tabId) && ending.reason === 'closed') ending = { reason: 'closed_by_bridge' };
+  tabEndings.set(tabId, { ...ending, at: new Date().toISOString() });
+  if (tabEndings.size > TAB_ENDINGS_MAX) tabEndings.delete(tabEndings.keys().next().value);
+}
+
 async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
   if (!action) throw new Error('Missing required parameter: action');
   const tabId = await resolveTabId(tab_id);
 
   if (action === 'close') {
-    await chrome.tabs.remove(tabId);
+    bridgeClosing.add(tabId);
+    try { await chrome.tabs.remove(tabId); } catch (e) { bridgeClosing.delete(tabId); throw e; }
     return { action, closed: tabId };
   }
   if (action === 'discard') {
@@ -4561,9 +4584,16 @@ async function cmdHttpAuth({ action, username, password }) {
 
 // --- Tab lifecycle: cleanup injection state ---
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+chrome.tabs.onRemoved.addListener((tabId, info) => {
   browserNetLog.delete(tabId);
   mainFrameHeaders.delete(tabId);
+  recordTabEnding(tabId, { reason: info?.isWindowClosing ? 'window_closed' : 'closed' });
+});
+
+// Chrome sostituisce l'id quando rimpiazza la scheda (prerender, alcuni
+// discard): per chi teneva il vecchio id è una scheda sparita senza chiusura.
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  recordTabEnding(removedTabId, { reason: 'replaced', replaced_by: addedTabId });
 });
 
 // --- get_interactives ---

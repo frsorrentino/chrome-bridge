@@ -28,6 +28,33 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+### Added
+
+- `execute_js` takes `timeout` (ms, default 30000): a promise is awaited up to
+  it. Before, a script with 54 sequential fetches died at 30 s with no way to
+  raise the limit. Measured live: a 35 s promise fails at 30 006 ms without it,
+  returns `done` at 35 022 ms with `timeout: 45000`. The `chrome-bridge` CLI
+  now honours a command's `timeout` the way the MCP server already did.
+- `execute_js` takes `save_to`: the whole result goes to disk (a string as is,
+  anything else as JSON) and only the path and size come back.
+- `get_tabs` reports, once, the session tabs that disappeared since the last
+  call, in `closed_session_tabs` with the reason the extension saw (`closed`,
+  `window_closed`, `replaced` with `replaced_by`, `closed_by_bridge`,
+  `unknown` after a service-worker restart or with an older extension). A tab
+  Chrome replaces stays a session tab under its new id. Tabs discarded by
+  Chrome carry `discarded: true`. Before, the only trace was
+  `No tab with id` on the next command.
+
+### Fixed
+
+- `execute_js` truncation kept the output valid JSON only by accident: the
+  serialization was cut mid-string and a text marker appended, so a caller
+  parsing it got `Invalid control character at char 59999`. Now a string is
+  shortened inside its value, an array loses whole elements, anything else
+  becomes a declared `result_json_prefix`; all carry `truncated: true`.
+- `test/unit/tool-counts.test.js` read `docs/index.md`, removed in 25db62a
+  when the page became `docs/index.html`: it now checks the HTML page.
+
 ## 1.17.0 — 2026-09-11
 
 Il ciclo nato dalla verifica concorrenti del 2026-09-11

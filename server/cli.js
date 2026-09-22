@@ -119,10 +119,13 @@ function connect(port) {
         sendCommand(type, params = {}) {
           return new Promise((res, rej) => {
             const command = createCommand(type, params);
+            // Come ws-manager: un timeout chiesto dal comando alza quello di trasporto.
+            const asked = Number(params?.timeout);
+            const timeout = Number.isFinite(asked) && asked > 0 ? Math.max(getTimeout(type), asked + 5000) : getTimeout(type);
             const timer = setTimeout(() => {
               pending.delete(command.id);
-              rej(new Error(`Command ${type} timed out after ${getTimeout(type)}ms`));
-            }, getTimeout(type));
+              rej(new Error(`Command ${type} timed out after ${timeout}ms`));
+            }, timeout);
             pending.set(command.id, { res, rej, timer });
             ws.send(JSON.stringify(command));
           });
