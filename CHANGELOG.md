@@ -2,10 +2,40 @@
 
 ## Unreleased
 
-### Fixed — field observations of 2026-09-23 (Meta Ads Manager, francescosorrentino.com)
+### Difetto aperto, riproducibile, senza rimedio deciso
 
-Triage and evidence in `docs/osservazioni-campo-2026-09.md`. No new Chrome
-permission; the extension changes and goes through the normal Store review.
+`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
+finestra con dentro sessioni terminale vive:
+
+    -> Command tab_action timed out after 30000ms
+    -> la scheda NON viene chiusa
+
+Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
+sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
+aspettarla — **non verificato**: al momento della scoperta nessuno poteva
+guardare lo schermo, e non si progetta un rimedio partendo da una causa non
+osservata.
+
+La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
+quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
+esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
+uno che rifiuta subito.
+
+**Rimedio misurato il 2026-09-11 (dal vivo, finestra con 8 sessioni):** la
+home non si chiude finché ha compagnia, ma si può portare via da sola:
+`move_tab {tab_id: home, new_window: true, window_type: popup}` lascia la
+finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
+suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
+nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.19.0 — 2026-09-23
+
+Difetti visti sul campo il 2026-09-22 e 23 da altre sessioni (Meta Ads Manager,
+francescosorrentino.com), smistati con la prova in
+`docs/osservazioni-campo-2026-09.md`. Nessun permesso Chrome nuovo;
+l'estensione cambia e passa dalla review normale dello Store.
+
+### Fixed
 
 - **Refs no longer change meaning.** `get_interactives`, the `navigate`
   preview and the neighbours attached by `find_text` each restarted at `n1`
@@ -40,32 +70,6 @@ permission; the extension changes and goes through the normal Store review.
 - Server instructions, README troubleshooting and a skill recipe for heavy web
   apps: hidden windows, no phone emulation, `isTrusted: false` events, the
   client's `[media removed: request limit]`.
-
-### Difetto aperto, riproducibile, senza rimedio deciso
-
-`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
-finestra con dentro sessioni terminale vive:
-
-    -> Command tab_action timed out after 30000ms
-    -> la scheda NON viene chiusa
-
-Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
-sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
-aspettarla — **non verificato**: al momento della scoperta nessuno poteva
-guardare lo schermo, e non si progetta un rimedio partendo da una causa non
-osservata.
-
-La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
-quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
-esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
-uno che rifiuta subito.
-
-**Rimedio misurato il 2026-09-11 (dal vivo, finestra con 8 sessioni):** la
-home non si chiude finché ha compagnia, ma si può portare via da sola:
-`move_tab {tab_id: home, new_window: true, window_type: popup}` lascia la
-finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
-suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
-nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
 ## 1.18.0 — 2026-09-22
 
