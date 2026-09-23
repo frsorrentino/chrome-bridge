@@ -16,6 +16,8 @@
  * - due lock, in quest'ordine: flock su <dir>/.lock dove c'è flock(1), poi
  *   sempre la cartella <plugin>.jsonl.lock creata con mkdir; file 0600 in una
  *   cartella 0700, sostituzione atomica;
+ * - lock occupato oltre l'attesa: la voce va in <plugin>.pending.jsonl con
+ *   una scrittura in append, e la incorpora il prossimo che ha il lock;
  * - un file con record di formato più nuovo non si riscrive.
  * scrub e normalize sono il porting di quelle di observe.py: il test
  * observe-parity li confronta sugli stessi testi.
@@ -23,7 +25,8 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {
-  chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, statSync, writeSync,
+  appendFileSync, chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, statSync,
+  unlinkSync, writeSync,
 } from 'node:fs';
 import { homedir, release, type } from 'node:os';
 import { basename, join } from 'node:path';
@@ -138,28 +141,62 @@ function rotate(recs, config, now) {
   return kept;
 }
 
-/** Legge, aggiorna e riscrive il file. Va chiamata con i lock presi. */
+// Aggiunge o aggiorna il record nella lista: la stessa logica di apply() in
+// observe.py (count, last_seen, fino a tre esempi, campi scritti a mano).
+function applyRecord(recs, id, fields, example, now) {
+  let r = recs.find((x) => x.id === id);
+  if (!r) {
+    r = {
+      v: FORMAT, id, tool: TOOL, count: 0, first_seen: now, examples: [], workaround: null,
+      class: null, status: 'new', ...fields,
+    };
+    recs.push(r);
+  } else {
+    for (const k of ['workaround', 'class', 'note', 'context']) if (fields[k]) r[k] = fields[k];
+    if (r.status === 'done' && String(fields.source || '').startsWith('hook')) r.status = 'new';
+  }
+  r.count = Number(r.count || 0) + (example != null || !r.count ? 1 : 0);
+  r.last_seen = Math.max(Number(r.last_seen || 0), now);
+  if (example != null) r.examples = [...(r.examples || []).slice(-2), { ...example, at: now }];
+  return r;
+}
+
+const pendingPath = (dir) => join(dir, `${TOOL}.pending.jsonl`);
+
+/**
+ * Legge, incorpora le voci in attesa, aggiorna e riscrive il file. Va
+ * chiamata con i lock presi. null = file di formato più nuovo, non toccato.
+ */
 export function applyEntry(dir, entry, config, nowSec = Date.now() / 1000) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const path = join(dir, `${TOOL}.jsonl`);
   const recs = readRecords(path);
-  // Un file scritto da una copia più nuova (formato incompatibile): non si tocca.
-  if (recs.some((r) => Number(r.v || 1) > FORMAT)) return null;
-  const now = Math.round(nowSec * 1000) / 1000;
-  let r = recs.find((x) => x.id === entry.id);
-  if (!r) {
-    r = {
-      v: FORMAT, id: entry.id, tool: TOOL, count: 0, first_seen: now, examples: [], workaround: null,
-      class: null, status: 'new', ...entry.fields,
-    };
-    recs.push(r);
-  } else if (entry.fields.context) {
-    r.context = entry.fields.context;
+  // Le voci rimaste in attesa (lock occupato, FORMAT.md «Pending»): si
+  // spostano da parte e si applicano come appena registrate; il file preso si
+  // cancella solo dopo la riscrittura.
+  const pending = pendingPath(dir);
+  let taken = null;
+  try {
+    const t = `${join(dir, `${TOOL}.pending`)}.${process.pid}.taking`;
+    renameSync(pending, t);
+    taken = t;
+  } catch { /* nessuna voce in attesa */ }
+  const takenText = taken ? readFileSync(taken, 'utf8') : '';
+  // Un file scritto da una copia più nuova (formato incompatibile): non si
+  // tocca, e le voci prese tornano in attesa.
+  if (recs.some((r) => Number(r.v || 1) > FORMAT)) {
+    if (taken) { appendFileSync(pending, takenText, { mode: 0o600 }); unlinkSync(taken); }
+    return null;
   }
-  r.count = Number(r.count || 0) + 1;
-  r.last_seen = now;
-  r.examples = [...(r.examples || []).slice(-2), { ...entry.example, at: now }];
+  for (const line of takenText.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      if (Number(e.v || 1) <= FORMAT && e.id) applyRecord(recs, e.id, e.fields || {}, e.example ?? null, Number(e.at) || nowSec);
+    } catch { /* riga rotta: si salta */ }
+  }
+  const r = entry ? applyRecord(recs, entry.id, entry.fields, entry.example, Math.round(nowSec * 1000) / 1000) : null;
   const kept = rotate(recs, config, nowSec);
   const tmp = `${path}.tmp`;
   const fd = openSync(tmp, 'w', 0o600);
@@ -170,7 +207,23 @@ export function applyEntry(dir, entry, config, nowSec = Date.now() / 1000) {
   }
   chmodSync(tmp, 0o600);
   renameSync(tmp, path);
-  return r;
+  if (taken) unlinkSync(taken);
+  return r ?? true;
+}
+
+/**
+ * Lock occupato oltre l'attesa: la voce non si perde, va in
+ * <plugin>.pending.jsonl con UNA scrittura in append (atomica senza lock per
+ * righe così piccole). La incorpora il prossimo scrittore che ha il lock.
+ */
+export function appendPending(dir, entry, nowSec = Date.now() / 1000) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const line = JSON.stringify({
+    v: FORMAT, tool: TOOL, id: entry.id, fields: entry.fields, example: entry.example ?? null,
+    at: Math.round(nowSec * 1000) / 1000,
+  }) + '\n';
+  const fd = openSync(pendingPath(dir), 'a', 0o600);
+  try { writeSync(fd, line); } finally { closeSync(fd); }
 }
 
 // Secondo lock del protocollo (FORMAT.md, «Lock»), sempre preso: la cartella
@@ -179,6 +232,7 @@ export function applyEntry(dir, entry, config, nowSec = Date.now() / 1000) {
 // morto; l'attesa complessiva si ferma a deadline (circa 3 s dall'inizio).
 export const LOCK_WAIT_MS = 3000;
 const LOCK_STALE_MS = 10000;
+export const BUSY = Symbol('lock busy');
 
 export async function withDirLock(dir, fn, deadline = Date.now() + LOCK_WAIT_MS) {
   const lock = join(dir, `${TOOL}.jsonl.lock`);
@@ -188,7 +242,7 @@ export async function withDirLock(dir, fn, deadline = Date.now() + LOCK_WAIT_MS)
       try {
         if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { rmdirSync(lock); continue; }
       } catch { continue; /* sparita nel frattempo: si riprova subito */ }
-      if (Date.now() > deadline) return null;
+      if (Date.now() > deadline) return BUSY;
       await new Promise((r) => setTimeout(r, 50));
     }
   }
@@ -196,6 +250,9 @@ export async function withDirLock(dir, fn, deadline = Date.now() + LOCK_WAIT_MS)
 }
 
 const SELF = fileURLToPath(import.meta.url);
+// Codici d'uscita del figlio: lock occupato (flock -E o cartella) contro
+// guasto vero. Solo il primo manda la voce in attesa.
+const EXIT_BUSY = 75;
 
 // Primo lock, dove c'è flock(1): la scrittura gira in un figlio sotto
 // `flock -x <dir>/.lock`, lo stesso lock di fcntl.flock in observe.py. Le
@@ -204,11 +261,11 @@ const SELF = fileURLToPath(import.meta.url);
 function writeUnderFlock(dir, entry, env, deadline) {
   const wait = String(Math.max(1, Math.ceil((deadline - Date.now()) / 1000)));
   return new Promise((resolve) => {
-    const child = spawn('flock', ['-x', '-w', wait, join(dir, '.lock'), process.execPath, SELF, '--write'], {
+    const child = spawn('flock', ['-x', '-w', wait, '-E', String(EXIT_BUSY), join(dir, '.lock'), process.execPath, SELF, '--write'], {
       stdio: ['pipe', 'ignore', 'ignore'], env,
     });
     child.on('error', () => resolve('no-flock'));
-    child.on('exit', (code) => resolve(code === 0 ? 'ok' : 'failed'));
+    child.on('exit', (code) => resolve(code === 0 ? 'ok' : code === EXIT_BUSY ? 'busy' : 'failed'));
     child.stdin.end(JSON.stringify({ dir, entry, deadline }));
   });
 }
@@ -230,15 +287,18 @@ export function createObserver({ env = process.env, version = '' } = {}) {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         const entry = buildEntry({ name, args, message, durationMs, version, env });
         const deadline = Date.now() + LOCK_WAIT_MS;
-        const how = await writeUnderFlock(dir, entry, env, deadline);
-        if (how === 'no-flock') await withDirLock(dir, () => applyEntry(dir, entry, config), deadline);
+        let how = await writeUnderFlock(dir, entry, env, deadline);
+        if (how === 'no-flock') {
+          how = (await withDirLock(dir, () => applyEntry(dir, entry, config), deadline)) === BUSY ? 'busy' : 'ok';
+        }
+        if (how === 'busy') appendPending(dir, entry);
       }).catch(() => { /* annotare un errore non deve mai produrne un altro */ });
       return chain;
     },
   };
 }
 
-// Modalità figlio: `node observe.js --write` con {dir, entry} su stdin.
+// Modalità figlio: `node observe.js --write` con {dir, entry, deadline} su stdin.
 if (process.argv[1] === SELF && process.argv[2] === '--write') {
   let input = '';
   process.stdin.on('data', (d) => { input += d; });
@@ -246,7 +306,7 @@ if (process.argv[1] === SELF && process.argv[2] === '--write') {
     try {
       const { dir, entry, deadline } = JSON.parse(input);
       withDirLock(dir, () => applyEntry(dir, entry, loadConfig(process.env)), deadline)
-        .then((r) => process.exit(r ? 0 : 1), () => process.exit(1));
+        .then((r) => process.exit(r === BUSY ? EXIT_BUSY : 0), () => process.exit(1));
     } catch {
       process.exit(1);
     }

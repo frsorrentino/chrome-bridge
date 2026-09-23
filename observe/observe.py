@@ -439,6 +439,19 @@ class Box:
                     raise TimeoutError(f"lock {self.lock}")
                 time.sleep(0.05)
         self.recs = read(self.path)
+        # le voci rimaste in attesa (lock occupato): si incorporano ora, sotto lock, e il file si svuota all'uscita
+        self.pending = Path(str(pending_path(self.path.stem)))
+        self.taken = None
+        if self.pending.exists():
+            self.taken = self.pending.with_suffix(f".{os.getpid()}.taking")
+            try:
+                os.replace(self.pending, self.taken)
+                for e in read(self.taken):
+                    if int(e.get("v") or 1) <= FORMAT and e.get("id"):
+                        apply(self.recs, e.get("tool") or self.path.stem, e["id"], e.get("fields") or {}, e.get("example"),
+                              float(e.get("at") or time.time()))
+            except OSError:
+                self.taken = None
         return self
 
     def __exit__(self, *exc):
@@ -450,6 +463,15 @@ class Box:
                 for r in self.recs:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
             os.replace(tmp, self.path)
+            if self.taken is not None:
+                self.taken.unlink(missing_ok=True)
+        elif self.taken is not None:
+            try:   # non riscritto: le voci prese tornano in attesa
+                with open(self.pending, "a") as f:
+                    f.write(self.taken.read_text())
+                self.taken.unlink()
+            except OSError:
+                pass
         try:
             os.rmdir(self.lock)
         except OSError:
@@ -496,26 +518,48 @@ def all_records():
     return out
 
 
-def record(tool, rec_id, fields, example=None):
-    """Aggiunge o aggiorna (count, last_seen, fino a tre esempi) il record rec_id nella casella dello strumento."""
-    now = round(time.time(), 3)   # frazioni di secondo: un aggiornamento nello stesso secondo dell'avviso conta
-    with Box(tool) as box:
-        r = next((x for x in box.recs if x.get("id") == rec_id), None)
-        if r is None:
-            r = {"v": FORMAT, "id": rec_id, "tool": tool, "count": 0, "first_seen": now, "examples": [], "workaround": None,
-                 "class": None, "status": "new", **fields}
-            box.recs.append(r)
-        else:
-            for k in ("workaround", "class", "note", "context"):
-                if fields.get(k):
-                    r[k] = fields[k]
-            if r.get("status") == "done" and fields.get("source", "").startswith("hook"):
-                r["status"] = "new"   # un errore segnato risolto che torna: va rivisto
-        r["count"] = int(r.get("count") or 0) + (1 if example is not None or not r["count"] else 0)
-        r["last_seen"] = now
-        if example is not None:
-            r["examples"] = (r.get("examples") or [])[-2:] + [dict(example, at=now)]
+def apply(recs, tool, rec_id, fields, example, now):
+    """Aggiunge o aggiorna (count, last_seen, fino a tre esempi) il record rec_id nella lista."""
+    r = next((x for x in recs if x.get("id") == rec_id), None)
+    if r is None:
+        r = {"v": FORMAT, "id": rec_id, "tool": tool, "count": 0, "first_seen": now, "examples": [], "workaround": None,
+             "class": None, "status": "new", **fields}
+        recs.append(r)
+    else:
+        for k in ("workaround", "class", "note", "context"):
+            if fields.get(k):
+                r[k] = fields[k]
+        if r.get("status") == "done" and fields.get("source", "").startswith("hook"):
+            r["status"] = "new"   # un errore segnato risolto che torna: va rivisto
+    r["count"] = int(r.get("count") or 0) + (1 if example is not None or not r["count"] else 0)
+    r["last_seen"] = max(float(r.get("last_seen") or 0), now)
+    if example is not None:
+        r["examples"] = (r.get("examples") or [])[-2:] + [dict(example, at=now)]
     return r
+
+
+def pending_path(tool):
+    return box_dir() / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', tool)}.pending.jsonl"
+
+
+def record(tool, rec_id, fields, example=None):
+    """Registra nella casella del plugin. Se il lock resta occupato oltre l'attesa (carico alto: il 23/09 un record si
+    perdeva in silenzio), la voce va in <plugin>.pending.jsonl con una sola scrittura in append, atomica senza lock; il
+    prossimo scrittore che ha il lock la incorpora (FORMAT.md). Niente si perde."""
+    now = round(time.time(), 3)   # frazioni di secondo: un aggiornamento nello stesso secondo dell'avviso conta
+    try:
+        with Box(tool) as box:
+            return apply(box.recs, tool, rec_id, fields, example, now)
+    except TimeoutError:
+        line = json.dumps({"v": FORMAT, "tool": tool, "id": rec_id, "fields": fields, "example": example, "at": now},
+                          ensure_ascii=False) + "\n"
+        box_dir().mkdir(parents=True, exist_ok=True)
+        fd = os.open(pending_path(tool), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
+        return {"id": rec_id, "tool": tool, "pending": True, **fields}
 
 
 def rid(tool, key):

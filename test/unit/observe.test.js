@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync, existsSync, mkdirSy
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  scrub, normalize, rid, shape, applyEntry, buildEntry, createObserver, withDirLock, TOOL,
+  scrub, normalize, rid, shape, applyEntry, buildEntry, createObserver, withDirLock, appendPending, BUSY, TOOL,
 } from '../../server/observe.js';
 import { registerTools } from '../../server/tools.js';
 
@@ -138,7 +138,7 @@ test('cartella di lock occupata: si aspetta fino alla scadenza, poi si rinuncia 
   mkdirSync(join(dir, `${TOOL}.jsonl.lock`));
   const t0 = Date.now();
   const r = await withDirLock(dir, () => 'scritto', Date.now() + 300);
-  assert.equal(r, null);
+  assert.equal(r, BUSY);
   assert.ok(Date.now() - t0 < 1500);
 });
 
@@ -163,17 +163,65 @@ test('server e hook Python in parallelo sullo stesso file: nessun aggiornamento 
   });
   // Un osservatore per scrittura: processi server diversi, come primary e relay.
   const node = (n) => createObserver({ env, version: '1.19.0' }).error('navigate', {}, `No tab with id: ${n}.`, 1);
-  const t0 = Date.now();
   await Promise.all([1, 2, 3, 4, 5, 6].map((n) => (n % 2 ? py(n) : node(n))));
-  const elapsed = Date.now() - t0;
+  // Chi non ottiene i lock in tempo lascia la voce in attesa (pending): la
+  // incorpora il prossimo scrittore. Una scrittura finale li raccoglie tutti.
+  await node(7);
   const recs = readFileSync(join(root, 'claude-observe', `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(recs.length, 1);
-  // Il protocollo ammette una rinuncia: chi non ottiene i lock in circa 3 s
-  // lascia perdere quel record (macchina molto carica). Una scrittura persa
-  // a lock aperti, invece, si vedrebbe con un count basso in fretta.
-  if (recs[0].count < 6) assert.ok(elapsed >= 3000, `count ${recs[0].count} in ${elapsed} ms: aggiornamento perso senza attesa scaduta`);
-  assert.ok(recs[0].count >= 1 && recs[0].count <= 6);
+  assert.equal(recs[0].count, 7, 'nessun aggiornamento perso');
+  assert.ok(!existsSync(join(root, 'claude-observe', `${TOOL}.pending.jsonl`)));
   assert.ok(!existsSync(join(root, 'claude-observe', `${TOOL}.jsonl.lock`)));
+});
+
+test('lock occupato oltre l\'attesa: la voce va in pending e il prossimo scrittore la incorpora', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const env = { XDG_STATE_HOME: root, CLAUDE_OBSERVE_CONFIG: join(root, 'none.json'), PATH: '/nonexistent' };
+  const box = join(root, 'claude-observe');
+  const lock = join(box, `${TOOL}.jsonl.lock`);
+  mkdirSync(lock, { recursive: true });
+  // PATH senza flock(1): solo la cartella di lock, che resta occupata.
+  await createObserver({ env }).error('click', { selector: '#r1' }, 'Element not found: #row-1', 1);
+  const line = JSON.parse(readFileSync(join(box, `${TOOL}.pending.jsonl`), 'utf8'));
+  assert.deepEqual(Object.keys(line).sort(), ['at', 'example', 'fields', 'id', 'tool', 'v']);
+  assert.equal(line.fields.call, 'mcp__chrome-bridge__click');
+  assert.ok(!existsSync(join(box, `${TOOL}.jsonl`)));
+  (await import('node:fs')).rmdirSync(lock);
+  await createObserver({ env }).error('click', { selector: '#r2' }, 'Element not found: #row-2', 1);
+  const recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].count, 2);
+  assert.ok(!existsSync(join(box, `${TOOL}.pending.jsonl`)), 'pending incorporato e cancellato');
+});
+
+test('pending fra le due copie: una riga scritta dal server la incorpora observe.py, e viceversa', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const box = join(root, 'claude-observe');
+  const env = { ...process.env, XDG_STATE_HOME: root, CLAUDE_OBSERVE_CONFIG: join(root, 'none.json'), CHROME_BRIDGE_OBSERVE: '', CLAUDE_CONFIG_DIR: join(root, 'cfg') };
+  appendPending(box, buildEntry({ name: 'navigate', args: {}, message: 'No tab with id: 1.' }));
+  const hook = spawnSync('python3', ['-B', PY, 'hook'], {
+    input: JSON.stringify({ hook_event_name: 'PostToolUseFailure', tool_name: 'mcp__chrome-bridge__navigate', tool_input: {}, error: 'No tab with id: 2.', cwd: root }),
+    env, encoding: 'utf8',
+  });
+  assert.equal(hook.status, 0, hook.stderr);
+  let recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs[0].count, 2, 'observe.py ha incorporato la riga del server');
+  assert.ok(!existsSync(join(box, `${TOOL}.pending.jsonl`)));
+  // Ora una riga in attesa scritta da observe.py (record() con il lock occupato).
+  mkdirSync(join(box, `${TOOL}.jsonl.lock`));
+  const py = spawnSync('python3', ['-B', '-c', [
+    'import sys', `sys.path.insert(0, ${JSON.stringify(join(REPO, 'observe'))})`, 'import observe',
+    'observe.LOCK_WAIT_S = 0.2',
+    'k = observe.normalize("mcp__chrome-bridge__navigate No tab with id: 3.")',
+    'print(observe.record("chrome-bridge", observe.rid("chrome-bridge", k), {"source": "hook-mcp", "kind": "error", "call": "mcp__chrome-bridge__navigate", "key": k}, {"error_raw": "x"}).get("pending"))',
+  ].join('\n')], { env, encoding: 'utf8' });
+  assert.equal(py.stdout.trim(), 'True', py.stderr);
+  (await import('node:fs')).rmdirSync(join(box, `${TOOL}.jsonl.lock`));
+  await createObserver({ env }).error('navigate', {}, 'No tab with id: 4.', 1);
+  recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].count, 4, 'il server ha incorporato la riga di observe.py');
+  assert.ok(!existsSync(join(box, `${TOOL}.pending.jsonl`)));
 });
 
 test('l\'id del server è quello dell\'hook: stesso call MCP completo, stesso testo che Claude Code mostra', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
