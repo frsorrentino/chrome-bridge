@@ -64,6 +64,10 @@ async function main() {
       'For more than one field use fill_form once (with submit_selector to submit in the same call) instead of repeated type_text: one turn instead of N.',
       'For tables use extract_table (server-side where/columns filtering) or extract, never read_page: read_page on a big table costs tens of thousands of tokens for data you filter anyway.',
       'To read detail in a screenshot, crop and zoom with element_screenshot (selector or region, scale) instead of taking another full one; to check an outcome, assert or wait_for poll for you — one call, no screenshot.',
+      // Il blocco più frequente sul campo (Meta Ads Manager, 23/09/2026): tre
+      // attese scadute e due screenshot falliti prima di capire che la
+      // finestra era dietro un'altra.
+      'A tab in a minimized, covered or background window does not render: screenshots fail and page timers slow down. get_page_info reports visibility; page_hidden in a result means the same. Bring the window on screen, or create_tab new_window with bounds.',
     ].join(' '),
   });
 

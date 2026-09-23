@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Fixed — field observations of 2026-09-23 (Meta Ads Manager, francescosorrentino.com)
+
+Triage and evidence in `docs/osservazioni-campo-2026-09.md`. No new Chrome
+permission; the extension changes and goes through the normal Store review.
+
+- **Refs no longer change meaning.** `get_interactives`, the `navigate`
+  preview and the neighbours attached by `find_text` each restarted at `n1`
+  and replaced the tab's map: after a `find_text`, `n3` pointed at another
+  element and a click landed on it without error (and older refs such as
+  `n47` vanished). Now a selector keeps its ref, numbers are never reused, and
+  `navigate` clears the map without resetting the counter. `Unknown ref` says
+  why (never issued, issued before the last navigate, evicted).
+- **`wait_for` text/element and `scroll until` honour their timeout on hidden
+  tabs.** They polled inside the page with `setTimeout`, which Chrome slows
+  down on hidden pages: a 25 s wait failed at 60 s with a transport timeout.
+  The service worker now holds the deadline; a negative result on a hidden
+  page carries `page_hidden: true` and a hint.
+- **Screenshot errors say what happened.** The transport timeout (10 s) equalled
+  the capture timer, so the generic "the tab may be busy" always won over
+  "the window is not rendering frames"; it is now 15 s. `image readback
+  failed` is explained the same way.
+- **`find_text` finds labels split across nodes** (`<span>Prestazioni</span>
+  e <b>clic</b>`, `&nbsp;`), one match per occurrence on the innermost element,
+  and searches open shadow roots.
+- **`scroll until` scrolls the app's panel** when the document does not scroll
+  (new `container` param; the result names the container used). Before, it
+  stopped at once with `stopped_reason: bottom`.
+- **`screenshot presets` no longer labels a desktop capture `mobile`.** A width
+  the window manager refuses is reported as `NOT APPLIED`, with the page zoom,
+  and no image.
+
+### Added
+
+- `get_page_info` reports `visibility`; `move_tab` with `new_window` reports
+  whether the page ended up hidden; `viewport_resize` reports the page `zoom`.
+- Server instructions, README troubleshooting and a skill recipe for heavy web
+  apps: hidden windows, no phone emulation, `isTrusted: false` events, the
+  client's `[media removed: request limit]`.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

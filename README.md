@@ -180,7 +180,11 @@ paste into a chat.
 | `Port N is held by a process that is not chrome-bridge` | Something else owns the port. Free it or change `CHROME_BRIDGE_PORT`. |
 | `execute_js` fails | Enable **Allow user scripts** in `chrome://extensions` → Chrome Bridge → Details (Chrome 138+; on 135-137 enable Developer Mode). |
 | `read_console` returns `note=Instrumentation not loaded` | The page was opened before the extension, "Capture console & metrics" is off, or the page isn't injectable (`chrome://`). Reload it. |
-| Screenshot times out | On ChromeOS a fully occluded window stops producing frames; captures fail after 10s. Bring the window forward. |
+| Screenshot times out, or `image readback failed` | A minimized or fully covered window stops producing frames; captures fail after 10 s. Bring the window forward. |
+| `wait_for`/`scroll` return `page_hidden: true`, pages stop updating | Same cause: Chrome does not render a hidden page and slows its timers (after a few minutes, to one wake-up per minute). `get_page_info` reports `visibility`. Bring the window on screen, or `create_tab` with `new_window` and bounds. |
+| `screenshot presets` says `NOT APPLIED` | Presets resize the window; they do not emulate a phone (no device pixel ratio, UA or touch). The window manager enforces a minimum width, and no window exceeds the screen (e.g. at most a 1536×686 viewport on a 1536×864 ChromeOS screen). For phone emulation or larger viewports use a headless browser. |
+| `type_text` returns `mismatch: true` | The field rejected the value. Events from an extension have `isTrusted: false`, and some widgets (date pickers, search boxes with tokenizers) discard them. Try `mode: 'keys'`, then the site's own controls (the calendar buttons), or `handoff`. |
+| `[media removed: request limit]` instead of a screenshot | Written by the MCP client, not by the bridge: too many images in one request. Use `save_to`, or `element_screenshot` with `region` and a small `scale`. |
 | Commands work, then stop | The MV3 service worker restarted and in-memory state (network log, diff baselines, HTTP auth) was reset. Re-run the monitoring call. |
 | Extension dropped on every ChromeOS reboot | Install from the Web Store instead of Load unpacked. |
 | Tool missing from the list | It's in an opt-in group. Check `get_status` → `caps_available`, then set `CHROME_BRIDGE_CAPS=all`. |

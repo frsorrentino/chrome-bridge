@@ -150,8 +150,10 @@ highlighted diff; zoom into a region with `element_screenshot({region, scale:2})
 ### Three viewports
 Triggers: "check it on mobile/tablet/desktop", «com'è su telefono?».
 `screenshot({presets:['mobile','tablet','desktop'], save_to:'./shots'})`: one
-call, one file per viewport, window restored. Report overflow, overlapping
-elements, hidden CTAs. Dark mode: `emulate_media({colorScheme:'dark'})`.
+call, one file per viewport, window restored. Presets resize the window and
+do not emulate a phone: a width the window manager refuses comes back as
+`NOT APPLIED`, with no image — say so instead of judging the mobile layout.
+Report overflow, overlapping elements, hidden CTAs. Dark mode: `emulate_media({colorScheme:'dark'})`.
 Print stylesheet: `emulate_media({printMode:true})` then `screenshot`.
 
 ### Accessibility and keyboard navigation
@@ -263,6 +265,21 @@ notify-send, a hook>`. Say which one you set up. `watch({action:'list'})`,
 Triggers: "download the orders export and tell me…".
 `click` the export button → `manage_downloads({action:'wait_for_complete'})` → read the file
 with Claude Code. Spam in signups: `extract_table({where:{email:'/\\.ru$|xn--/'}})`.
+
+### Heavy web apps (Meta Ads Manager, Google Ads, big back offices)
+Triggers: "change the campaign budget", "read the ad set breakdown", «modifica
+la campagna su Ads Manager», «leggi i dati dell'inserzione».
+Keep the tab visible first: `get_page_info` must say `visibility: 'visible'`,
+else `create_tab({url, new_window:true, left, top, width, height})` on screen.
+Menus without ARIA roles: `find_text({text})` on the label, not
+`get_interactives` scoped by role. The app scrolls inside a panel:
+`scroll({action:'until', container})` (it picks the largest scrollable panel
+when the page itself does not scroll). Virtualized lists render the next rows
+only after a frame: scroll in one call, click in the next. Fields that save on
+Enter: `type_text` then `press_key({key:'Enter'})`. Several clicks on a React
+UI: one call per click, or `execute_js` with about 350 ms between them. A
+button that opens `window.open('')` navigates the tab away: override
+`window.open` with `execute_js` before clicking.
 
 ### Email deliverability
 Triggers: "do the site emails land in spam?". `navigate('https://www.mail-tester.com')`

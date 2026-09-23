@@ -22,9 +22,14 @@ function build(reply) {
 }
 
 test('screenshot presets: un resize e una cattura per preset, poi la finestra torna com\'era', async () => {
+  let width = 1600;
   const { handlers, sent } = build(async (t, p) => {
-    if (t === MessageType.VIEWPORT_RESIZE) return p.read_only ? { window: { width: 1600, height: 900, left: 0, top: 0 } } : { actual: {} };
-    if (t === MessageType.SCREENSHOT) return { image: PNG, viewport: { width: 375, height: 700 } };
+    if (t === MessageType.VIEWPORT_RESIZE) {
+      if (p.read_only) return { window: { width: 1600, height: 900, left: 0, top: 0 } };
+      width = p.preset === 'mobile' ? 375 : 1425;
+      return { actual: {} };
+    }
+    if (t === MessageType.SCREENSHOT) return { image: PNG, viewport: { width, height: 700 } };
     return {};
   });
   const dir = await mkdtemp(join(tmpdir(), 'cb-shots-'));
@@ -35,6 +40,17 @@ test('screenshot presets: un resize e una cattura per preset, poi la finestra to
   assert.deepEqual({ width: resizes[3].width, height: resizes[3].height }, { width: 1600, height: 900 }, 'ripristino');
   assert.deepEqual((await readdir(dir)).sort(), ['desktop.png', 'mobile.png']);
   assert.match(res.content[0].text, /mobile: .*mobile\.png \(viewport 375×700\)/);
+});
+
+test('screenshot presets: una larghezza rifiutata dal window manager non esce etichettata come mobile', async () => {
+  const { handlers } = build(async (t, p) => {
+    if (t === MessageType.VIEWPORT_RESIZE) return p.read_only ? { window: { width: 1600, height: 900 } } : { actual: {}, zoom: 0.67 };
+    if (t === MessageType.SCREENSHOT) return { image: PNG, viewport: { width: 2226, height: 1083 } };
+    return {};
+  });
+  const res = await handlers.get('screenshot').handler({ presets: ['mobile'] });
+  assert.deepEqual(res.content.map((c) => c.type), ['text'], 'nessuna immagine');
+  assert.match(res.content[0].text, /mobile: NOT APPLIED — viewport stayed 2226×1083 CSS px \(asked ~375, page zoom 67%\)/);
 });
 
 test('screenshot presets senza save_to restituisce le immagini con la riga del viewport', async () => {

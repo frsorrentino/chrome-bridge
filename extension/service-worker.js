@@ -11,6 +11,7 @@ import { pageFingerprint } from './lib/page-fingerprint.js';
 import { createPacer } from './lib/capture-pacing.js';
 import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
+import { findTextInPage } from './lib/find-text.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -603,9 +604,58 @@ async function captureVisible(windowId, options = { format: 'png' }) {
     }, 10000);
     chrome.tabs.captureVisibleTab(windowId, options).then(
       (dataUrl) => { clearTimeout(timer); resolve(dataUrl); },
-      (err) => { clearTimeout(timer); reject(err); },
+      (err) => {
+        clearTimeout(timer);
+        // «image readback failed» è lo stesso guasto della finestra che non
+        // disegna, detto dal compositor: stesso messaggio, stesso rimedio.
+        if (/readback failed/i.test(err?.message || '')) {
+          reject(new Error(`Capture failed (${err.message}): the window is not rendering frames (fully occluded, minimized, or frozen). Bring the Chrome window at least partially on screen and retry.`));
+        } else {
+          reject(err);
+        }
+      },
     );
   });
+}
+
+// --- Utility: scadenze tenute dal service worker ---
+// Le attese che girano nella pagina usano setTimeout, e Chrome raggruppa i
+// timer delle pagine nascoste fino a un risveglio al minuto: il controllo
+// della scadenza scattava tardi e vinceva il timeout di trasporto (60 s per
+// un'attesa da 25, osservato su Meta Ads Manager il 23/09/2026). Il service
+// worker non è rallentato: la scadenza la tiene lui.
+const HIDDEN_HINT = 'The page is hidden (window minimized, covered or in the background): Chrome slows its timers and stops rendering. Bring the window on screen, or create_tab new_window with bounds, then retry.';
+
+async function pageHidden(tabId) {
+  try {
+    const q = chrome.scripting.executeScript({ target: { tabId }, func: () => document.visibilityState === 'hidden' });
+    const r = await Promise.race([q, new Promise((res) => setTimeout(() => res(null), 1000))]);
+    return r?.[0]?.result === true;
+  } catch {
+    return false;
+  }
+}
+
+// Esegue run(); se non risponde entro deadlineMs restituisce onTimeout. In
+// entrambi i casi un esito negativo su pagina nascosta porta page_hidden e il
+// suggerimento, così chi chiama non ritenta tre volte la stessa attesa.
+async function withDeadline(tabId, deadlineMs, run, onTimeout, isNegative) {
+  const DEADLINE = Symbol('deadline');
+  let timer;
+  let result;
+  try {
+    result = await Promise.race([
+      run(),
+      new Promise((res) => { timer = setTimeout(() => res(DEADLINE), deadlineMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (result === DEADLINE) result = { ...onTimeout };
+  if (result && isNegative(result) && await pageHidden(tabId)) {
+    return { ...result, page_hidden: true, hint: HIDDEN_HINT };
+  }
+  return result;
 }
 
 // --- Utility: rendi visibile un tab per la cattura SENZA rubare il focus OS ---
@@ -1170,7 +1220,14 @@ async function cmdMoveTab({ tab_id, window_id, new_window = false, window_type, 
       if (typeof v === 'number') winOpts[k] = v;
     }
     const win = await chrome.windows.create(winOpts);
+    // La finestra nuova può nascere dietro un'altra (lo decide il window
+    // manager): allora la pagina resta hidden e non disegna. Lo si dice qui,
+    // non dopo tre attese scadute.
+    await new Promise((r) => setTimeout(r, 300));
+    const hidden = await pageHidden(tab_id);
     return {
+      visibility: hidden ? 'hidden' : 'visible',
+      ...(hidden ? { hint: HIDDEN_HINT } : {}),
       moved: tab_id,
       url: before.url,
       from_window: before.windowId,
@@ -1344,6 +1401,9 @@ async function cmdGetPageInfo({ tab_id, frame_id }) {
         url: location.href,
         doctype: document.doctype ? document.doctype.name : null,
         charset: document.characterSet,
+        // hidden = finestra minimizzata, coperta o in secondo piano: la pagina
+        // non disegna e i suoi timer rallentano. Va saputo prima di attendere.
+        visibility: document.visibilityState,
         metas,
         scripts,
         stylesheets,
@@ -1754,7 +1814,7 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
   const tabId = await resolveTabId(tab_id);
   const clampedInterval = Math.max(interval, 50);
 
-  const results = await chrome.scripting.executeScript({
+  const run = () => chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, tout, intv, vis) => {
       function deepQuery(sel) {
@@ -1806,8 +1866,9 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
     },
     args: [selector, timeout, clampedInterval, visible],
     world: 'MAIN',
-  });
-  return results?.[0]?.result ?? { found: false, error: 'No result' };
+  }).then((results) => results?.[0]?.result ?? { found: false, error: 'No result' });
+  return withDeadline(tabId, timeout + 1000, run,
+    { found: false, error: `Element not found within ${timeout}ms: ${selector}` }, (r) => r.found === false);
 }
 
 // --- scroll_to ---
@@ -2058,11 +2119,16 @@ async function cmdViewportResize({ preset, width, height, left, top, state, read
   }
   const winNow = await chrome.windows.get(tab.windowId);
   const geometry = { left: winNow.left, top: winNow.top, width: winNow.width, height: winNow.height, state: winNow.state };
-  if (read_only) return { actual, window: geometry, viewport_error };
+  // Uno zoom sotto il 100% allarga il viewport in CSS px oltre lo schermo:
+  // senza questo numero un 2226 px su uno schermo da 1536 non si spiega.
+  let zoom = null;
+  try { zoom = await chrome.tabs.getZoom(tabId); } catch { /* scheda senza zoom (chrome://) */ }
+  if (read_only) return { actual, window: geometry, zoom, viewport_error };
   const win = winNow;
   return {
     requested: { width: targetW, height: targetH, preset: preset || null, left, top, state },
     actual,
+    zoom,
     viewport_error,
     // Il window manager può accettare e ignorare: senza il confronto una
     // finestra rimasta ferma passerebbe per spostata.
@@ -3536,41 +3602,7 @@ async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (needleRaw, caseSensitive, maxResults) => {
-      const needle = caseSensitive ? needleRaw : needleRaw.toLowerCase();
-      const matches = [];
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-        acceptNode: (n) => {
-          const p = n.parentElement;
-          if (!p || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
-          return NodeFilter.FILTER_ACCEPT;
-        },
-      });
-      const selectorFor = (el) => {
-        if (el.id) return `#${el.id}`;
-        const tag = el.tagName.toLowerCase();
-        const cls = el.classList.length ? `.${[...el.classList].slice(0, 2).join('.')}` : '';
-        return `${tag}${cls}`;
-      };
-      let node;
-      while ((node = walker.nextNode()) && matches.length < maxResults) {
-        const hay = caseSensitive ? node.textContent : node.textContent.toLowerCase();
-        let idx = hay.indexOf(needle);
-        while (idx !== -1 && matches.length < maxResults) {
-          const parent = node.parentElement;
-          const rect = parent.getBoundingClientRect();
-          const ctx = node.textContent.substring(Math.max(0, idx - 40), idx + needleRaw.length + 40);
-          matches.push({
-            selector: selectorFor(parent),
-            context: ctx.trim(),
-            visible: rect.width > 0 && rect.height > 0,
-            position: { x: Math.round(rect.x + window.scrollX), y: Math.round(rect.y + window.scrollY) },
-          });
-          idx = hay.indexOf(needle, idx + 1);
-        }
-      }
-      return { count: matches.length, matches };
-    },
+    func: findTextInPage,
     args: [text, case_sensitive, max_results],
     world: 'MAIN',
   });
@@ -4448,7 +4480,7 @@ async function cmdWaitForText({ text, selector, timeout = 10000, interval = 200,
   if (!text) throw new Error('Missing required parameter: text');
   const tabId = await resolveTabId(tab_id);
 
-  const results = await chrome.scripting.executeScript({
+  const run = () => chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (needle, scopeSel, tout, intv) => new Promise((resolve) => {
       const started = Date.now();
@@ -4477,9 +4509,10 @@ async function cmdWaitForText({ text, selector, timeout = 10000, interval = 200,
     }),
     args: [text, selector || null, timeout, Math.max(50, interval)],
     world: 'MAIN',
-  });
+  }).then((results) => results?.[0]?.result ?? { found: false, error: 'No result' });
 
-  return results?.[0]?.result ?? { found: false, error: 'No result' };
+  return withDeadline(tabId, timeout + 1000, run,
+    { found: false, error: `Text not found within ${timeout}ms: ${text}` }, (r) => r.found === false);
 }
 
 async function cmdSavePage({ tab_id }) {
@@ -4707,52 +4740,92 @@ async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 10
 
 // --- scroll_until ---
 
-async function cmdScrollUntil({ until = 'no_new_content', selector, max_scrolls = 20, step_px, settle_ms = 400, tab_id }) {
+async function cmdScrollUntil({ until = 'no_new_content', selector, container, max_scrolls = 20, step_px, settle_ms = 400, tab_id }) {
   const tabId = await resolveTabId(tab_id);
   if (until === 'network_idle') await ensureNetworkHook(tabId);
-  const results = await chrome.scripting.executeScript({
+  const run = () => chrome.scripting.executeScript({
     target: { tabId },
-    func: (mode, sel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
+    func: (mode, sel, containerSel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const docEl = document.scrollingElement || document.documentElement;
+      const scrollable = (el) => {
+        if (el.scrollHeight <= el.clientHeight + 2) return false;
+        const oy = getComputedStyle(el).overflowY;
+        return oy === 'auto' || oy === 'scroll' || oy === 'overlay';
+      };
+      const describe = (el) => {
+        if (el.id) return `#${el.id}`;
+        const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '';
+        return el.tagName.toLowerCase() + cls;
+      };
+      // Le app come Ads Manager bloccano il documento e scorrono in un div
+      // interno: scorrendo solo window la condizione «bottom» era vera al
+      // primo giro. Senza container esplicito si prende il contenitore
+      // scorrevole più grande, ma solo se il documento non scorre.
+      let box = null;
+      if (containerSel) {
+        box = document.querySelector(containerSel);
+        if (!box) { resolve({ stopped_reason: 'error', error: `Container not found: ${containerSel}`, scrolls: 0 }); return; }
+      } else if (docEl.scrollHeight <= innerHeight + 2
+        // overflow hidden su html o body: l'utente non può scorrere il
+        // documento anche se è più alto della finestra (e scrollBy sì).
+        || [document.documentElement, document.body].some((e) => e && getComputedStyle(e).overflowY === 'hidden')) {
+        let best = null;
+        let bestArea = 0;
+        for (const el of document.querySelectorAll('body *')) {
+          if (el.clientHeight < 50 || !scrollable(el)) continue;
+          const area = el.clientWidth * el.clientHeight;
+          if (area > bestArea) { best = el; bestArea = area; }
+        }
+        box = best;
+      }
+      const s = box
+        ? { by: (d) => box.scrollBy(0, d), pos: () => box.scrollTop, height: () => box.scrollHeight, view: () => box.clientHeight, name: describe(box) }
+        : { by: (d) => window.scrollBy(0, d), pos: () => window.scrollY, height: () => docEl.scrollHeight, view: () => innerHeight, name: 'document' };
+      const done = (stopped_reason, scrolls) => resolve({ stopped_reason, scrolls, finalScrollY: Math.round(s.pos()), container: s.name });
       (async () => {
         let scrolls = 0;
-        let lastHeight = document.documentElement.scrollHeight;
+        let lastHeight = s.height();
         let stableCount = 0;
-        const step = stepPx || window.innerHeight;
+        const step = stepPx || s.view();
         for (scrolls = 0; scrolls < maxScrolls; scrolls++) {
           if (mode === 'element' && sel) {
             const el = document.querySelector(sel);
             if (el) {
               const r = el.getBoundingClientRect();
               const vis = r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
-              if (vis) { resolve({ stopped_reason: 'element_found', scrolls, finalScrollY: Math.round(window.scrollY) }); return; }
+              if (vis) { done('element_found', scrolls); return; }
             }
           }
-          window.scrollBy(0, step);
+          s.by(step);
           await sleep(settleMs);
 
           if (mode === 'network_idle') {
             const inflight = window.__chromeBridge_inflight || 0;
             const last = window.__chromeBridge_lastNetActivity || Date.now();
-            if (inflight === 0 && Date.now() - last >= settleMs) { resolve({ stopped_reason: 'network_idle', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+            if (inflight === 0 && Date.now() - last >= settleMs) { done('network_idle', scrolls + 1); return; }
           }
 
-          const h = document.documentElement.scrollHeight;
+          const h = s.height();
           if (h === lastHeight) {
             stableCount++;
-            if (mode === 'no_new_content' && stableCount >= 2) { resolve({ stopped_reason: 'no_new_content', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+            if (mode === 'no_new_content' && stableCount >= 2) { done('no_new_content', scrolls + 1); return; }
           } else { stableCount = 0; lastHeight = h; }
 
           // bottom reached
-          if (window.innerHeight + window.scrollY >= h - 2) { resolve({ stopped_reason: 'bottom', scrolls: scrolls + 1, finalScrollY: Math.round(window.scrollY) }); return; }
+          if (s.view() + s.pos() >= h - 2) { done('bottom', scrolls + 1); return; }
         }
-        resolve({ stopped_reason: 'max_scrolls', scrolls, finalScrollY: Math.round(window.scrollY) });
+        done('max_scrolls', scrolls);
       })();
     }),
-    args: [until, selector || null, max_scrolls, step_px || null, settle_ms],
+    args: [until, selector || null, container || null, max_scrolls, step_px || null, settle_ms],
     world: 'MAIN',
-  });
-  return results?.[0]?.result ?? { stopped_reason: 'error', scrolls: 0 };
+  }).then((results) => results?.[0]?.result ?? { stopped_reason: 'error', scrolls: 0 });
+  // Stesse sleep in pagina delle attese: su una scheda nascosta rallentano.
+  const deadline = Math.min(55000, max_scrolls * (settle_ms + 250) + 5000);
+  return withDeadline(tabId, deadline, run,
+    { stopped_reason: 'deadline', error: `Scrolling did not finish within ${deadline}ms` },
+    (r) => r.stopped_reason === 'deadline');
 }
 
 // --- Avvia la connessione + registra l'instrumentation ---

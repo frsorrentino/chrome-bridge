@@ -645,6 +645,49 @@ async function testHandoffMultiPick(tabId) {
   } catch (e) { fail(name, e.message); }
 }
 
+async function testFindTextSplitLabel(tabId) {
+  const name = 'find_text on a label split across nodes and &nbsp;';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { const u = document.createElement('ul'); u.innerHTML = '<li id=\"__cb_ft\"><span>Prestazioni</span> e <b>clic</b></li><li id=\"__cb_ft2\">Dati&nbsp;demografici</li>'; document.body.appendChild(u); return true; })()", tab_id: tabId });
+    const a = await wsManager.sendCommand(MessageType.FIND_TEXT, { text: 'Prestazioni e clic', tab_id: tabId });
+    const b = await wsManager.sendCommand(MessageType.FIND_TEXT, { text: 'dati demografici', tab_id: tabId });
+    if (a.count !== 1 || a.matches[0].selector !== '#__cb_ft') throw new Error(JSON.stringify(a));
+    if (b.count !== 1 || b.matches[0].selector !== '#__cb_ft2') throw new Error(JSON.stringify(b));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function testScrollUntilInnerContainer(tabId) {
+  const name = 'scroll until inside an inner container (document does not scroll)';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { document.documentElement.style.overflow = 'hidden'; document.body.style.overflow = 'hidden'; const d = document.createElement('div'); d.id = '__cb_sc'; d.style.cssText = 'position:fixed;inset:0;overflow-y:auto;background:#fff;z-index:2147483000'; d.innerHTML = '<div style=\"height:5000px\">tall</div>'; document.body.appendChild(d); return true; })()", tab_id: tabId });
+    const data = await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until: 'no_new_content', max_scrolls: 3, settle_ms: 100, tab_id: tabId });
+    if (data.container !== '#__cb_sc' || !(data.finalScrollY > 0)) throw new Error(JSON.stringify(data));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+  await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { document.getElementById('__cb_sc')?.remove(); document.documentElement.style.overflow = ''; document.body.style.overflow = ''; return true; })()", tab_id: tabId }).catch(() => {});
+}
+
+async function testWaitForTextHiddenWindow() {
+  const name = 'wait_for text in a minimized window: answers within its timeout, says page_hidden';
+  let winTab = null;
+  try {
+    winTab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: 'https://example.com', new_window: true });
+    await new Promise((r) => setTimeout(r, 1000));
+    await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { state: 'minimized', tab_id: winTab.id });
+    await new Promise((r) => setTimeout(r, 800));
+    const info = await wsManager.sendCommand(MessageType.GET_PAGE_INFO, { tab_id: winTab.id });
+    const t0 = Date.now();
+    const data = await wsManager.sendCommand(MessageType.WAIT_FOR_TEXT, { text: 'never-there-xyz', timeout: 2000, tab_id: winTab.id });
+    const took = Date.now() - t0;
+    if (data.found !== false || took > 4500) throw new Error(`took ${took}ms: ${JSON.stringify(data)}`);
+    if (info.visibility === 'hidden' && data.page_hidden !== true) throw new Error(`page hidden but no page_hidden: ${JSON.stringify(data)}`);
+    log(`visibility=${info.visibility}, page_hidden=${data.page_hidden ?? false}, ${took}ms`);
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+  if (winTab?.id) await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: winTab.id }).catch(() => {});
+}
+
 // --- Main ---
 
 async function main() {
@@ -712,6 +755,11 @@ async function main() {
     await testTypeTextReadback(testTabId);
     await testHandoffAskViaBanner(testTabId);
     await testHandoffMultiPick(testTabId);
+
+    // 1.19.0 (osservazioni dal campo, docs/osservazioni-campo-2026-09.md)
+    await testFindTextSplitLabel(testTabId);
+    await testScrollUntilInnerContainer(testTabId);
+    await testWaitForTextHiddenWindow();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

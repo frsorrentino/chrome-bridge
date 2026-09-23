@@ -472,17 +472,73 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     }
   };
 
-  // Mappa ref → selector per tab, popolata da get_interactives.
-  // Permette click/type_text/hover per ref (n1, n2…) senza ripetere selettori lunghi.
+  // Registro ref → selector per tab, popolato da get_interactives, dalla
+  // preview di navigate e dai vicini di find_text. Permette click/type_text/
+  // hover per ref (n1, n2…) senza ripetere selettori lunghi.
+  // Un selettore tiene lo stesso ref finché la pagina non cambia, e un numero
+  // non viene mai riassegnato: prima ogni chiamata di scoperta ripartiva da n1
+  // sulla stessa mappa, e dopo un find_text n3 indicava un altro elemento —
+  // il click andava a segno sull'elemento sbagliato senza errori.
   const interactivesRefs = new Map();
+  const REFS_MAX = 2000;
 
   const refsKey = (tab_id) => tab_id ?? sessionTabId ?? 'active';
+
+  function refRegistry(tab_id) {
+    const key = refsKey(tab_id);
+    let reg = interactivesRefs.get(key);
+    if (!reg) {
+      reg = { next: 1, floor: 1, bySel: new Map(), byRef: new Map() };
+      interactivesRefs.set(key, reg);
+    }
+    return reg;
+  }
+
+  // Assegna i ref agli elementi (in place). Solo gli elementi con selector
+  // ricevono un ref: senza, non ci sarebbe nulla da risolvere.
+  function assignRefs(tab_id, elements) {
+    const reg = refRegistry(tab_id);
+    for (const e of elements) {
+      if (!e.selector) continue;
+      let ref = reg.bySel.get(e.selector);
+      if (!ref) {
+        ref = `n${reg.next++}`;
+        reg.bySel.set(e.selector, ref);
+        reg.byRef.set(ref, e.selector);
+      }
+      e.ref = ref;
+    }
+    while (reg.byRef.size > REFS_MAX) {
+      const [oldRef, oldSel] = reg.byRef.entries().next().value;
+      reg.byRef.delete(oldRef);
+      reg.bySel.delete(oldSel);
+    }
+    return reg.byRef.size;
+  }
+
+  // Una navigazione cambia pagina: i selettori vecchi potrebbero trovare altro.
+  // La mappa si svuota ma il contatore no, così un ref vecchio dà errore
+  // invece di indicare un elemento nuovo con lo stesso numero.
+  function resetRefs(tab_id) {
+    const reg = refRegistry(tab_id);
+    reg.bySel.clear();
+    reg.byRef.clear();
+    reg.floor = reg.next;
+  }
 
   function resolveTarget(selector, ref, tab_id) {
     if (selector) return selector;
     if (ref) {
-      const sel = interactivesRefs.get(refsKey(tab_id))?.get(ref);
-      if (!sel) throw new Error(`Unknown ref ${ref} — run get_interactives first`);
+      const reg = interactivesRefs.get(refsKey(tab_id));
+      const sel = reg?.byRef.get(ref);
+      if (!sel) {
+        const num = Number(String(ref).replace(/^n/, ''));
+        const why = !reg || reg.next === 1 ? 'no refs issued for this tab yet'
+          : num >= reg.next ? `refs issued so far go up to n${reg.next - 1}`
+            : num < reg.floor ? 'it was issued before the last navigate, which resets refs'
+              : 'it was evicted from the ref cache';
+        throw new Error(`Unknown ref ${ref} (${why}) — run get_interactives or find_text again`);
+      }
       return sel;
     }
     throw new Error('Either selector or ref is required');
@@ -517,13 +573,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   async function interactivesPreview(tab_id, limit = 12) {
     try {
       const data = await send(MessageType.GET_INTERACTIVES, { limit, visible_only: true, tab_id });
-      const refMap = new Map();
-      (data?.elements ?? []).forEach((e, i) => {
-        e.ref = `n${i + 1}`;
-        if (e.selector) refMap.set(e.ref, e.selector);
-      });
-      interactivesRefs.set(refsKey(tab_id), refMap);
-      return refMap.size ? truncateText(interactivesLines(data), 1500) : null;
+      const elements = data?.elements ?? [];
+      assignRefs(tab_id, elements);
+      return elements.some((e) => e.ref) ? truncateText(interactivesLines(data), 1500) : null;
     } catch { return null; }
   }
 
@@ -612,6 +664,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const data = await send(MessageType.NAVIGATE, { url, tab_id });
       // Il tab navigato diventa il default di sessione per i comandi successivi
       if (data?.tabId != null) sessionTabId = data.tabId;
+      resetRefs(data?.tabId ?? tab_id);
       const preview = await interactivesPreview(data?.tabId ?? tab_id);
       return {
         content: [{
@@ -623,6 +676,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   );
 
   // --- screenshot ---
+  // Larghezze dei preset, le stesse di viewport_resize nell'estensione.
+  const PRESET_WIDTHS = { mobile: 375, tablet: 768, desktop: 1440 };
   server.tool(
     'screenshot',
     'Screenshot of the visible viewport only (PNG), at the current scroll position, or one per viewport preset with presets. Read-only. '
@@ -631,7 +686,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     {
       tab_id: tabId,
       save_to: saveToField('the PNG'),
-      presets: z.array(z.enum(['mobile', 'tablet', 'desktop'])).optional().describe('One capture per preset, window restored; save_to = directory, one file each'),
+      presets: z.array(z.enum(['mobile', 'tablet', 'desktop'])).optional().describe('Resizes the window per preset, then restores it; not phone emulation. A refused width is reported, not shot. save_to = directory'),
     },
     async ({ tab_id, save_to, presets }) => {
       guardWrite(save_to);
@@ -643,10 +698,24 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         const notes = [];
         try {
           for (const preset of presets) {
-            await send(MessageType.VIEWPORT_RESIZE, { preset, tab_id });
+            const resized = await send(MessageType.VIEWPORT_RESIZE, { preset, tab_id });
             await new Promise((r) => setTimeout(r, 400));
             const shot = await send(MessageType.SCREENSHOT, { tab_id });
             if (!shot?.image) { notes.push(`${preset}: no image`); continue; }
+            // presets ridimensiona la finestra, non emula un dispositivo: il
+            // window manager può imporre una larghezza minima o ignorare la
+            // richiesta. Un'immagine desktop etichettata «mobile» porta a
+            // conclusioni sbagliate (2226 px su med-systems.it, 23/09/2026):
+            // meglio nessuna immagine e una nota esplicita.
+            const got = shot.viewport?.width;
+            const want = PRESET_WIDTHS[preset];
+            if (got && want && Math.abs(got - want) > Math.max(40, want * 0.15)) {
+              const zoom = resized?.zoom && resized.zoom !== 1 ? `, page zoom ${Math.round(resized.zoom * 100)}%` : '';
+              notes.push(`${preset}: NOT APPLIED — viewport stayed ${got}×${shot.viewport.height} CSS px (asked ~${want}${zoom}); `
+                + 'the window manager refused the width. No capture saved: this would not be a ' + preset + ' rendering. '
+                + 'Device emulation needs a headless browser.');
+              continue;
+            }
             if (save_to) {
               await mkdir(save_to, { recursive: true });
               const path = join(save_to, `${preset}.png`);
@@ -1083,12 +1152,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       max_scrolls: z.number().optional().default(20).describe('Cap on scroll steps, so an infinite feed terminates'),
       step_px: z.number().optional().describe('px per step, default viewport height'),
       settle_ms: z.number().optional().default(400).describe('Pause ms after each step'),
+      container: z.string().optional().describe('until: selector that scrolls; default the document, or the largest scrollable element if the document does not scroll'),
       tab_id: tabId,
       frame_id: frameId,
     },
-    async ({ action, selector, x, y, behavior, offset_y, until, max_scrolls, step_px, settle_ms, tab_id, frame_id }) => {
+    async ({ action, selector, x, y, behavior, offset_y, until, max_scrolls, step_px, settle_ms, container, tab_id, frame_id }) => {
       const data = (action ?? 'to') === 'until'
-        ? await send(MessageType.SCROLL_UNTIL, { until, selector, max_scrolls, step_px, settle_ms, tab_id })
+        ? await send(MessageType.SCROLL_UNTIL, { until, selector, container, max_scrolls, step_px, settle_ms, tab_id })
         : await send(MessageType.SCROLL_TO, { selector, x, y, behavior, offset_y, tab_id, frame_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
@@ -1502,12 +1572,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
             .slice(0, 5)
             .map((c) => c.e);
           if (els.length) {
-            const refMap = new Map();
-            els.forEach((e, i) => {
-              e.ref = `n${i + 1}`;
-              if (e.selector) refMap.set(e.ref, e.selector);
-            });
-            interactivesRefs.set(refsKey(tab_id), refMap);
+            assignRefs(tab_id, els);
             near = truncateText(interactivesLines({ count: els.length, elements: els, note: 'near first match' }), 1200);
           }
         } catch {}
@@ -2200,13 +2265,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     },
     async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
       const data = await send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
-      // Assegna ref n1..nN e memorizza la mappa ref → selector per click/type_text/hover
-      const refMap = new Map();
-      (data?.elements ?? []).forEach((e, i) => {
-        e.ref = `n${i + 1}`;
-        if (e.selector) refMap.set(e.ref, e.selector);
-      });
-      interactivesRefs.set(refsKey(tab_id), refMap);
+      // Ref stabili per selettore, memorizzati per click/type_text/hover
+      assignRefs(tab_id, data?.elements ?? []);
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText(data) }] };
       }
