@@ -176,8 +176,8 @@ paste into a chat.
 
 When one of its own tools fails, chrome-bridge adds a line to a **local** file,
 `${XDG_STATE_HOME:-~/.local/state}/claude-observe/chrome-bridge.jsonl` (mode
-0600, in a 0700 folder), in the claude-observe format (the plugin's copy is in
-`observe/`). With the plugin, a `PostToolUseFailure` hook writes it; with the npm
+0600, in a 0700 folder), in the [claude-observe](https://github.com/frsorrentino/claude-observe)
+format (the plugin's copy is in `observe/`). With the plugin, a `PostToolUseFailure` hook writes it; with the npm
 server alone, the server does. The same error seen again is one line with a
 count.
 
