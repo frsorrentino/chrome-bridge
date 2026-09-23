@@ -11,8 +11,9 @@
   `SessionStart`); known errors come back to Claude with their workaround, or
   «fixed in 1.19.0: update» on older installs (`observe/tool.json` → `known`).
   Without the plugin the server writes the same records itself
-  (`server/observe.js`, `source: server`, same id, same `flock` on
-  `<dir>/.lock`). Parameter values are never kept, only field names and text
+  (`server/observe.js`, `source: server`, same id, same two locks: `flock`
+  on `<dir>/.lock` where available, then always the `chrome-bridge.jsonl.lock`
+  directory). Parameter values are never kept, only field names and text
   lengths. Off: `{"enabled": false}` in `~/.config/claude-observe/config.json`
   or `CHROME_BRIDGE_OBSERVE=off`. README → Local error log.
 

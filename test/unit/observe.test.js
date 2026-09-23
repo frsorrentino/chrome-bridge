@@ -6,13 +6,13 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, statSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync, existsSync, mkdirSync, utimesSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  scrub, normalize, rid, shape, applyEntry, buildEntry, createObserver, TOOL,
+  scrub, normalize, rid, shape, applyEntry, buildEntry, createObserver, withDirLock, TOOL,
 } from '../../server/observe.js';
 import { registerTools } from '../../server/tools.js';
 
@@ -131,6 +131,53 @@ test('createObserver scrive sotto flock, e observe.py legge il record come suo',
   const after = readFileSync(join(root, 'claude-observe', `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(after.length, 1, 'stesso errore, stesso id: il record è uno');
   assert.equal(after[0].count, 3);
+});
+
+test('cartella di lock occupata: si aspetta fino alla scadenza, poi si rinuncia senza scrivere', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  mkdirSync(join(dir, `${TOOL}.jsonl.lock`));
+  const t0 = Date.now();
+  const r = await withDirLock(dir, () => 'scritto', Date.now() + 300);
+  assert.equal(r, null);
+  assert.ok(Date.now() - t0 < 1500);
+});
+
+test('cartella di lock più vecchia di 10 s: è di un processo morto e si toglie', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const lock = join(dir, `${TOOL}.jsonl.lock`);
+  mkdirSync(lock);
+  const old = (Date.now() - 60000) / 1000;
+  utimesSync(lock, old, old);
+  assert.equal(await withDirLock(dir, () => 'scritto', Date.now() + 300), 'scritto');
+  assert.ok(!existsSync(lock), 'tolta dopo la scrittura');
+});
+
+test('server e hook Python in parallelo sullo stesso file: nessun aggiornamento perso', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const env = { ...process.env, XDG_STATE_HOME: root, CLAUDE_OBSERVE_CONFIG: join(root, 'none.json'), CHROME_BRIDGE_OBSERVE: '', CLAUDE_CONFIG_DIR: join(root, 'cfg') };
+  const payload = (n) => JSON.stringify({ hook_event_name: 'PostToolUseFailure', tool_name: 'mcp__chrome-bridge__navigate', tool_input: {}, error: `No tab with id: ${n}.`, cwd: root });
+  const py = (n) => new Promise((res) => {
+    const c = spawn('python3', ['-B', PY, 'hook'], { env, stdio: ['pipe', 'ignore', 'ignore'] });
+    c.on('exit', res);
+    c.stdin.end(payload(n));
+  });
+  // Un osservatore per scrittura: processi server diversi, come primary e relay.
+  const node = (n) => createObserver({ env, version: '1.19.0' }).error('navigate', {}, `No tab with id: ${n}.`, 1);
+  await Promise.all([1, 2, 3, 4, 5, 6].map((n) => (n % 2 ? py(n) : node(n))));
+  const recs = readFileSync(join(root, 'claude-observe', `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].count, 6);
+  assert.ok(!existsSync(join(root, 'claude-observe', `${TOOL}.jsonl.lock`)));
+});
+
+test('l\'id del server è quello dell\'hook: stesso call MCP completo, stesso testo che Claude Code mostra', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
+  // L'SDK MCP trasforma l'eccezione in isError con text = error.message: è il
+  // testo che arriva al payload dell'hook (visto dal vivo: «No tab with id: 1.»).
+  const server = buildEntry({ name: 'navigate', args: {}, message: 'No tab with id: 1.' });
+  const script = `import sys; sys.path.insert(0, ${JSON.stringify(join(REPO, 'observe'))}); import observe; k = observe.normalize("mcp__chrome-bridge__navigate No tab with id: 1."); print(observe.rid("chrome-bridge", k))`;
+  const hookId = execFileSync('python3', ['-B', '-c', script], { encoding: 'utf8' }).trim();
+  assert.equal(server.fields.call, 'mcp__chrome-bridge__navigate');
+  assert.equal(server.id, hookId);
 });
 
 test('il wrapper dei tool passa all\'osservatore gli errori, e l\'errore arriva comunque al chiamante', async () => {

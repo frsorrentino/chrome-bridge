@@ -40,8 +40,11 @@ voce `known` del registro distribuita col plugin) non si propone come issue.
 """
 import platform
 import urllib.parse
-import fcntl
 import glob
+try:
+    import fcntl   # non c'e' su Windows: li' resta il solo lock a cartella
+except ImportError:
+    fcntl = None
 import hashlib
 import json
 import os
@@ -54,6 +57,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FORMAT = 1   # versione del formato dei record (FORMAT.md): chi legge ignora i campi ignoti, chi riscrive li conserva
+LOCK_WAIT_S, LOCK_STALE_S = 3.0, 10.0   # un hook non aspetta oltre 3 s; un lock di 10 s e' di un processo morto
 OPS = {"|", "||", "&&", ";", "&", "|&"}
 VERBS = {"arm", "list", "show", "add", "mark", "export", "report", "hook", "status", "push", "serve", "set", "get",
          "open", "close", "check"}
@@ -83,7 +87,7 @@ MSG = {
   "observe.draft_nogh": "gh non c'è o non è autenticato: l'invio stamperà un link GitHub precompilato da aprire nel browser (già loggato).",
   "observe.draft_existing": "Esiste già una issue aperta sullo stesso errore: #{number} «{title}» ({url}). L'invio aggiunge un COMMENTO lì, non una issue nuova.",
   "observe.nothing_to_send": "nessuna osservazione da inviare per {tool}",
-  "observe.propose": "OSSERVAZIONI DA INVIARE {tool}: {n} errori registrati da un hook su uno strumento pubblico. In un momento naturale (a fine lavoro) proponi all'utente di inviarle: `{cmd} report {tool}` prepara UNA issue anonimizzata; mostragliela com'è e chiedi un solo sì, poi lancia il comando con --send che stampa."
+  "observe.propose": "OSSERVAZIONI DA INVIARE {tool}: {n} (errori registrati dall'hook o note a mano) sul plugin {tool}. In un momento naturale (a fine lavoro) proponi all'utente di inviarle: `{cmd} report {tool}` prepara UNA issue anonimizzata; mostragliela com'è e chiedi un solo sì, poi lancia il comando con --send che stampa."
  },
  "en": {
   "observe.summary": "OBSERVATIONS {tool}: {new} new, {again} recurring — `{cmd} list {tool}` (triage: `observe mark ID D|L|S|done`)",
@@ -107,7 +111,7 @@ MSG = {
   "observe.draft_nogh": "gh is missing or not logged in: sending will print a prefilled GitHub link to open in the browser (already logged in).",
   "observe.draft_existing": "An open issue on the same error exists: #{number} “{title}” ({url}). Sending adds a COMMENT there, not a new issue.",
   "observe.nothing_to_send": "no observations to send for {tool}",
-  "observe.propose": "OBSERVATIONS TO SEND {tool}: {n} errors recorded by a hook on a public tool. At a natural moment (end of the task) offer the user to send them: `{cmd} report {tool}` prepares ONE anonymized issue; show it as it is and ask for a single yes, then run the --send command it prints."
+  "observe.propose": "OBSERVATIONS TO SEND {tool}: {n} (errors recorded by the hook or notes added by hand) on the {tool} plugin. At a natural moment (end of the task) offer the user to send them: `{cmd} report {tool}` prepares ONE anonymized issue; show it as it is and ask for a single yes, then run the --send command it prints."
  }
 }
 
@@ -390,10 +394,41 @@ class Box:
         self.path = self.dir / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', tool)}.jsonl"
 
     def __enter__(self):
+        """Due lock, sempre in quest'ordine (FORMAT.md): flock su <dir>/.lock dove il sistema ce l'ha, che esclude le
+        copie gia' distribuite (fino ad a787654 prendevano solo quello), poi la cartella <file>.lock creata con mkdir,
+        atomica ovunque e uguale per chi scrive in Node senza flock. Nessuno stallo: chi prende solo mkdir non aspetta mai
+        flock. Una cartella di lock piu' vecchia di LOCK_STALE_S e' di un processo morto."""
         self.dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.dir, 0o700)
-        self.lock = open(self.dir / ".lock", "w")
-        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        self.lock = Path(str(self.path) + ".lock")
+        end = time.time() + LOCK_WAIT_S
+        self.flock = None
+        if fcntl is not None:
+            self.flock = open(self.dir / ".lock", "w")
+            while True:
+                try:
+                    fcntl.flock(self.flock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.time() > end:
+                        self.flock.close()
+                        raise TimeoutError(f"flock {self.dir / '.lock'}")
+                    time.sleep(0.05)
+        while True:
+            try:
+                os.mkdir(self.lock)
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - self.lock.stat().st_mtime > LOCK_STALE_S:
+                        os.rmdir(self.lock)
+                        continue
+                except OSError:
+                    continue
+                if time.time() > end:
+                    self._release_flock()
+                    raise TimeoutError(f"lock {self.lock}")
+                time.sleep(0.05)
         self.recs = read(self.path)
         return self
 
@@ -406,9 +441,20 @@ class Box:
                 for r in self.recs:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
             os.replace(tmp, self.path)
-        fcntl.flock(self.lock, fcntl.LOCK_UN)
-        self.lock.close()
+        try:
+            os.rmdir(self.lock)
+        except OSError:
+            pass
+        self._release_flock()
         return False
+
+    def _release_flock(self):
+        if self.flock is not None:
+            try:
+                fcntl.flock(self.flock, fcntl.LOCK_UN)
+            finally:
+                self.flock.close()
+                self.flock = None
 
 
 def read(path):
@@ -676,9 +722,11 @@ def draft(tool, recs, target=None):
             rows.append(f"  - workaround: {scrub(v['workaround'], 300)}")
     if len(vs) > 20:
         rows.append(f"- … and {len(vs) - 20} more")
-    title = f"[{tool}] field observations: {len(vs)} error(s), most frequent `{vs[0].get('call')}`"
-    body = "\n".join([f"Collected automatically by `claude-master observe` on {time.strftime('%Y-%m-%d')} "
-                      f"(tool errors recorded by a hook; parameter values are never stored).", "", *rows])
+    errors = sum(1 for v in vs if v.get("kind") != "note")
+    kinds = ", ".join(x for x in (f"{errors} error(s)" if errors else "", f"{len(vs) - errors} note(s)" if len(vs) > errors else "") if x)
+    title = f"[{tool}] field observations: {kinds}, most frequent `{vs[0].get('call')}`"
+    body = "\n".join([f"Collected on {time.strftime('%Y-%m-%d')} by claude-observe (https://github.com/frsorrentino/claude-observe): "
+                      "errors recorded by a hook and notes added by hand; parameter values are never stored.", "", *rows])
     text = redact_out(f"{title}\n\n{body}", tool)
     title, _, body = text.partition("\n\n")
     head = f"comment #{target['number']}" if target else "new"

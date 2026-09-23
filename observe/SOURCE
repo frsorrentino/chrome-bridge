@@ -1,7 +1,7 @@
 {
   "source": "https://github.com/frsorrentino/claude-observe",
-  "commit": "a7876549ed15635b621fd6bbd59dafdeb6a5e011",
+  "commit": "90735e3c9d79f6c2c2f6f632aa8a4c423c015911",
   "sha256": {
-    "observe.py": "42bd7abd2c2bf32ac6d913df23dd4978e0742054651a398c181bd53e74b68454"
+    "observe.py": "e0ca177b17f690c752f3489d2f8999a247f8b9bb5e0e9fa905878850225d140b"
   }
 }
