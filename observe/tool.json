@@ -1,0 +1,18 @@
+{
+  "name": "chrome-bridge",
+  "repo": "frsorrentino/chrome-bridge",
+  "version_from": ".claude-plugin/plugin.json",
+  "match": {"mcp": ["mcp__chrome-bridge__"]},
+  "known": [
+    {"error": "Unknown ref", "fixed_in": "1.19.0",
+     "workaround": "Refs come from get_interactives, navigate and find_text; run one of them again, or pass a selector. Before 1.19.0 each of those calls renumbered refs from n1, so an old ref could point at another element."},
+    {"call": "mcp__chrome-bridge__wait_for", "error": "timed out after", "fixed_in": "1.19.0",
+     "workaround": "The tab is probably hidden (window minimized or covered): get_page_info reports visibility. Bring the window on screen, or create_tab with new_window and bounds."},
+    {"call": "mcp__chrome-bridge__screenshot", "error": "timed out after 10000ms", "fixed_in": "1.19.0",
+     "workaround": "The window is not rendering frames (minimized or fully covered). Bring it at least partially on screen and retry."},
+    {"error": "image readback failed",
+     "workaround": "The window is not rendering frames (minimized or fully covered). Bring it at least partially on screen and retry."},
+    {"error": "No tab with id",
+     "workaround": "The tab was closed or replaced: get_tabs reports closed_session_tabs with the reason (1.18.0+). Open a new one with create_tab and use its id."}
+  ]
+}

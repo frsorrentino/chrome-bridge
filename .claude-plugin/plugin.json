@@ -26,7 +26,8 @@
         "chrome-bridge-mcp@1.19.0"
       ],
       "env": {
-        "CHROME_BRIDGE_CAPS": "all"
+        "CHROME_BRIDGE_CAPS": "all",
+        "CHROME_BRIDGE_OBSERVE": "hook"
       }
     }
   }

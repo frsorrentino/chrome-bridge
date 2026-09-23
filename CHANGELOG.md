@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- Local error log in the claude-observe format:
+  `${XDG_STATE_HOME:-~/.local/state}/claude-observe/chrome-bridge.jsonl`. The
+  plugin ships a copy of claude-observe (`observe/`) and two hooks
+  (`hooks/hooks.json`: `PostToolUseFailure` on `mcp__chrome-bridge__*`,
+  `SessionStart`); known errors come back to Claude with their workaround, or
+  «fixed in 1.19.0: update» on older installs (`observe/tool.json` → `known`).
+  Without the plugin the server writes the same records itself
+  (`server/observe.js`, `source: server`, same id, same `flock` on
+  `<dir>/.lock`). Parameter values are never kept, only field names and text
+  lengths. Off: `{"enabled": false}` in `~/.config/claude-observe/config.json`
+  or `CHROME_BRIDGE_OBSERVE=off`. README → Local error log.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUseFailure": [
+      {
+        "matcher": "mcp__chrome\\-bridge__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

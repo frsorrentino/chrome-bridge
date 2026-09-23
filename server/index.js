@@ -12,6 +12,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WSManager } from './ws-manager.js';
 import { registerTools } from './tools.js';
+import { createObserver } from './observe.js';
 import { launchBrowser } from './launcher.js';
 import { DEFAULT_PORT, VERSION } from './protocol.js';
 
@@ -107,7 +108,10 @@ async function main() {
   }
 
   // 3. Registra i tool MCP (filtrati per capability)
-  session.tools = registerTools(mcpServer, wsManager, parseCaps(), parseSecurity());
+  // Errori dei tool annotati in locale (formato claude-observe) quando nessun
+  // hook del plugin li vede: vedi server/observe.js.
+  const observe = createObserver({ version: VERSION });
+  session.tools = registerTools(mcpServer, wsManager, parseCaps(), { ...parseSecurity(), observe });
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();

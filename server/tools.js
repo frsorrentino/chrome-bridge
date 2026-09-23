@@ -400,6 +400,25 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     ? ['core', ...Object.keys(TOOL_CAPS)]
     : ['core', ...String(caps).split(',').map((s) => s.trim()).filter((s) => s && s !== 'core')];
 
+  // Un errore del tool (eccezione, o risultato isError) va all'osservatore,
+  // che lo annota in locale senza i valori dei parametri (server/observe.js).
+  // L'errore arriva comunque al chiamante, uguale.
+  const observer = options.observe ?? null;
+  const observed = (name, handler) => (observer ? async (args, extra) => {
+    const t0 = Date.now();
+    try {
+      const out = await handler(args, extra);
+      if (out?.isError) {
+        const text = (out.content ?? []).find((c) => c.type === 'text')?.text ?? '';
+        observer.error(name, args, text, Date.now() - t0);
+      }
+      return out;
+    } catch (err) {
+      observer.error(name, args, err?.message ?? String(err), Date.now() - t0);
+      throw err;
+    }
+  } : handler);
+
   // Ogni registrazione passa da qui: il filtro capability scarta i tool opt-in
   // fuori dai gruppi attivi, e le annotations vengono applicate da TOOL_ANNOTATIONS.
   // Un solo wrapper per entrambe le cose, altrimenti con caps != 'all' le
@@ -417,10 +436,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           if (group && !enabled.has(group) && !enabled.has('all')) return;
         }
         const annotations = TOOL_ANNOTATIONS[name];
+        const run = observed(name, handler);
         // Un tool senza voce resta registrato (meglio di un crash all'avvio):
         // è il test tool-annotations a segnalarlo.
-        if (annotations) target.tool(name, desc, schema, annotations, handler);
-        else target.tool(name, desc, schema, handler);
+        if (annotations) target.tool(name, desc, schema, annotations, run);
+        else target.tool(name, desc, schema, run);
       },
     };
   }

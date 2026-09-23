@@ -156,6 +156,7 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_TOKEN` | unset | Required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind isn't loopback |
 | `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. `install.sh` uses `all` |
 | `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
+| `CHROME_BRIDGE_OBSERVE` | unset | `off` stops the local error log below. The plugin sets `hook`: its hooks keep the log and the server stays out of it |
 | `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
 
 The bridge binds loopback, accepts extension connections only from a
@@ -170,6 +171,31 @@ hostile page's text is untrusted input. `get_storage`, `session_fixture`, HAR
 exports and screenshots are **not** redacted and may carry cookies, tokens or
 personal data. Don't point the automation at pages holding secrets you wouldn't
 paste into a chat.
+
+### Local error log
+
+When one of its own tools fails, chrome-bridge adds a line to a **local** file,
+`${XDG_STATE_HOME:-~/.local/state}/claude-observe/chrome-bridge.jsonl` (mode
+0600, in a 0700 folder), in the claude-observe format (the plugin's copy is in
+`observe/`). With the plugin, a `PostToolUseFailure` hook writes it; with the npm
+server alone, the server does. The same error seen again is one line with a
+count.
+
+- **Kept:** the tool name, the error text after scrubbing (your home folder
+  becomes `~`; emails, URL queries, secrets and typed values are removed), the
+  names of the parameters and the length of text values, the chrome-bridge
+  version, the OS, the name of the working folder and of the Claude Code config
+  folder. With the plugin, also the Claude Code and model versions, the
+  session id and the names of the last three tools called.
+- **Never kept:** parameter values — no URLs, selectors, typed text or page
+  content.
+- **Nothing leaves your computer** unless you say yes. With the plugin, after a
+  few errors have piled up Claude may offer, at a natural moment, to send them
+  as one GitHub issue: it shows you the anonymized text first and sends it only
+  after your confirmation. The server alone never sends or offers anything.
+- **Turn it off:** `{"enabled": false}` in `~/.config/claude-observe/config.json`
+  (every plugin that uses claude-observe), or `CHROME_BRIDGE_OBSERVE=off` for
+  the server. Keep the log but stop the offers: `{"propose": false}`.
 
 ## Troubleshooting
 
