@@ -287,10 +287,19 @@ def tool_of(tool_name, tool_input):
 
 
 def is_benign(tool, seg, code):
+    """Un codice d'uscita documentato come normale. La chiave e' un sottocomando («restart arm»: le parole dopo il
+    programma) o il nome di uno script («external-exec.py»: script senza sottocomandi), con i suoi eventuali
+    sottocomandi («fd-telemetry.py budget-open»)."""
     if code is None:
         return False
     words = " ".join(x for x in seg[1:] if not x.startswith("-") and re.fullmatch(r"[a-z][a-z0-9-]*", x))
-    return any((words + " ").startswith(k + " ") and code in codes for k, codes in (tool.get("benign_exits") or {}).items())
+    red = " " + redact_cmd(seg, tool) + " "
+    for k, codes in (tool.get("benign_exits") or {}).items():
+        if code not in codes:
+            continue
+        if (words + " ").startswith(k + " ") or (k.split()[0].endswith((".py", ".sh")) and f" {k} " in red):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ contesto e versioni

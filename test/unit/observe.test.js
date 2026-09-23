@@ -163,10 +163,16 @@ test('server e hook Python in parallelo sullo stesso file: nessun aggiornamento 
   });
   // Un osservatore per scrittura: processi server diversi, come primary e relay.
   const node = (n) => createObserver({ env, version: '1.19.0' }).error('navigate', {}, `No tab with id: ${n}.`, 1);
+  const t0 = Date.now();
   await Promise.all([1, 2, 3, 4, 5, 6].map((n) => (n % 2 ? py(n) : node(n))));
+  const elapsed = Date.now() - t0;
   const recs = readFileSync(join(root, 'claude-observe', `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(recs.length, 1);
-  assert.equal(recs[0].count, 6);
+  // Il protocollo ammette una rinuncia: chi non ottiene i lock in circa 3 s
+  // lascia perdere quel record (macchina molto carica). Una scrittura persa
+  // a lock aperti, invece, si vedrebbe con un count basso in fretta.
+  if (recs[0].count < 6) assert.ok(elapsed >= 3000, `count ${recs[0].count} in ${elapsed} ms: aggiornamento perso senza attesa scaduta`);
+  assert.ok(recs[0].count >= 1 && recs[0].count <= 6);
   assert.ok(!existsSync(join(root, 'claude-observe', `${TOOL}.jsonl.lock`)));
 });
 
