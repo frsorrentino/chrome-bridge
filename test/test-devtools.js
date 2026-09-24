@@ -668,6 +668,19 @@ async function testScrollUntilInnerContainer(tabId) {
   await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { document.getElementById('__cb_sc')?.remove(); document.documentElement.style.overflow = ''; document.body.style.overflow = ''; return true; })()", tab_id: tabId }).catch(() => {});
 }
 
+async function testGetInteractivesLabels(tabId) {
+  const name = 'get_interactives names fields by <label>, wrapping label, aria-labelledby';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { const f = document.createElement('form'); f.id = '__cb_lbl'; f.innerHTML = '<label>Customer name: <input name=\"custname\"></label><label for=\"__cb_tel\">Telephone</label><input id=\"__cb_tel\" type=\"tel\"><span id=\"__cb_dl\">Delivery time</span><input aria-labelledby=\"__cb_dl\" type=\"time\"><label><input type=\"radio\" name=\"size\" value=\"small\"> Small</label><label><input type=\"checkbox\" value=\"bacon\"> Bacon</label><label>Size <select><option>L</option></select></label><button>Submit order</button>'; document.body.appendChild(f); return true; })()", tab_id: tabId });
+    const data = await wsManager.sendCommand(MessageType.GET_INTERACTIVES, { scope: '#__cb_lbl', tab_id: tabId });
+    const texts = data.elements.map((e) => e.text);
+    const want = ['Customer name:', 'Telephone', 'Delivery time', 'Small', 'Bacon', 'Size', 'Submit order'];
+    if (JSON.stringify(texts) !== JSON.stringify(want)) throw new Error(JSON.stringify(texts));
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+  await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { document.getElementById('__cb_lbl')?.remove(); return true; })()", tab_id: tabId }).catch(() => {});
+}
+
 async function testWaitForTextHiddenWindow() {
   const name = 'wait_for text in a minimized window: answers within its timeout, says page_hidden';
   let winTab = null;
@@ -760,6 +773,9 @@ async function main() {
     await testFindTextSplitLabel(testTabId);
     await testScrollUntilInnerContainer(testTabId);
     await testWaitForTextHiddenWindow();
+
+    // Unreleased
+    await testGetInteractivesLabels(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

@@ -4633,11 +4633,14 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 
 async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab_id, frame_id }) {
   const tabId = await resolveTabId(tab_id);
+  // labelOf vive in un file a sé (testato in test/unit): va iniettato prima
+  await chrome.scripting.executeScript({ target: scriptTarget(tabId, frame_id), files: ['lib/element-label.js'], world: 'MAIN' });
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (scopeSel, lim, visibleOnly) => {
       const root = scopeSel ? document.querySelector(scopeSel) : document;
       if (!root) return { count: 0, elements: [], note: 'Scope element not found' };
+      const labelOf = globalThis.__cbLabelOf;
 
       // Selettore stabile e riusabile: id > data-testid > path nth-of-type
       const stableSelector = (el) => {
@@ -4677,7 +4680,7 @@ async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab
           const top = document.elementFromPoint(cx, cy);
           occluded = !!top && top !== el && !el.contains(top) && !top.contains(el);
         }
-        const label = (el.getAttribute('aria-label') || el.value || el.textContent || el.getAttribute('title') || el.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+        const label = labelOf(el, document);
         out.push({
           selector: stableSelector(el),
           tag: el.tagName.toLowerCase(),

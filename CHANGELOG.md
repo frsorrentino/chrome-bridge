@@ -17,6 +17,19 @@
   lengths. Off: `{"enabled": false}` in `~/.config/claude-observe/config.json`
   or `CHROME_BRIDGE_OBSERVE=off`. README → Local error log.
 
+### Fixed
+
+- `get_interactives` (and the preview `navigate` attaches) names form fields
+  by their visible label: `aria-label`, then `aria-labelledby`, then
+  `<label for>` or a wrapping `<label>` (without the field's own text or a
+  select's options), then text or value for buttons and other non-field
+  elements, then `title`, then `placeholder`; 80 characters. Before, fields
+  labelled by `<label>` or `aria-labelledby` came out unnamed
+  (httpbin.org/forms/post: Customer name, Telephone, E-mail, Preferred
+  delivery time, Delivery instructions) and radios and checkboxes showed
+  their `value` («small», «bacon») instead of their text. A text field's
+  current value is no longer used as its name. `extension/lib/element-label.js`.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
