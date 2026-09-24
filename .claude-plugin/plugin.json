@@ -1,6 +1,6 @@
 {
   "name": "chrome-bridge",
-  "version": "1.19.0",
+  "version": "1.20.0",
   "description": "Your real, logged-in Chrome as an MCP server: navigate, read, fill, audit, diff and record in the browser you already use. ChromeOS included, no debugger permission. Ships the chrome-bridge skill (recipes) and the zero-token CLI.",
   "author": {
     "name": "frsorrentino",
@@ -23,7 +23,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "chrome-bridge-mcp@1.19.0"
+        "chrome-bridge-mcp@1.20.0"
       ],
       "env": {
         "CHROME_BRIDGE_CAPS": "all",

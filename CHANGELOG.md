@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Difetto aperto, riproducibile, senza rimedio deciso
+
+`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
+finestra con dentro sessioni terminale vive:
+
+    -> Command tab_action timed out after 30000ms
+    -> la scheda NON viene chiusa
+
+Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
+sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
+aspettarla — **non verificato**: al momento della scoperta nessuno poteva
+guardare lo schermo, e non si progetta un rimedio partendo da una causa non
+osservata.
+
+La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
+quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
+esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
+uno che rifiuta subito.
+
+**Rimedio misurato il 2026-09-11 (dal vivo, finestra con 8 sessioni):** la
+home non si chiude finché ha compagnia, ma si può portare via da sola:
+`move_tab {tab_id: home, new_window: true, window_type: popup}` lascia la
+finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
+suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
+nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.20.0 — 2026-09-24
+
 ### Added
 
 - Local error log in the claude-observe format:
@@ -29,32 +57,6 @@
   delivery time, Delivery instructions) and radios and checkboxes showed
   their `value` («small», «bacon») instead of their text. A text field's
   current value is no longer used as its name. `extension/lib/element-label.js`.
-
-### Difetto aperto, riproducibile, senza rimedio deciso
-
-`tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
-finestra con dentro sessioni terminale vive:
-
-    -> Command tab_action timed out after 30000ms
-    -> la scheda NON viene chiusa
-
-Il ponte è sano: una `activate` su un'altra scheda risponde in 0,27 s. Il
-sospetto è che il Terminale apra una conferma e `tabs.remove` resti ad
-aspettarla — **non verificato**: al momento della scoperta nessuno poteva
-guardare lo schermo, e non si progetta un rimedio partendo da una causa non
-osservata.
-
-La domanda da chiudere prima di scrivere codice: cosa deve fare `tab_action`
-quando il browser apre un dialogo — gestirlo, o tornare subito con un errore
-esplicito? Un tool che si pianta trenta secondi e non dice perché è peggio di
-uno che rifiuta subito.
-
-**Rimedio misurato il 2026-09-11 (dal vivo, finestra con 8 sessioni):** la
-home non si chiude finché ha compagnia, ma si può portare via da sola:
-`move_tab {tab_id: home, new_window: true, window_type: popup}` lascia la
-finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
-suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
-nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
 ## 1.19.0 — 2026-09-23
 

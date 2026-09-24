@@ -774,7 +774,7 @@ async function main() {
     await testScrollUntilInnerContainer(testTabId);
     await testWaitForTextHiddenWindow();
 
-    // Unreleased
+    // 1.20.0
     await testGetInteractivesLabels(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
