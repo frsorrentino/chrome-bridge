@@ -38,6 +38,7 @@ function parseSecurity() {
   return {
     noJs: process.argv.includes('--no-js') || on(process.env.CHROME_BRIDGE_NO_JS),
     writeRoot: argValue('--write-root') ?? process.env.CHROME_BRIDGE_WRITE_ROOT ?? null,
+    readRoot: argValue('--read-root') ?? process.env.CHROME_BRIDGE_READ_ROOT ?? null,
   };
 }
 

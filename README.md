@@ -156,6 +156,7 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_TOKEN` | unset | Required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind isn't loopback |
 | `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. `install.sh` uses `all` |
 | `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
+| `CHROME_BRIDGE_READ_ROOT` / `--read-root` | unset | Where `upload_file` may read from. Unset: any file except keys and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `id_*`, `*.pem`, `*.key`, …), symlinks resolved first. Set: only files under this directory, whatever their name — the way to upload a certificate key on purpose |
 | `CHROME_BRIDGE_OBSERVE` | unset | `off` stops the local error log below. The plugin sets `hook`: its hooks keep the log and the server stays out of it |
 | `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
 
@@ -171,6 +172,32 @@ hostile page's text is untrusted input. `get_storage`, `session_fixture`, HAR
 exports and screenshots are **not** redacted and may carry cookies, tokens or
 personal data. Don't point the automation at pages holding secrets you wouldn't
 paste into a chat.
+
+### Threat model
+
+chrome-bridge gives an AI agent your real, logged-in browser. Scanners that
+rate MCP servers by capability flag it, correctly, for code execution
+(`execute_js`), requests that carry your cookies (`http_request`) and reading
+private page data (`get_storage`, `get_tabs`). Those are the product, not bugs.
+What matters is who can reach them and what a hostile page can make the agent
+do with them.
+
+- **Who can connect:** see above — loopback bind, `chrome-extension://` origin
+  check, `CHROME_BRIDGE_TOKEN` on both handshakes.
+- **The real risk is prompt injection.** A page can ask the agent to run
+  JavaScript, send a request with your cookies, submit a form or upload a file.
+  Treat every page you automate as untrusted input, and review what the agent
+  proposes on sites that hold money or credentials.
+- **Reduce the surface:** `--caps core` (the default) exposes the smallest set;
+  `--no-js` removes arbitrary JavaScript; `--write-root` fences every path the
+  model writes; `upload_file` refuses keys and credentials, and `--read-root`
+  fences it to one directory. For sessions that matter, automate in a separate
+  Chrome profile.
+- **`--no-js` is not a sandbox:** `inject_css` stays, and CSS attribute
+  selectors with `url()` can leak attribute values to a remote host.
+- **What leaves your machine** is what the browser sends on the agent's behalf.
+  chrome-bridge itself has no telemetry; the error log below stays local unless
+  you approve an issue.
 
 ### Local error log
 

@@ -5,7 +5,7 @@
  * e restituisce il risultato al client MCP.
  */
 
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
@@ -40,6 +40,14 @@ const JS_TOOLS = new Set(['execute_js', 'modify_dom']);
 // Sotto CHROME_BRIDGE_WRITE_ROOT lo stato del server resta scrivibile: non è un
 // percorso scelto dal modello.
 const STATE_DIRS = [join(homedir(), '.config', 'chrome-bridge'), SESSIONS_DIR, RECORDINGS_DIR, FIXTURES_DIR];
+// upload_file mette un file del disco in un form della pagina: una pagina ostile
+// con prompt injection può chiedere ~/.ssh/id_ed25519 o un .env. Senza
+// CHROME_BRIDGE_READ_ROOT questi percorsi sono rifiutati; con la radice
+// impostata vale solo la radice, scelta a mano da chi la imposta (il caso
+// legittimo: una chiave SSL da caricare nel pannello dell'hosting).
+const SECRET_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.azure', join('.config', 'gcloud'), join('.config', 'gh'), join('.config', 'chrome-bridge')]
+  .map((d) => join(homedir(), d));
+const SECRET_FILES = /(^|[\\/])(\.env(\..*)?|\.netrc|\.npmrc|\.pypirc|\.git-credentials|id_(rsa|dsa|ecdsa|ed25519)(_sk)?|[^\\/]*\.(pem|key|p12|pfx|jks|keystore|kdbx))$/i;
 
 // `hint` è il parametro REALE del tool chiamante che riduce i dati. Suggerire
 // max_length quando 56 tool su 59 non lo espongono mandava il modello a
@@ -364,7 +372,7 @@ export const TOOL_ANNOTATIONS = {
  * @param {import('@modelcontextprotocol/sdk/server/index.js').McpServer} server - MCP Server
  * @param {import('./ws-manager.js').WSManager} wsManager - WebSocket manager
  * @param {string} [caps='all'] - 'all', 'core', o lista di gruppi "audits,visual"
- * @param {{noJs?: boolean, writeRoot?: string|null}} [options] - CHROME_BRIDGE_NO_JS / CHROME_BRIDGE_WRITE_ROOT
+ * @param {{noJs?: boolean, writeRoot?: string|null, readRoot?: string|null}} [options] - CHROME_BRIDGE_NO_JS / CHROME_BRIDGE_WRITE_ROOT / CHROME_BRIDGE_READ_ROOT
  */
 /** Procedura leggibile da un'osservazione: un passo per riga, i campi sensibili marcati come passo umano. */
 function observedProcedure(name, d) {
@@ -395,6 +403,20 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     const inside = (root) => abs === root || abs.startsWith(root + sep);
     if (inside(WRITE_ROOT) || STATE_DIRS.some((d) => inside(resolve(d)))) return p;
     throw new Error(`Refusing to write ${abs}: outside CHROME_BRIDGE_WRITE_ROOT (${WRITE_ROOT})`);
+  };
+  const READ_ROOT = options.readRoot ? resolve(String(options.readRoot)) : null;
+  // realpath: un symlink innocuo verso ~/.ssh non deve passare.
+  const guardRead = async (p) => {
+    const abs = await realpath(resolve(String(p)));
+    const inside = (root) => abs === root || abs.startsWith(root + sep);
+    if (READ_ROOT) {
+      if (inside(READ_ROOT)) return abs;
+      throw new Error(`Refusing to read ${abs}: outside CHROME_BRIDGE_READ_ROOT (${READ_ROOT})`);
+    }
+    if (SECRET_DIRS.some(inside) || SECRET_FILES.test(abs)) {
+      throw new Error(`Refusing to upload ${abs}: looks like a key or credential file. To upload it on purpose, set CHROME_BRIDGE_READ_ROOT to a folder that contains it.`);
+    }
+    return abs;
   };
   const activeCaps = caps === 'all'
     ? ['core', ...Object.keys(TOOL_CAPS)]
@@ -619,6 +641,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
             // scoprire che esiste ma è in un gruppo disattivato.
             js_evaluation: !noJs,
             write_root: WRITE_ROOT,
+            read_root: READ_ROOT,
             caps_active: activeCaps,
             caps_available: ['core', ...Object.keys(TOOL_CAPS)],
             session_tab_id: sessionTabId,
@@ -1519,12 +1542,12 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'Set a file on input[type=file] from the server filesystem via DataTransfer (max 10MB).',
     {
       selector: z.string().describe('The file input to fill; ">>>" pierces shadow DOM'),
-      path: z.string().describe('Absolute path on the server machine'),
+      path: z.string().describe('Absolute path on the server machine; keys and credentials (~/.ssh, .env, *.pem) refused'),
       mime_type: z.string().optional().describe('Default: inferred from extension'),
       tab_id: tabId,
     },
     async ({ selector, path, mime_type, tab_id }) => {
-      const buf = await readFile(path);
+      const buf = await readFile(await guardRead(path));
       if (buf.length > 10 * 1024 * 1024) throw new Error(`File too large: ${buf.length} bytes (max 10MB)`);
       const mime = mime_type || MIME_BY_EXT[extname(path).toLowerCase()] || 'application/octet-stream';
       const data = await send(MessageType.UPLOAD_FILE, {

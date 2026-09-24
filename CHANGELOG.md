@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Security
+
+- `upload_file` no longer reads any file on disk. A hostile page could prompt
+  the agent to put `~/.ssh/id_ed25519` or a `.env` into one of its forms. Keys
+  and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`,
+  `~/.config/gcloud`, `~/.config/gh`, `~/.config/chrome-bridge`, `.env*`,
+  `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `id_*`, `*.pem`, `*.key`,
+  `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`) are now refused, after
+  resolving symlinks and before anything reaches the extension.
+  `CHROME_BRIDGE_READ_ROOT` / `--read-root` replaces that list with a fence:
+  only files under the chosen directory, whatever their name. `get_status`
+  reports `read_root`.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
