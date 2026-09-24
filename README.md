@@ -1,5 +1,7 @@
 # Chrome Bridge
 
+> By [frsorrentino](https://github.com/frsorrentino) · npm `chrome-bridge-mcp` · not affiliated with other projects named "chrome-bridge".
+
 ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-257%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **An MCP server that gives Claude Code your real, logged-in Chrome — measured
