@@ -2,20 +2,6 @@
 
 ## Unreleased
 
-### Added
-
-- `get_css_styles`: the Styles panel of DevTools as text. For each CSS
-  property of an element, the winning declaration — selector, stylesheet, rule
-  position, `!important`, `@layer`, `@media` — and the declarations it
-  overrides; `properties` narrows it, `include_inherited` walks the ancestors
-  for `color`, `font-*` and custom properties. `query_dom` says what
-  `margin-top` is; this says who set it. Built from the CSSOM in the isolated
-  world (`extension/lib/css-cascade.js`, cascade order per CSS Cascade 5,
-  unit-tested on a fake CSSOM): a stylesheet from another origin without CORS
-  is opaque and listed by href; `@container`, `@scope` and `@starting-style`
-  are not evaluated and are reported in `skipped`. Core group; 60 tools, 39 in
-  core.
-
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
@@ -41,6 +27,22 @@ home non si chiude finché ha compagnia, ma si può portare via da sola:
 finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.21.0 — 2026-09-24
+
+### Added
+
+- `get_css_styles`: the Styles panel of DevTools as text. For each CSS
+  property of an element, the winning declaration — selector, stylesheet, rule
+  position, `!important`, `@layer`, `@media` — and the declarations it
+  overrides; `properties` narrows it, `include_inherited` walks the ancestors
+  for `color`, `font-*` and custom properties. `query_dom` says what
+  `margin-top` is; this says who set it. Built from the CSSOM in the isolated
+  world (`extension/lib/css-cascade.js`, cascade order per CSS Cascade 5,
+  unit-tested on a fake CSSOM): a stylesheet from another origin without CORS
+  is opaque and listed by href; `@container`, `@scope` and `@starting-style`
+  are not evaluated and are reported in `skipped`. Core group; 60 tools, 39 in
+  core.
 
 ## 1.20.1 — 2026-09-24
 

@@ -804,7 +804,7 @@ async function main() {
     // 1.20.0
     await testGetInteractivesLabels(testTabId);
 
-    // Unreleased
+    // 1.21.0
     await testGetCssStyles(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
