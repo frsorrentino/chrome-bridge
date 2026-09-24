@@ -703,6 +703,33 @@ async function testWaitForTextHiddenWindow() {
 
 // --- Main ---
 
+// Unreleased: get_css_styles. example.com: <style>body{background:#eee;width:60vw;
+// margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}…</style>
+async function testGetCssStyles(tabId) {
+  const name = 'get_css_styles: winner with sheet and rule, shorthand expanded, inherited from body';
+  try {
+    // I test precedenti lasciano la scheda dove capita: la pagina va scelta qui.
+    await wsManager.sendCommand(MessageType.NAVIGATE, { url: 'https://example.com/', tab_id: tabId });
+    await new Promise((r) => setTimeout(r, 500));
+    const body = await wsManager.sendCommand(MessageType.GET_CSS_STYLES, { selector: 'body', properties: ['width', 'margin'], tab_id: tabId });
+    const width = body.properties?.width;
+    if (!width) throw new Error(`no width: ${JSON.stringify(body).slice(0, 300)}`);
+    if (width.value !== '60vw') throw new Error(`width.value ${width.value}, expected 60vw`);
+    if (width.source?.selector !== 'body') throw new Error(`source ${JSON.stringify(width.source)}`);
+    if (!/^<style>/.test(width.source.sheet)) throw new Error(`sheet ${width.source.sheet}`);
+    if (!/px$/.test(width.computed)) throw new Error(`computed ${width.computed}`);
+    const top = body.properties['margin-top'];
+    if (top?.value !== '15vh') throw new Error(`margin shorthand not expanded: ${JSON.stringify(top)}`);
+    const h1 = await wsManager.sendCommand(MessageType.GET_CSS_STYLES, { selector: 'h1', include_inherited: true, tab_id: tabId });
+    if (h1.properties?.['font-size']?.value !== '1.5em') throw new Error(`h1 font-size ${JSON.stringify(h1.properties?.['font-size'])}`);
+    if (h1.properties?.['font-family']?.inherited_from !== 'body') throw new Error(`font-family ${JSON.stringify(h1.properties?.['font-family'])}`);
+    log(`body width ${width.value} (${width.computed}) from ${width.source.sheet} rule ${width.source.rule}; h1 font-family inherited from ${h1.properties['font-family'].inherited_from}`);
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
 async function main() {
   console.log('=== Chrome Bridge DevTools Test ===\n');
 
@@ -776,6 +803,9 @@ async function main() {
 
     // 1.20.0
     await testGetInteractivesLabels(testTabId);
+
+    // Unreleased
+    await testGetCssStyles(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

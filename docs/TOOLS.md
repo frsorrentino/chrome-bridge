@@ -1,7 +1,7 @@
 # Tool reference
 
-All 59 tools, by capability group. The group name is the value to pass to
-`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (38 tools);
+All 60 tools, by capability group. The group name is the value to pass to
+`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (39 tools);
 `install.sh` registers the server with `all`.
 
 Check what is active in your session with `get_status` → `caps_active` /
@@ -40,12 +40,19 @@ agent can act without a separate discovery call.
 `fill_form` fills N fields and submits in one call — 3 calls instead of 9 on the
 benchmark form, at the same byte count.
 
-## DOM & Inspection (10) — group `dom`
+## DOM & Inspection (11) — group `dom`
 
-`read_page`, `extract`, `get_page_info`, `query_dom`, `modify_dom`, `find_text`,
+`read_page`, `extract`, `get_page_info`, `query_dom`, `get_css_styles`, `modify_dom`, `find_text`,
 `get_interactives`, `inject_css`, `watch_dom`, `get_page_info` (with `dev`: dev server and
 error overlay when one is open),
 `measure_spacing`.
+
+`get_css_styles` is the Styles panel of DevTools as text: for each property the
+winning declaration (selector, stylesheet, rule position, `!important`, `@layer`,
+`@media`) and the ones it overrides; `include_inherited` walks the ancestors for
+`color`, `font-*` and custom properties. Built from the CSSOM, so a stylesheet
+from another origin without CORS is opaque (listed by href) and `@container` /
+`@scope` rules are not evaluated (`skipped`).
 
 `read_page(mode="markdown")` keeps headings, links and tables at a fraction of
 the HTML cost. `read_page`, `extract`, `screenshot` and `http_request` accept

@@ -50,7 +50,7 @@ const MUTATING = [
 
 // Tool che osservano e basta: nessuna scrittura su pagina, tab o disco.
 const READ_ONLY = [
-  'read_page', 'get_tabs', 'query_dom', 'screenshot', 'get_page_info',
+  'read_page', 'get_tabs', 'query_dom', 'get_css_styles', 'screenshot', 'get_page_info',
   'audit', 'extract_table', 'find_text',
   'get_interactives', 'get_frames',
   'get_status', 'get_storage',

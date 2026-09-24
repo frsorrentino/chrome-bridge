@@ -18,6 +18,7 @@ export const MessageType = Object.freeze({
   GET_STORAGE:     'get_storage',
   GET_PERFORMANCE: 'get_performance',
   QUERY_DOM:       'query_dom',
+  GET_CSS_STYLES:  'get_css_styles',
   MODIFY_DOM:      'modify_dom',
   INJECT_CSS:      'inject_css',
   READ_CONSOLE:         'read_console',

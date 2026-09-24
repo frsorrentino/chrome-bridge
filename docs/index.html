@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chrome Bridge for Claude Code — your real, logged-in Chrome</title>
-<meta name="description" content="An MCP server that gives Claude Code your real, logged-in Chrome: 59 browser automation tools over a local WebSocket. Measured 2.75× fewer turns than the official Claude in Chrome extension. Self-hosted, no accounts, ChromeOS included.">
+<meta name="description" content="An MCP server that gives Claude Code your real, logged-in Chrome: 60 browser automation tools over a local WebSocket. Measured 2.75× fewer turns than the official Claude in Chrome extension. Self-hosted, no accounts, ChromeOS included.">
 <link rel="canonical" href="https://frsorrentino.github.io/chrome-bridge/">
 <meta property="og:title" content="Chrome Bridge for Claude Code">
-<meta property="og:description" content="59 browser automation tools over a local WebSocket. Your real Chrome, where you are already logged in. Self-hosted, no accounts.">
+<meta property="og:description" content="60 browser automation tools over a local WebSocket. Your real Chrome, where you are already logged in. Self-hosted, no accounts.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://frsorrentino.github.io/chrome-bridge/">
 <style>
@@ -186,7 +186,7 @@ footer .container { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-
             <p class="eyebrow">MCP server + Chrome extension</p>
             <h1>Claude Code drives the Chrome you are already logged into.</h1>
             <p class="hero__lead">No robot browser, no empty profile, no paid plan: your real tabs, sessions and extensions, through a WebSocket bridge that never leaves your machine.</p>
-            <p class="hero__meta">59 tools · Chrome 135+ · Node 18+ · Windows, macOS, Linux, ChromeOS · MIT</p>
+            <p class="hero__meta">60 tools · Chrome 135+ · Node 18+ · Windows, macOS, Linux, ChromeOS · MIT</p>
             <div class="actions">
                 <a class="btn btn--primary" href="https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb">Install from the Chrome Web Store</a>
                 <a class="btn" href="https://github.com/frsorrentino/chrome-bridge">Source on GitHub</a>
@@ -254,15 +254,15 @@ footer .container { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-
 
 <section>
     <div class="container">
-        <h2 class="section-title">59 tools, in seven groups</h2>
-        <p class="section-lead">Only <code>core</code> (38 tools) loads by default; the rest are opt-in with <code>--caps</code>, so the schema you pay for stays small.</p>
+        <h2 class="section-title">60 tools, in seven groups</h2>
+        <p class="section-lead">Only <code>core</code> (39 tools) loads by default; the rest are opt-in with <code>--caps</code>, so the schema you pay for stays small.</p>
         <div class="wrap">
             <table>
                 <thead><tr><th>Group</th><th>N</th><th>What’s in it</th></tr></thead>
                 <tbody>
                     <tr><td>Core &amp; Navigation</td><td>13</td><td>tabs, windows, <code>navigate</code>, <code>screenshot</code>, <code>tile_windows</code></td></tr>
                     <tr><td>Interaction</td><td>11</td><td><code>click</code>, <code>fill_form</code>, <code>upload_file</code>, dialogs, clipboard</td></tr>
-                    <tr><td>DOM &amp; Inspection</td><td>10</td><td><code>read_page</code>, <code>extract</code>, <code>query_dom</code>, <code>watch_dom</code></td></tr>
+                    <tr><td>DOM &amp; Inspection</td><td>11</td><td><code>read_page</code>, <code>extract</code>, <code>query_dom</code>, <code>get_css_styles</code>, <code>watch_dom</code></td></tr>
                     <tr><td>Debugging &amp; Network</td><td>8</td><td><code>execute_js</code>, console, network log, mocking, <code>track_events</code></td></tr>
                     <tr><td>Visual &amp; Responsive</td><td>5</td><td><code>screenshot_diff</code>, viewport and zoom, media emulation</td></tr>
                     <tr><td>Audits</td><td>2</td><td><code>audit</code> (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), <code>cookie_audit</code></td></tr>
@@ -312,7 +312,7 @@ chrome-bridge replay --file ./recordings/login.jsonl</pre>
                 <thead><tr><th></th><th>Chrome Bridge</th><th>Claude in Chrome</th><th>DevTools MCP</th><th>Playwright MCP</th></tr></thead>
                 <tbody>
                     <tr><td>ChromeOS / Crostini</td><td class="yes">Yes (real host)</td><td>No</td><td>Container only</td><td>Container only</td></tr>
-                    <tr><td>Tools</td><td class="yes">59 (38 core)</td><td>22</td><td>29 default</td><td>24 core</td></tr>
+                    <tr><td>Tools</td><td class="yes">60 (39 core)</td><td>22</td><td>29 default</td><td>24 core</td></tr>
                     <tr><td>Requires paid plan</td><td class="yes">No</td><td>Yes (Pro+)</td><td>No</td><td>No</td></tr>
                     <tr><td>Network mocking</td><td class="yes">Yes</td><td>No</td><td>No</td><td>Yes</td></tr>
                     <tr><td>Visual regression</td><td class="yes">Yes</td><td>No</td><td>No</td><td>No</td></tr>

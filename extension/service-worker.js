@@ -357,6 +357,8 @@ async function executeCommand(msg) {
       return await cmdGetPerformance(params);
     case 'query_dom':
       return await cmdQueryDom(params);
+    case 'get_css_styles':
+      return await cmdGetCssStyles(params);
     case 'modify_dom':
       return await cmdModifyDom(params);
     case 'inject_css':
@@ -1562,6 +1564,42 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id 
   });
   const elements = results?.[0]?.result ?? [];
   return { count: elements.length, elements };
+}
+
+// --- DevTools: get_css_styles ---
+
+// La cascata sta in lib/css-cascade.js, iniettato prima della funzione come
+// element-label.js: chrome.scripting serializza solo la funzione. Mondo
+// ISOLATED: il CSSOM è lo stesso e la pagina non vede né manomette la libreria.
+async function cmdGetCssStyles({ selector, properties, include_inherited = false, tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+  await chrome.scripting.executeScript({ target, files: ['lib/css-cascade.js'], world: 'ISOLATED' });
+  const results = await chrome.scripting.executeScript({
+    target,
+    func: (sel, props, inherited) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      return globalThis.__cbCssStyles(el, { selector: sel, properties: props, include_inherited: inherited });
+    },
+    args: [selector, properties ?? null, Boolean(include_inherited)],
+    world: 'ISOLATED',
+  });
+  return results?.[0]?.result ?? {};
 }
 
 // --- DevTools: modify_dom ---

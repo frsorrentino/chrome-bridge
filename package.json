@@ -3,7 +3,7 @@
   "mcpName": "io.github.frsorrentino/chrome-bridge",
   "version": "1.20.1",
   "type": "module",
-  "description": "Chrome Bridge by frsorrentino: MCP server that gives Claude Code your real, logged-in Chrome — 59 tools, 2.75× fewer turns than Claude in Chrome, ChromeOS included.",
+  "description": "Chrome Bridge by frsorrentino: MCP server that gives Claude Code your real, logged-in Chrome — 60 tools, 2.75× fewer turns than Claude in Chrome, ChromeOS included.",
   "main": "server/index.js",
   "bin": {
     "chrome-bridge-mcp": "server/index.js",

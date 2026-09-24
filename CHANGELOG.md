@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- `get_css_styles`: the Styles panel of DevTools as text. For each CSS
+  property of an element, the winning declaration — selector, stylesheet, rule
+  position, `!important`, `@layer`, `@media` — and the declarations it
+  overrides; `properties` narrows it, `include_inherited` walks the ancestors
+  for `color`, `font-*` and custom properties. `query_dom` says what
+  `margin-top` is; this says who set it. Built from the CSSOM in the isolated
+  world (`extension/lib/css-cascade.js`, cascade order per CSS Cascade 5,
+  unit-tested on a fake CSSOM): a stylesheet from another origin without CORS
+  is opaque and listed by href; `@container`, `@scope` and `@starting-style`
+  are not evaluated and are reported in `skipped`. Core group; 60 tools, 39 in
+  core.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

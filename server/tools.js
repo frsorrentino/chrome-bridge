@@ -307,6 +307,7 @@ export const TOOL_ANNOTATIONS = {
   measure_spacing: ro(),
   monitor_network: ro(true),
   query_dom: ro(),
+  get_css_styles: ro(),
   read_page: ro(),
   screenshot: ro(),
   wait_for: ro(),
@@ -979,6 +980,27 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           text: jsonText(data),
         }],
       };
+    }
+  );
+
+  // --- get_css_styles ---
+  server.tool(
+    'get_css_styles',
+    'Why an element looks the way it does: for each CSS property the winning declaration — selector, stylesheet, '
+      + 'rule position, !important, @layer, @media — and the ones it overrides, like the Styles panel of DevTools; '
+      + 'query_dom gives the computed value, this gives who set it. Read-only, from the CSSOM: stylesheets of '
+      + 'another origin without CORS are opaque and listed by href; user-agent styles, @container and @scope rules '
+      + 'are not evaluated. properties narrows the output.',
+    {
+      selector: z.string().describe('CSS selector; ">>>" pierces shadow DOM. Only the first match is inspected'),
+      properties: z.array(z.string()).optional().describe('Only these, e.g. ["margin-top","--brand"]; margin covers its longhands. Omitted = every property a matching rule sets'),
+      include_inherited: z.boolean().optional().default(false).describe('Also inherited properties (color, font-*, custom properties) with the ancestor that sets them'),
+      tab_id: tabId,
+      frame_id: frameId,
+    },
+    async ({ selector, properties, include_inherited, tab_id, frame_id }) => {
+      const data = await send(MessageType.GET_CSS_STYLES, { selector, properties, include_inherited, tab_id, frame_id });
+      return { content: [{ type: 'text', text: jsonText(data, DEFAULT_MAX_OUTPUT, 'properties') }] };
     }
   );
 

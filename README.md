@@ -8,7 +8,7 @@
 2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome"
 extension on a form-filling task, with ~3× the toolset and no paid plan.**
 
-59 web-development tools (navigation, DOM inspection, visual regression, audits,
+60 web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for CI.
 Self-hosted, local-only.
 
@@ -55,7 +55,7 @@ register the same server twice.
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **59** (38 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
+| **Tools** | **60** (39 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
@@ -117,16 +117,16 @@ user-script toggle isn't available.
 
 ## Tools
 
-59 in total, in seven groups. Only `core` (38 tools) loads by default; the rest
+60 in total, in seven groups. Only `core` (39 tools) loads by default; the rest
 are opt-in via `--caps`.
 
-![59 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
+![60 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
 | Core & Navigation | 13 | tabs, windows, `navigate`, `screenshot`, `tile_windows` |
 | Interaction | 11 | `click`, `fill_form`, `upload_file`, dialogs, clipboard |
-| DOM & Inspection | 10 | `read_page`, `extract`, `query_dom`, `watch_dom` |
+| DOM & Inspection | 11 | `read_page`, `extract`, `query_dom`, `get_css_styles`, `watch_dom` |
 | Debugging & Network | 8 | `execute_js`, console, network log, mocking, `track_events` |
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
 | Audits | 2 | `audit` (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), `cookie_audit` |
@@ -246,7 +246,7 @@ count.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 59 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 60 tools, by group
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`
