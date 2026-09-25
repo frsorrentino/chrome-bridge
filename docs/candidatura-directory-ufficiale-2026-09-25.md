@@ -24,7 +24,7 @@ Passi del modulo (`claude.com/docs/plugins/submit`), con cosa mettere:
 | Source | Validate | da premere nel portale; il report vale per un commit solo, ripetere dopo ogni push |
 | Listing details | (nessun campo editabile) | nome, descrizione breve e testo lungo vengono da `plugin.json` e dal `README.md` |
 | Data handling | 4 domande | vedi §3 |
-| Compliance | contact email + 4 acknowledgement | `fr.sorrentino@gmail.com`; spuntare i quattro |
+| Compliance | contact email + 4 acknowledgement | la mail personale di Franz (quella dell'account claude.ai); spuntare i quattro |
 | Review and submit | How new versions reach the directory | **GitHub push webhook** (default; serve admin del repo per il webhook) |
 | Review and submit | Auto-publish passing versions | **on** (Anthropic decide se applicarlo; di default un reviewer pubblica ogni versione) |
 

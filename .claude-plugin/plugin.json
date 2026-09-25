@@ -1,5 +1,6 @@
 {
   "name": "chrome-bridge",
+  "displayName": "Chrome Bridge for Claude",
   "version": "1.22.0",
   "description": "Borrow a tab from your own logged-in Chrome and hand it back: navigate, read, fill, audit, diff and record in the browser you already use; logins, 2FA and CAPTCHAs stay with you (handoff). ChromeOS included, no debugger permission. Ships the chrome-bridge skill (recipes) and the zero-token CLI.",
   "author": {

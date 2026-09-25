@@ -2,7 +2,7 @@
 
 > By [frsorrentino](https://github.com/frsorrentino) · npm `chrome-bridge-mcp` · not affiliated with other projects named "chrome-bridge".
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-257%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-373%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **Claude Code borrows a tab from the Chrome you are already using — signed in,
 with your extensions and your cookies — works in it, and hands it back. What
@@ -53,7 +53,11 @@ registers the MCP server from npm (all capabilities) together with the recipes
 skill; clients that read [Agent Plugins 1.0](https://agent-plugins.org) get the
 same from `plugin.json` + `mcp.json`. The extension still comes from the Web
 Store or `extension/`. Pick one path: the plugin and `install.sh` would
-register the same server twice.
+register the same server twice, and so would a plugin added from the
+[Anthropic directory](https://claude.ai/directory) on claude.ai (it reaches
+Claude Code as `chrome-bridge@synced`) next to a marketplace install. In
+claude.ai chat the plugin loads only the recipes skill: the tools need Claude
+Code, or Cowork running on your computer, where the local MCP server can start.
 
 ## Your browser, your login
 
