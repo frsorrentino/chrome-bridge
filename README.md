@@ -45,8 +45,10 @@ element refs, `click(ref="n1")` follows with no discovery turn in between.
 For `execute_js`, enable **Allow user scripts** in `chrome://extensions` →
 Chrome Bridge → Details (on Chrome 135-137, enable Developer Mode instead).
 
-**As a plugin, without a clone:** in Claude Code, `/plugin marketplace add
-frsorrentino/chrome-bridge` then `/plugin install chrome-bridge@chrome-bridge`
+**As a plugin, without a clone:** in Claude Code,
+`/plugin install chrome-bridge --marketplace frsorrentino/chrome-bridge`
+(one command, Claude Code 2.1.275+; on older versions `/plugin marketplace add
+frsorrentino/chrome-bridge` then `/plugin install chrome-bridge@chrome-bridge`)
 registers the MCP server from npm (all capabilities) together with the recipes
 skill; clients that read [Agent Plugins 1.0](https://agent-plugins.org) get the
 same from `plugin.json` + `mcp.json`. The extension still comes from the Web
