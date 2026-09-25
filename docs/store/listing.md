@@ -6,7 +6,7 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
-Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
+Lend Claude Code a tab of your own logged-in Chrome and get it back; 2FA and CAPTCHA stay yours. 60 web-dev tools. ChromeOS too.
 
 ## Category
 
@@ -22,7 +22,7 @@ This extension has a single purpose: it lets the user's own Claude Code CLI (run
 
 ## Detailed description
 
-Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your real, logged-in Chrome browser. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension.
+Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — borrow a tab of the Chrome you are already using, signed in, and hand it back. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. What only you can do — a login, a 2FA code, a CAPTCHA, a choice — comes back to you as a banner in the page (the handoff tool): you act, the agent continues. It never types your credentials.
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 

@@ -625,7 +625,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- get_status ---
   server.tool(
     'get_status',
-    'Check bridge status: extension connection, server mode (primary/relay), port, version',
+    'Bridge status: extension connection, server mode (primary/relay), host, port, server and extension versions, js_evaluation '
+      + '(false under --no-js), write_root and read_root, caps_active and caps_available (a tool missing from the list lives in an '
+      + 'inactive cap), session_tab_id (the implicit tab), owned_tabs (created by this session), uptime_sec.',
     {},
     async () => {
       return {
@@ -924,7 +926,10 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- get_page_info ---
   server.tool(
     'get_page_info',
-    'Get page metadata: meta tags, scripts, stylesheets, links, and forms',
+    'Page metadata: title, url, visibility, doctype, charset, meta tags, scripts, stylesheets, links and forms. visibility=hidden means '
+      + 'the window is minimized, covered or in the background: the page does not render (screenshots fail) and its timers slow down. '
+      + 'dev.server names a dev server (vite, webpack-dev-server, next, nuxt) and dev.overlay carries the compiler message when an error '
+      + 'overlay is open: read it before treating the page as valid.',
     {
       tab_id: tabId,
       frame_id: frameId,
@@ -1561,7 +1566,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- upload_file ---
   server.tool(
     'upload_file',
-    'Set a file on input[type=file] from the server filesystem via DataTransfer (max 10MB).',
+    'Set a file on input[type=file] from the server filesystem via DataTransfer (max 10MB). Keys and credentials (~/.ssh, ~/.aws, '
+      + '~/.gnupg, .env*, *.pem, *.key, id_*…) are refused, and a --read-root on the server limits the readable tree: the call fails '
+      + 'with an error, nothing is read.',
     {
       selector: z.string().describe('The file input to fill; ">>>" pierces shadow DOM'),
       path: z.string().describe('Absolute path on the server machine; keys and credentials (~/.ssh, .env, *.pem) refused'),

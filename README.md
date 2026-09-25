@@ -4,13 +4,16 @@
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-257%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
-**An MCP server that gives Claude Code your real, logged-in Chrome — measured
-2.75× fewer turns and 2.28× lower cost than the official "Claude in Chrome"
-extension on a form-filling task, with ~3× the toolset and no paid plan.**
+**Claude Code borrows a tab from the Chrome you are already using — signed in,
+with your extensions and your cookies — works in it, and hands it back. What
+only a person can do (a login, a 2FA code, a CAPTCHA, a choice) comes back to
+you through `handoff`: a banner in the page, you act, the agent continues.**
 
-60 web-development tools (navigation, DOM inspection, visual regression, audits,
-network mocking) over a local WebSocket bridge, plus a headless instance for CI.
-Self-hosted, local-only.
+Measured on a form-filling task: 2.75× fewer turns and 2.28× lower cost than
+the official browser extension, with ~3× the toolset and no paid plan. 60
+web-development tools (navigation, DOM inspection, visual regression, audits,
+network mocking) over a local WebSocket bridge, plus a headless instance for
+CI. Self-hosted, local-only. Works on ChromeOS.
 
 ![The same form filled in 6 turns instead of 16.5 — 2.75× fewer turns, 2.28× lower cost](assets/readme/card1-race.png)
 
@@ -49,6 +52,21 @@ skill; clients that read [Agent Plugins 1.0](https://agent-plugins.org) get the
 same from `plugin.json` + `mcp.json`. The extension still comes from the Web
 Store or `extension/`. Pick one path: the plugin and `install.sh` would
 register the same server twice.
+
+## Your browser, your login
+
+No blank profile, no debugging port, no cloud browser. The extension runs in
+your Chrome, so every site you are signed into is already open to the agent:
+webmail, the hosting panel, a client's back office, a staging site behind
+basic auth. Tabs the agent opens are marked as its own and closed when the
+session ends; your tabs stay yours.
+
+When a page asks for something only you can give, the agent does not guess and
+never types credentials. `handoff` shows a banner in the page with what it
+needs — "complete the login with your 2FA, then press Done", "click the button
+you mean" — waits for you, and continues from where you left it, redirects
+included. It can also ask a question in the banner and read your typed reply,
+or let you pick one or more elements on the page.
 
 ## Why Chrome Bridge?
 
