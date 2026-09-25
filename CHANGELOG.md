@@ -28,6 +28,37 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.23.0 — unreleased
+
+### Fixed
+
+- The `PostToolUseFailure` hook never fired for a plugin install. With the
+  plugin, Claude Code names the tools
+  `mcp__plugin_chrome-bridge_chrome-bridge__<tool>`; the matcher in
+  `hooks/hooks.json` only knew `mcp__chrome-bridge__<tool>` (a server added
+  by hand). Found by the directory validator on 2026-09-25. `observe/tool.json`
+  now declares both prefixes, `hooks/hooks.json` is regenerated from it, and
+  two tests pin the matcher and the recorded call name.
+
+### Changed
+
+- `.claude-plugin/plugin.json`: `privacyPolicyUrl`
+  (https://frsorrentino.github.io/chrome-bridge/privacy) and `icon`
+  (`.claude-plugin/icon.svg`, 128×128). The Agent Plugins 1.0 `plugin.json`
+  stays as it is: its schema closes the object (`additionalProperties:
+  false`) and has no such fields.
+- `/chrome-bridge:observe`: `allowed-tools` narrowed from `Bash` to
+  `Bash(python3 *)`, the only command the recipe runs.
+- The `.claude/skills/chrome-bridge` symlink is out of the repo (ignored): the
+  plugin loads `./skills/`, the symlink only served the local session.
+- MCP server instructions shortened from 1 253 to 1 065 characters with the
+  same content: since Claude Code 2.1.283 `/context` shows them as a line of
+  their own.
+- docs/TOOLS.md and the skill: since Claude Code 2.1.283 every image a tool
+  returns is also saved to a file by the client, `save_to` or not; reuse the
+  path instead of capturing again. The site's install note matches the README
+  (one-command plugin install, directory duplicate).
+
 ## 1.22.0 — 2026-09-25
 
 ### Added

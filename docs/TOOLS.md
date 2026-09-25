@@ -57,7 +57,11 @@ from another origin without CORS is opaque (listed by href) and `@container` /
 `read_page(mode="markdown")` keeps headings, links and tables at a fraction of
 the HTML cost. `read_page`, `extract`, `screenshot` and `http_request` accept
 `save_to`: the result goes to a file and the tool returns the path, so the bytes
-never enter the context unless the agent decides to read them.
+never enter the context unless the agent decides to read them. Since Claude
+Code 2.1.283 every image a tool returns (`screenshot`, `element_screenshot`,
+`full_page_screenshot` without `save_to`) is also written to a file by the
+client, and the result names the path: reuse it with Read or Bash instead of
+capturing again. `save_to` still decides where the file goes.
 
 ## Debugging & Network (8) — group `network`
 

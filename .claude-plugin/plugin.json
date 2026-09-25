@@ -1,13 +1,15 @@
 {
   "name": "chrome-bridge",
   "displayName": "Chrome Bridge for Claude",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "description": "Borrow a tab from your own logged-in Chrome and hand it back: navigate, read, fill, audit, diff and record in the browser you already use; logins, 2FA and CAPTCHAs stay with you (handoff). ChromeOS included, no debugger permission. Ships the chrome-bridge skill (recipes) and the zero-token CLI.",
   "author": {
     "name": "frsorrentino",
     "url": "https://github.com/frsorrentino"
   },
   "homepage": "https://github.com/frsorrentino/chrome-bridge#readme",
+  "privacyPolicyUrl": "https://frsorrentino.github.io/chrome-bridge/privacy",
+  "icon": "./.claude-plugin/icon.svg",
   "repository": "https://github.com/frsorrentino/chrome-bridge",
   "license": "MIT",
   "keywords": [
@@ -24,7 +26,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "chrome-bridge-mcp@1.22.0"
+        "chrome-bridge-mcp@1.23.0"
       ],
       "env": {
         "CHROME_BRIDGE_CAPS": "all",

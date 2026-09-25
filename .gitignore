@@ -6,3 +6,6 @@ __pycache__/
 
 # claude plugin eval: risultati locali (JSON, report HTML), mai nel repo
 evals/results/
+
+# skill del repo per la sessione locale (symlink a skills/chrome-bridge): il plugin carica ./skills/, il portale non vuole symlink
+.claude/skills/chrome-bridge

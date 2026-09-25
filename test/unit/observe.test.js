@@ -308,3 +308,38 @@ test('observe/observe.py coincide con la fonte (SOURCE; check.sh se claude-obser
     assert.equal(r.status, 0, r.stderr);
   }
 });
+
+// Il validatore della directory (25/09) ha trovato che con il plugin installato
+// i tool si chiamano mcp__plugin_chrome-bridge_chrome-bridge__<tool>: il
+// matcher stretto di prima (mcp__chrome-bridge__) non scattava mai.
+test('hooks.json: il matcher PostToolUseFailure copre il nome nudo e quello plugin-scoped, non altri server', () => {
+  const hooks = JSON.parse(readFileSync(join(REPO, 'hooks', 'hooks.json'), 'utf8'));
+  const entry = hooks.hooks.PostToolUseFailure.find((e) => e.hooks.some((h) => h.command.includes('/observe/observe.py')));
+  assert.ok(entry?.matcher, 'nessuna voce PostToolUseFailure per observe.py');
+  const re = new RegExp(`^(?:${entry.matcher})$`);
+  for (const name of ['mcp__chrome-bridge__navigate', 'mcp__plugin_chrome-bridge_chrome-bridge__navigate', 'mcp__plugin_chrome-bridge_chrome-bridge__get_css_styles']) {
+    assert.ok(re.test(name), `${name} non corrisponde a ${entry.matcher}`);
+  }
+  for (const name of ['mcp__claude-in-chrome__navigate', 'mcp__chrome-bridges__x', 'Bash', 'mcp__plugin_other_chrome-bridge__navigate']) {
+    assert.ok(!re.test(name), `${name} corrisponde a ${entry.matcher}`);
+  }
+  // tool.json (da cui sync.py costruisce il matcher) dichiara gli stessi prefissi
+  const tool = JSON.parse(readFileSync(join(REPO, 'observe', 'tool.json'), 'utf8'));
+  assert.deepEqual(tool.match.mcp, ['mcp__chrome-bridge__', 'mcp__plugin_chrome-bridge_chrome-bridge__']);
+});
+
+test('observe.py hook: un errore con il nome plugin-scoped viene registrato come hook-mcp', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  mkdirSync(join(root, 'cfg'), { recursive: true });
+  const env = { ...process.env, XDG_STATE_HOME: root, CLAUDE_OBSERVE_CONFIG: join(root, 'none.json'), CLAUDE_CONFIG_DIR: join(root, 'cfg') };
+  const hook = spawnSync('python3', ['-B', PY, 'hook'], {
+    input: JSON.stringify({ hook_event_name: 'PostToolUseFailure', tool_name: 'mcp__plugin_chrome-bridge_chrome-bridge__navigate', tool_input: { url: 'x' }, error: 'No tab with id: 9.', cwd: root }),
+    env, encoding: 'utf8',
+  });
+  assert.equal(hook.status, 0, hook.stderr);
+  const recs = readFileSync(join(root, 'claude-observe', `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].source, 'hook-mcp');
+  assert.equal(recs[0].call, 'mcp__plugin_chrome-bridge_chrome-bridge__navigate');
+  assert.ok(!('attribution' in recs[0]), 'attribuzione certa: il prefisso è dichiarato in tool.json');
+});

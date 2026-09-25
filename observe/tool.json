@@ -3,7 +3,7 @@
   "repo": "frsorrentino/chrome-bridge",
   "security": "advisory",
   "version_from": ".claude-plugin/plugin.json",
-  "match": {"mcp": ["mcp__chrome-bridge__"]},
+  "match": {"mcp": ["mcp__chrome-bridge__", "mcp__plugin_chrome-bridge_chrome-bridge__"]},
   "known": [
     {"error": "Unknown ref", "fixed_in": "1.19.0",
      "workaround": "Refs come from get_interactives, navigate and find_text; run one of them again, or pass a selector. Before 1.19.0 each of those calls renumbered refs from n1, so an old ref could point at another element."},
