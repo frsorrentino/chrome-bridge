@@ -1,6 +1,7 @@
 {
   "name": "chrome-bridge",
   "repo": "frsorrentino/chrome-bridge",
+  "security": "advisory",
   "version_from": ".claude-plugin/plugin.json",
   "match": {"mcp": ["mcp__chrome-bridge__"]},
   "known": [

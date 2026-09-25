@@ -152,7 +152,7 @@ function applyRecord(recs, id, fields, example, now) {
     };
     recs.push(r);
   } else {
-    for (const k of ['workaround', 'class', 'note', 'context']) if (fields[k]) r[k] = fields[k];
+    for (const k of ['workaround', 'class', 'note', 'context', 'security', 'severity']) if (fields[k]) r[k] = fields[k];
     if (r.status === 'done' && String(fields.source || '').startsWith('hook')) r.status = 'new';
   }
   r.count = Number(r.count || 0) + (example != null || !r.count ? 1 : 0);

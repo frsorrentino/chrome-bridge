@@ -224,6 +224,52 @@ test('pending fra le due copie: una riga scritta dal server la incorpora observe
   assert.ok(!existsSync(join(box, `${TOOL}.pending.jsonl`)));
 });
 
+test('security e severity (FORMAT.md, a mano): il server li conserva e li incorpora dal pending, mai li mette da sé', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const box = join(root, 'claude-observe');
+  const config = { max_records: 2000, max_days: 90 };
+  const entry = buildEntry({ name: 'upload_file', args: { path: 'x' }, message: 'Refusing to read ~/.ssh/id_ed25519', env: process.env });
+  applyEntry(box, entry, config);
+  let recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.ok(!('security' in recs[0]) && !('severity' in recs[0]), 'il server non classifica: i flag sono a mano');
+  // `add --on ID --security --severity high` con il lock occupato: la riga in attesa porta i flag, e chi ha il lock li applica.
+  appendPending(box, { id: entry.id, fields: { source: 'manual', security: true, severity: 'high', note: 'letto fuori perimetro' }, example: null });
+  applyEntry(box, null, config);
+  recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].security, true);
+  assert.equal(recs[0].severity, 'high');
+  assert.equal(recs[0].note, 'letto fuori perimetro');
+  // Lo stesso errore visto di nuovo dal server: count sale, i flag messi a mano restano.
+  applyEntry(box, entry, config);
+  recs = readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(recs[0].count, 2, 'una riga a mano senza esempio non conta come errore visto');
+  assert.equal(recs[0].security, true);
+  assert.equal(recs[0].severity, 'high');
+});
+
+test('un record del server ha solo i campi di FORMAT.md v1, e observe.py lo elenca con i flag a mano', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'cb-obs-'));
+  const box = join(root, 'claude-observe');
+  const env = { ...process.env, XDG_STATE_HOME: root, CLAUDE_OBSERVE_CONFIG: join(root, 'none.json'), CLAUDE_CONFIG_DIR: join(root, 'cfg') };
+  const entry = buildEntry({ name: 'navigate', args: {}, message: 'No tab with id: 1.', env });
+  applyEntry(box, entry, { max_records: 2000, max_days: 90 });
+  const rec = JSON.parse(readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim());
+  const known = new Set(['v', 'id', 'tool', 'source', 'kind', 'call', 'error', 'key', 'count', 'first_seen', 'last_seen', 'account',
+    'project', 'context', 'examples', 'workaround', 'class', 'note', 'status', 'fixed_in', 'reported', 'attribution', 'security', 'severity']);
+  for (const k of Object.keys(rec)) assert.ok(known.has(k), `campo fuori formato: ${k}`);
+  assert.equal(rec.v, 1);
+  const py = spawnSync('python3', ['-B', PY, 'add', '--on', rec.id, '--security', '--severity', 'high', 'letto fuori perimetro'], { env, encoding: 'utf8', cwd: root });
+  assert.equal(py.status, 0, py.stderr);
+  const after = JSON.parse(readFileSync(join(box, `${TOOL}.jsonl`), 'utf8').trim());
+  assert.equal(after.security, true);
+  assert.equal(after.severity, 'high');
+  const list = spawnSync('python3', ['-B', PY, 'list', '--all'], { env, encoding: 'utf8', cwd: root });
+  assert.equal(list.status, 0, list.stderr);
+  assert.match(list.stdout, /^SEC\s+chrome-bridg-/m, list.stdout);
+});
+
 test('l\'id del server è quello dell\'hook: stesso call MCP completo, stesso testo che Claude Code mostra', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
   // L'SDK MCP trasforma l'eccezione in isError con text = error.message: è il
   // testo che arriva al payload dell'hook (visto dal vivo: «No tab with id: 1.»).

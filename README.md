@@ -218,10 +218,18 @@ count.
   session id and the names of the last three tools called.
 - **Never kept:** parameter values — no URLs, selectors, typed text or page
   content.
-- **Nothing leaves your computer** unless you say yes. With the plugin, after a
-  few errors have piled up Claude may offer, at a natural moment, to send them
-  as one GitHub issue: it shows you the anonymized text first and sends it only
-  after your confirmation. The server alone never sends or offers anything.
+- **Nothing leaves your computer** unless you say yes. With the plugin, once
+  a few errors have piled up (or one has waited a few days, or one is marked
+  as a defect), a line at the end of a turn tells you so, and Claude may offer,
+  at a natural moment, to send them as one GitHub issue: it shows you the
+  anonymized text first, then asks with buttons (from your GitHub, or not now)
+  and sends only what you chose. `/chrome-bridge:observe send` does the same
+  on demand; `list`, `mark` and `add` read and triage the log. The server
+  alone never sends or offers anything.
+- **Security observations** (a read or write outside the perimeter, a secret
+  exposed, unwanted code execution, data leaving the computer) never enter a
+  public issue: `/chrome-bridge:observe send --security` prepares a private
+  vulnerability report for the maintainers, see [SECURITY.md](SECURITY.md).
 - **Turn it off:** `{"enabled": false}` in `~/.config/claude-observe/config.json`
   (every plugin that uses claude-observe), or `CHROME_BRIDGE_OBSERVE=off` for
   the server. Keep the log but stop the offers: `{"propose": false}`.
