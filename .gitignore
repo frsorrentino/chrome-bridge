@@ -3,3 +3,6 @@ dist/
 .superpowers/
 .claude/settings.local.json
 __pycache__/
+
+# claude plugin eval: risultati locali (JSON, report HTML), mai nel repo
+evals/results/
