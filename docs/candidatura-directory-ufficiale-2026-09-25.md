@@ -116,3 +116,18 @@ Cosa manca o è debole per un reviewer:
 - https://claude.com/docs/plugins/submit
 - https://claude.com/docs/plugins/pre-submission-checklist
 - https://claude.com/docs/plugins/platform-support
+
+## 7. Esito: inviata il 2026-09-25 alle 22:59
+
+- **Submission:** https://claude.ai/directory/manage/plugins/9b07c4c4-3409-431e-bba9-d607ddc82209 (organizzazione di Franz Sorrentino, account personale). Stato alla creazione: «Submitted. The security scan is running now» → Security scan (current) → In review → Live. Versione rilevata v1.22.0 · 5645f0c, tracked branch `main`.
+- **Validazione del portale** su main@5645f0c: passata, 0 blocchi, 10 warning, 21 policy hold (npx pinnato, lockfile, `allowed-tools` di commands/observe.md, 9 immagini/font, 8 «credential from the user's machine», observe/observe.py non seguibile). Warning: nessuna icona, 8 «download-and-run command» nei docs, symlink `.claude/skills/chrome-bridge`, nessun `privacyPolicyUrl` in plugin.json.
+- **Scelte nel modulo:** Listed on = Claude Code, Cowork (Claude apps tolto: lì arriverebbe solo la skill). Data handling = Reads only · Yes, listed in README · Not retained · No. Compliance: 4 dichiarazioni, contact email personale di Franz. Auto-publish: acceso, ma «doesn't apply for now» finché un reviewer pubblica.
+- **Webhook push GitHub:** creato con `gh api` (hook id 685862626, evento push, content type json). Payload URL `https://api.anthropic.com/directory-webhooks/github/d4f0efb8-5a35-479e-bead-672c10630a6b/frsorrentino/chrome-bridge`; **segreto in `~/.config/chrome-bridge/directory-webhook.env` (0600)**, mai nel repo. Se perso: Settings → Rotate secret nel portale, poi aggiornare il hook.
+- **Screenshot:** docs/history/directory-review-2026-09-25-top.png, docs/history/directory-review-2026-09-25.png.
+
+## 8. Da fare nella prossima release (trovato dal validatore)
+
+1. **Bug:** il matcher del hook `PostToolUseFailure` in hooks/hooks.json (`mcp__chrome\-bridge__.*`) non corrisponde al nome plugin-scoped dei tool, `mcp__plugin_chrome-bridge_chrome-bridge__<tool>`: con il plugin installato il hook non scatta mai (scatta solo con il server aggiunto a mano sotto la stessa chiave). Correggere il matcher perché copra entrambi i nomi.
+2. `privacyPolicyUrl` in plugin.json (https://frsorrentino.github.io/chrome-bridge/privacy) e `icon` (`.claude-plugin/icon.svg`, quadrata ≥128 px).
+3. `allowed-tools` di commands/observe.md ristretto ai comandi esatti.
+4. Symlink `.claude/skills/chrome-bridge` fuori dal repo.
