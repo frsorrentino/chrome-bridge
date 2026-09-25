@@ -28,6 +28,44 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.22.0 — 2026-09-25
+
+### Added
+
+- The local error log (claude-observe, source commit `4ad78b7`) gains a private
+  path and speaks up on its own. Five changes, all local, nothing is sent
+  without your yes:
+  1. **The offer comes sooner.** Claude may offer to send the unsent
+     observations not only after three errors, but also when the oldest has
+     waited `propose_after_days` days (default 3) or one is marked as a defect
+     of ours (class `D`), at once.
+  2. **`--security` and `--severity high`** on `observe add`: a read or write
+     outside the perimeter, a secret exposed, unwanted code execution, data
+     leaving the computer; or a defect of ours that blocks the work. Claude
+     sets them from what it saw, never asks you. Security observations never
+     enter a public issue: they take a private path only.
+  3. **One line on screen** at the end of a turn (a `Stop` hook) when the offer
+     rule fires, once per `propose_every_days`, never in the maintainer's own
+     session.
+  4. **`/chrome-bridge:observe`**, the same command in every plugin that uses
+     claude-observe: `send`, `send --security`, `list`, `show`, `mark`, `add`,
+     `export`.
+  5. **Buttons, not free text.** After the anonymized draft, Claude asks with
+     three options at most: send from your GitHub (an issue in your name, or a
+     private vulnerability report for `--security`), send anonymously (only
+     when the maintainers' endpoint is configured), not now (the offer comes
+     back in seven days).
+- `SECURITY.md`: security findings go to GitHub private vulnerability
+  reporting on this repo, or through `/chrome-bridge:observe send --security`.
+  `observe/tool.json` names that channel (`security: advisory`).
+
+### Changed
+
+- The npm server keeps the `security` and `severity` fields of a record it
+  updates, like the Python copy (FORMAT.md v1, optional fields set by hand);
+  it never sets them itself. Two parity tests cover the pending line and the
+  field set.
+
 ## 1.21.0 — 2026-09-24
 
 ### Added
