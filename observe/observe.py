@@ -331,11 +331,24 @@ def redact_cmd(toks, tool=None):
 
 
 # ------------------------------------------------------------------ registro: di quale strumento e' la chiamata
+def bare_call(tool_name):
+    """Il nome MCP senza il prefisso del plugin: con il plugin installato Claude Code chiama
+    mcp__plugin_<plugin>_<server>__<tool>, a mano mcp__<server>__<tool> (26/09: i `known` scritti col nome nudo non
+    scattavano, lo stesso errore dava due record). Il server resta; il plugin si toglie col suo nome, se e' il nostro."""
+    m = re.match(r"mcp__plugin_(.+?)__(.+)$", tool_name)
+    if not m:
+        return tool_name
+    scope, rest = m.groups()
+    plugin = str(TOOL.get("plugin") or TOOL.get("name") or "")
+    server = scope[len(plugin) + 1:] if plugin and scope.startswith(plugin + "_") else scope.split("_", 1)[-1]
+    return f"mcp__{server}__{rest}"
+
+
 def tool_of(tool_name, tool_input):
     """(nome, strumento, segmento, certo) oppure None."""
     for name, t in tools().items():
         m = t.get("match") or {}
-        if any(tool_name.startswith(p) for p in m.get("mcp") or [] if p):
+        if any(tool_name.startswith(p) or bare_call(tool_name).startswith(p) for p in m.get("mcp") or [] if p):
             return name, t, None, True
     if tool_name != "Bash":
         return None
@@ -448,7 +461,7 @@ def known_hint(name, t, rec, head, err, ctx):
     """Cosa dire a Claude su un errore gia' noto: prima la correzione (piu' vecchia della versione installata →
     aggiornare), poi l'aggiramento registrato. Il testo di un aggiramento scritto da un altro account non passa."""
     fixed = [(k.get("fixed_in"), k.get("workaround")) for k in t.get("known") or []
-             if isinstance(k, dict) and k.get("call") in (head, None, "") and str(k.get("error") or "").lower() in err.lower()]
+             if isinstance(k, dict) and bare_call(str(k.get("call") or "")) in (head, "") and str(k.get("error") or "").lower() in err.lower()]
     if rec:
         fixed.insert(0, (rec.get("fixed_in"), rec.get("workaround") if rec.get("account") == account_name() else None))
     have = ctx.get("tool_version") or ""
@@ -654,13 +667,14 @@ def hook(p):
         head = " ".join(call.split()[:3])
     else:
         call = name
-        head = name
+        head = bare_call(name)   # la chiave e i `known`: lo stesso tool sotto i due nomi e' lo stesso tool
     key = normalize(f"{head} {err}")
     ctx = context(p, tool, t)
     prev = next((r for r in read(box_dir() / f"{tool}.jsonl") if r.get("id") == rid(tool, key)), None)
     ex = {"input_shape": shape(p.get("tool_input")) if name != "Bash" else {"command": call}, "error_raw": scrub(err),
+          **({} if name == "Bash" else {"call": name}),
           "session_id": str(p.get("session_id") or ""), "duration_ms": p.get("duration_ms"), "context": ctx}
-    record(tool, rid(tool, key), {"context": ctx, "source": "hook-mcp" if name != "Bash" else "hook-bash", "kind": "error", "call": head,
+    record(tool, rid(tool, key), {"context": ctx, "source": "hook-mcp" if name != "Bash" else "hook-bash", "kind": "error", "call": call if name != "Bash" else head,
                                   "error": scrub(err), "key": key, "account": account_name(),
                                   "project": os.path.basename(os.path.realpath(p.get("cwd") or os.getcwd())),
                                   **({} if certain else {"attribution": "uncertain"})}, ex)
@@ -676,7 +690,7 @@ def record_external(source, call, text, project="", account=""):
     if not O.get("enabled", True) or not tools():
         return None
     tool = TOOL["name"]
-    key = normalize(f"{call} {text}")
+    key = normalize(f"{bare_call(call)} {text}")
     return record(tool, rid(tool, key), {"source": source, "kind": "error", "call": scrub(call, 200), "error": scrub(text),
                                          "key": key, "account": account or account_name(), "project": project},
                   {"error_raw": scrub(text)})
