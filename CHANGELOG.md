@@ -58,6 +58,10 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
   returns is also saved to a file by the client, `save_to` or not; reuse the
   path instead of capturing again. The site's install note matches the README
   (one-command plugin install, directory duplicate).
+- The skill says which recipes need an opt-in capability group (`/doctor
+  prompt-audit`, 2.1.283: thirteen tools called by recipes are not in `core`)
+  and what to do when a tool is missing from the list: `get_status`, then ask
+  for the group.
 
 ## 1.22.0 — 2026-09-25
 
