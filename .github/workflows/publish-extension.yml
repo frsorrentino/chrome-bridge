@@ -27,34 +27,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          # Servono i tag per confrontare extension/ con la release precedente.
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-
-      - run: npm ci
-
-      # Cancello di qualità: un pacchetto che non passa i test non arriva agli
-      # utenti dello store, dove un rollback costa un'altra revisione.
-      - name: Test
-        run: npm test
-
-      # Il tag e il manifest devono dire la stessa cosa. Se divergono, lo store
-      # riceverebbe un artefatto che non corrisponde alla release: meglio
-      # fermarsi qui che scoprirlo dopo l'approvazione.
-      - name: Il manifest corrisponde al tag
+      # Una release può non toccare l'estensione (1.23.2: solo server): allora
+      # il manifest resta alla versione che è già sullo store e nessun passo
+      # sotto parla con lo store — niente upload, niente revisione per un
+      # pacchetto identico. Se il manifest diverge dal tag MA extension/ è
+      # cambiata, è un bump dimenticato: errore, come prima.
+      - name: L'estensione fa parte di questa release?
+        id: scope
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           TAG_VERSION="${TAG#v}"
           MANIFEST_VERSION="$(node -p "require('./extension/manifest.json').version")"
           echo "tag=$TAG_VERSION manifest=$MANIFEST_VERSION"
-          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
-            echo "::error::il tag dice $TAG_VERSION, il manifest $MANIFEST_VERSION"
+          if [ "$TAG_VERSION" = "$MANIFEST_VERSION" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/v$MANIFEST_VERSION" >/dev/null \
+               && git diff --quiet "v$MANIFEST_VERSION" HEAD -- extension/; then
+            echo "::notice::extension/ identica a v$MANIFEST_VERSION: questa release non tocca lo store"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::il tag dice $TAG_VERSION, il manifest $MANIFEST_VERSION, e extension/ è cambiata da v$MANIFEST_VERSION: manca il bump del manifest"
             exit 1
           fi
 
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.publish == 'true'
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+        if: steps.scope.outputs.publish == 'true'
+
+      # Cancello di qualità: un pacchetto che non passa i test non arriva agli
+      # utenti dello store, dove un rollback costa un'altra revisione.
+      - name: Test
+        if: steps.scope.outputs.publish == 'true'
+        run: npm test
+
       - name: Costruisci lo zip
+        if: steps.scope.outputs.publish == 'true'
         id: package
         run: |
           bash scripts/package-extension.sh
@@ -66,6 +81,7 @@ jobs:
       # è "You may not edit or publish an item that is in review", cioè una
       # versione precedente è ancora in revisione e va aspettata.
       - name: Carica e pubblica sullo store
+        if: steps.scope.outputs.publish == 'true'
         env:
           CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
@@ -87,7 +103,7 @@ jobs:
           esac
 
       - name: Stato dell'item dopo il caricamento
-        if: always()
+        if: always() && steps.scope.outputs.publish == 'true'
         env:
           CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}

@@ -37,9 +37,13 @@ jobs:
         run: |
           TAG="$(git tag --list 'v*' --sort=-v:refname | head -1)"
           if [ -z "$TAG" ]; then echo "::error::nessun tag v* nel repo"; exit 1; fi
+          # La versione da portare sullo store è quella del manifest nel tag,
+          # non il numero del tag: una release di solo server (1.23.2) lascia
+          # il manifest alla versione già caricata, e non va ricaricata.
+          VERSION="$(git show "$TAG:extension/manifest.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "ultimo tag: $TAG"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "ultimo tag: $TAG, estensione $VERSION"
 
       - name: Lo store è già a questa versione?
         id: check
