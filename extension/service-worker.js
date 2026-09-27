@@ -12,7 +12,7 @@ import { createPacer } from './lib/capture-pacing.js';
 import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 import { findTextInPage } from './lib/find-text.js';
-import { clickOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
+import { elementOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -919,7 +919,7 @@ async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'l
     world: 'MAIN',
   });
 
-  return clickOutcome(results, selector);
+  return elementOutcome(results, selector);
 }
 
 async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
@@ -994,7 +994,7 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
     world: 'MAIN',
   });
 
-  return results?.[0]?.result ?? { typed: true };
+  return elementOutcome(results, selector);
 }
 
 // Impronta per page_changed: pochi interi letti nell'ISOLATED world (nessuna
@@ -3343,7 +3343,7 @@ async function cmdHover({ selector, tab_id, frame_id }) {
     args: [selector],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { hovered: true };
+  return elementOutcome(results, selector);
 }
 
 // --- press_key ---
@@ -3410,7 +3410,7 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
     args: [key, selector || null, { ctrl, shift, alt, meta }],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { pressed: true };
+  return elementOutcome(results, selector);
 }
 
 // --- get_frames ---

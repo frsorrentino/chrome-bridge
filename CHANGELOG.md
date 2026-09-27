@@ -45,6 +45,11 @@ release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
   `Element not found: #checkout-button (no element matches; check it with
   query_dom)`. An occluded element still answers `clicked: false, occluded:
   true`, as before.
+- **`type_text`, `hover` and `press_key` had the same fallback** (`{typed:
+  true}`, `{hovered: true}`, `{pressed: true}`) and fail the same way now,
+  with the same message. `cookie_audit` with an `accept_selector` that matches
+  nothing used to report `consent: click <selector>` as if the banner had
+  been accepted; it now fails with that error.
 - **`navigate` reports a network error.** A refused connection answered
   `{url, title: "127.0.0.1"}`: Chrome's error page reaches status `complete`
   like a real page. The command now listens to
@@ -53,8 +58,10 @@ release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
   http://127.0.0.1:…/ (tab N shows the browser's error page)`. The same goes
   for DNS and other net errors; `net::ERR_ABORTED` (a download, a 204, a
   navigation replaced by another) is not an error.
-- Tests: `test/unit/command-outcome.test.js`, and two end-to-end cases in
-  `test/test-devtools.js` that fail on 1.23.3 (41/43) and pass now (43/43).
+- Tests: `test/unit/command-outcome.test.js`, and end-to-end cases in
+  `test/test-devtools.js` for the four element commands and navigate: each
+  was run against the old code and failed there first (click and navigate
+  41/43, type_text/hover/press_key 43/46); all pass now (46/46).
 
 ## 1.23.3 — not released
 

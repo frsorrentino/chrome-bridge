@@ -703,19 +703,26 @@ async function testWaitForTextHiddenWindow() {
 }
 
 // 1.23.4 (test Windows del 27/09): due successi falsi, su ogni OS.
-async function testClickNoMatch(tabId) {
-  const name = 'click on a selector with no match fails, does not report clicked';
+async function expectElementNotFound(name, type, params, tabId) {
   try {
     let data;
     try {
-      data = await wsManager.sendCommand(MessageType.CLICK, { selector: '#__cb_nothing_here', tab_id: tabId });
+      data = await wsManager.sendCommand(type, { ...params, tab_id: tabId });
     } catch (e) {
-      if (!/Element not found: #__cb_nothing_here/.test(e.message)) throw new Error(`wrong error: ${e.message}`);
+      if (!e.message.includes(`Element not found: ${params.selector}`)) throw new Error(`wrong error: ${e.message}`);
       ok(name);
       return;
     }
     throw new Error(`no error, got ${JSON.stringify(data)}`);
   } catch (e) { fail(name, e.message); }
+}
+
+async function testElementCommandsNoMatch(tabId) {
+  const sel = '#__cb_nothing_here';
+  await expectElementNotFound('click on a selector with no match fails, does not report clicked', MessageType.CLICK, { selector: sel }, tabId);
+  await expectElementNotFound('type_text on a selector with no match fails, does not report typed', MessageType.TYPE_TEXT, { selector: sel, text: 'x' }, tabId);
+  await expectElementNotFound('hover on a selector with no match fails, does not report hovered', MessageType.HOVER, { selector: sel }, tabId);
+  await expectElementNotFound('press_key on a selector with no match fails, does not report pressed', MessageType.PRESS_KEY, { key: 'Enter', selector: sel }, tabId);
 }
 
 async function closedPort() {
@@ -855,7 +862,7 @@ async function main() {
     await testGetCssStyles(testTabId);
 
     // 1.23.4
-    await testClickNoMatch(testTabId);
+    await testElementCommandsNoMatch(testTabId);
     await testNavigateConnectionRefused(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);

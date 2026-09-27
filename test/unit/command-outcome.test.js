@@ -1,29 +1,34 @@
 /**
  * Due successi falsi osservati nel test Windows del 27/09/2026 (su ogni OS):
- * `click` su un selettore senza corrispondenze rispondeva {"clicked":true}, e
+ * `click` su un selettore senza corrispondenze rispondeva {"clicked":true}
+ * (type_text, hover e press_key allo stesso modo), e
  * `navigate` verso una porta chiusa rispondeva {url, title} senza errore.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clickOutcome, isReportableNavError, watchNavErrors, navErrorMessage } from '../../extension/lib/command-outcome.js';
+import { elementOutcome, isReportableNavError, watchNavErrors, navErrorMessage } from '../../extension/lib/command-outcome.js';
 
 test('click senza risultato dalla funzione iniettata è un errore, non un successo', () => {
   // Quello che executeScript restituisce quando la funzione lancia «Element not found».
-  assert.throws(() => clickOutcome([{ frameId: 0, documentId: 'd' }], '#checkout-button'), /Element not found: #checkout-button/);
-  assert.throws(() => clickOutcome([{ frameId: 0, result: null }], '#x'), /Element not found: #x/);
-  assert.throws(() => clickOutcome([], '#x'), /Element not found/);
-  assert.throws(() => clickOutcome(undefined, '#x'), /Element not found/);
+  assert.throws(() => elementOutcome([{ frameId: 0, documentId: 'd' }], '#checkout-button'), /Element not found: #checkout-button/);
+  assert.throws(() => elementOutcome([{ frameId: 0, result: null }], '#x'), /Element not found: #x/);
+  assert.throws(() => elementOutcome([], '#x'), /Element not found/);
+  assert.throws(() => elementOutcome(undefined, '#x'), /Element not found/);
+});
+
+test('press_key senza selettore e senza risultato: errore generico, non «Element not found: undefined»', () => {
+  assert.throws(() => elementOutcome([{ frameId: 0 }], null), /^Error: The page returned no result for the command$/);
 });
 
 test('click: il messaggio d\'errore del frame, se c\'è, passa com\'è', () => {
-  assert.throws(() => clickOutcome([{ frameId: 0, error: { message: 'Element not found: #a >>> b' } }], '#a >>> b'), /^Error: Element not found: #a >>> b$/);
+  assert.throws(() => elementOutcome([{ frameId: 0, error: { message: 'Element not found: #a >>> b' } }], '#a >>> b'), /^Error: Element not found: #a >>> b$/);
 });
 
 test('click: un esito vero, anche negativo, resta com\'è', () => {
   const hit = { clicked: true, button: 'left', count: 1, tagName: 'BUTTON' };
-  assert.deepEqual(clickOutcome([{ frameId: 0, result: hit }], 'button'), hit);
+  assert.deepEqual(elementOutcome([{ frameId: 0, result: hit }], 'button'), hit);
   const occluded = { clicked: false, occluded: true, occluder: { selector: '#modal' } };
-  assert.deepEqual(clickOutcome([{ frameId: 0, result: occluded }], 'button'), occluded);
+  assert.deepEqual(elementOutcome([{ frameId: 0, result: occluded }], 'button'), occluded);
 });
 
 test('errori di navigazione: solo il frame principale, ERR_ABORTED escluso', () => {
