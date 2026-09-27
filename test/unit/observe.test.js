@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, statSync, writeFileSync, existsSync, mkdirSync, utimesSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import {
   scrub, normalize, rid, shape, applyEntry, buildEntry, createObserver, withDirLock, appendPending, BUSY, TOOL,
@@ -33,6 +33,14 @@ const CORPUS = [
   'type_text mismatch: value_after "Mario Rossi" text \'segreto\' «Lazio»',
   'Città non trovata: «Roma» dopo 3 tentativi, errore è 42',
   '  spazi\tmultipli\n e a capo  ',
+  // Le home di Windows in ogni forma (claude-observe d3fa492): mai il nome utente in un invio anonimo
+  'Refusing to write C:\\Users\\Utente\\Desktop\\x.png: outside CHROME_BRIDGE_WRITE_ROOT',
+  'ENOENT: C:/Users/Mario Rossi/AppData/Local/x.json',
+  'bash: /c/Users/Utente/a.sh and /mnt/c/Users/utente/b and /cygdrive/d/Users/x/c',
+  'open \\\\?\\C:\\Users\\Utente\\d.txt failed',
+  '{"path": "C:\\\\Users\\\\Utente\\\\e.png"}',
+  'read /home/altro/f and /Users/altro/g',
+  `mounted at /srv/${userInfo().username}/data`,
 ];
 
 test('scrub, normalize e id coincidono con observe.py sugli stessi testi', { skip: !hasPython && 'python3 o observe/observe.py assenti' }, () => {
@@ -299,7 +307,12 @@ test('observe/observe.py coincide con la fonte (SOURCE; check.sh se claude-obser
   const source = JSON.parse(readFileSync(join(REPO, 'observe', 'SOURCE'), 'utf8'));
   const have = createHash('sha256').update(readFileSync(PY)).digest('hex');
   assert.equal(have, source.sha256['observe.py'], 'copia modificata a mano: rimedio python3 <claude-observe>/sync.py .');
+  assert.equal(createHash('sha256').update(readFileSync(join(REPO, 'observe', 'py.sh'))).digest('hex'), source.sha256['py.sh']);
   const hooks = readFileSync(join(REPO, 'hooks', 'hooks.json'), 'utf8');
+  // Su Windows `python3` e' l'alias del Microsoft Store (esce 9009): ogni hook passa da py.sh (test del 27/09)
+  for (const h of Object.values(JSON.parse(hooks).hooks).flat().flatMap((e) => e.hooks)) {
+    assert.match(h.command, /^bash "\$\{CLAUDE_PLUGIN_ROOT\}\/observe\/py\.sh" /);
+  }
   assert.match(hooks, /observe\/observe\.py\\" hook/);
   assert.match(hooks, /observe\/observe\.py\\" session-start/);
   const check = join(REPO, '..', 'claude-observe', 'check.sh');
@@ -307,6 +320,35 @@ test('observe/observe.py coincide con la fonte (SOURCE; check.sh se claude-obser
     const r = spawnSync('bash', [check, REPO], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
   }
+});
+
+// py.sh: il primo Python 3 vero. Stub di python3 che esce 9009 come l'alias del
+// Microsoft Store in Git Bash; nessun Python: una riga su stderr ed exit 0.
+function runPySh(bins, args = ['-c', 'import os, sys; print(os.environ["PYTHONUTF8"], sys.version_info[0])']) {
+  const dir = mkdtempSync(join(tmpdir(), 'cb-pysh-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  for (const [name, body] of Object.entries(bins)) {
+    writeFileSync(join(bin, name), body, { mode: 0o755 });
+  }
+  return spawnSync('/bin/bash', [join(REPO, 'observe', 'py.sh'), ...args], {
+    encoding: 'utf8', env: { PATH: bin, HOME: dir, XDG_CACHE_HOME: join(dir, 'cache') },
+  });
+}
+const realPython = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).stdout?.trim();
+
+test('py.sh salta un python3 che esce 9009 (alias Store) e usa python, con PYTHONUTF8', { skip: !realPython && 'python3 assente' }, () => {
+  const r = runPySh({ python3: '#!/bin/sh\nexit 9009\n', python: `#!/bin/sh\nexec "${realPython}" "$@"\n` });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '1 3');
+});
+
+test('py.sh senza alcun Python: una riga su stderr ed exit 0, l\'hook non rompe la sessione', () => {
+  const r = runPySh({ python3: '#!/bin/sh\nexit 9009\n' }, ['x.py', 'hook']);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /no Python 3\.8\+ found/);
+  assert.equal(r.stderr.trim().split('\n').length, 1);
 });
 
 // Il validatore della directory (25/09) ha trovato che con il plugin installato

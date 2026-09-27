@@ -40,12 +40,51 @@ const DEFAULTS = { enabled: true, dir: '', max_records: 2000, max_days: 90 };
 // \w di Python è Unicode: qui lo stesso insieme, esplicito.
 const W = '[\\p{L}\\p{N}_]';
 
+// Una home in qualunque forma, come observe.py (claude-observe d3fa492, invio
+// anonimo da Windows): C:\Users\x, C:/Users/x, /c/Users/x, /mnt/c/Users/x,
+// /cygdrive/c/Users/x, \\?\C:\Users\x, i \\ dentro JSON, /home/x, /Users/x.
+const SEP = '[\\\\/]+';
+const DRIVE = '(?:(?:[\\\\/]{2}\\?[\\\\/]+)?\\b[a-z]:|/mnt/[a-z]|/cygdrive/[a-z]|/[a-z](?=[\\\\/]))';
+const SEG = '[^\\\\/\\s"\'`<>|:*?,;()\\[\\]]';
+// il nome della cartella puo' avere spazi: con gli spazi solo se dopo viene un separatore
+const HOME_ANY_RE = new RegExp(`${DRIVE}?${SEP}(?:users|home|documents and settings)${SEP}(?:${SEG}+(?: ${SEG}+)+(?=[\\\\/])|${SEG}+)`, 'giu');
+const reEscape = (x) => x.replace(/[.*+?^${}()|[\]\\/]/gu, '\\$&');
+
+// Le home di questa macchina senza distinzione di separatore, unita' e
+// maiuscole (anche una USERPROFILE fuori da Users), e il nome utente come
+// segmento di percorso.
+function homeRes(env = process.env) {
+  const homes = [...new Set([homedir(), env.USERPROFILE || '', env.HOME || ''])];
+  const pats = [];
+  for (const h of homes.sort((a, b) => b.length - a.length)) {
+    let parts = h.split(/[\\/]+/u).filter((x) => x && x !== '?');
+    if (!parts.length) continue;
+    const drive = parts.length > 1 ? /^([A-Za-z]):?$/u.exec(parts[0]) : null;
+    let head = '';
+    if (drive && (parts[0].endsWith(':') || parts[0].length === 1)) {
+      const d = drive[1];
+      head = `(?:(?:[\\\\/]{2}\\?[\\\\/]+)?\\b${d}:|/mnt/${d}|/cygdrive/${d}|/${d}(?=[\\\\/]))`;
+      parts = parts.slice(1);
+    }
+    pats.push(head + parts.map((x) => SEP + reEscape(x)).join(''));
+  }
+  const names = new Set(homes.filter(Boolean).map((h) => basename(h.replace(/\\/gu, '/').replace(/\/+$/u, ''))));
+  for (const k of ['USERNAME', 'USER', 'LOGNAME']) names.add(env[k] || '');
+  const list = [...names].filter((n) => n.length >= 2 && !['users', 'home'].includes(n.toLowerCase())).sort((a, b) => b.length - a.length);
+  return [
+    pats.map((p) => new RegExp(`${p}(?![^\\\\/\\s"'\`<>|:*?,;()\\[\\]])`, 'giu')),
+    list.length ? new RegExp(`(?<=[\\\\/])(?:${list.map(reEscape).join('|')})(?=[\\\\/\\s"'\`<>|:*?,;()\\[\\]]|$)`, 'giu') : null,
+  ];
+}
+const [HOME_RES, USER_SEG_RE] = homeRes();
+
 export function scrub(text, limit = 300) {
   let t = String(text ?? '');
-  const home = homedir();
-  if (home && home !== '/') t = t.split(home).join('~');
   t = t.replace(new RegExp(`(?:${W}|[.+-])+@(?:${W}|-)+\\.(?:${W}|[.-])+`, 'gu'), '<EMAIL>');
   t = t.replace(/(https?:\/\/[^/\s?#"'»]+)[^\s"'»]*/gu, '$1/…');
+  for (const r of HOME_RES) t = t.replace(r, '~');
+  t = t.replace(HOME_ANY_RE, '~');
+  if (USER_SEG_RE) t = t.replace(USER_SEG_RE, '<USER>');
   t = t.replace(/\b(token|password|passwd|secret|api[_-]?key|authorization|bearer)("?\s*[:=]\s*|\s+)\S+/giu, '$1$2<SECRET>');
   t = t.replace(/\b(value_after|value|text)("?\s*[:=]?\s*)("[^"]*"|'[^']*'|«[^»]*»)/giu, '$1$2<STR>');
   t = t.replace(/\b(?=[A-Za-z0-9_\-+/]*\d)(?=[A-Za-z0-9_\-+/]*[A-Za-z])[A-Za-z0-9_\-+/=]{24,}\b/gu, '<SECRET>');

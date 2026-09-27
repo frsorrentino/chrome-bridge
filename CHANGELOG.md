@@ -28,6 +28,52 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.23.3 — not released
+
+Fixes from the Windows compatibility test of 2026-09-27 (Windows 11, Claude
+Code 2.1.283, PowerShell 5.1). The MCP server and the Web Store extension
+already worked there; the plugin's hooks and launch mode did not. The extension
+code is unchanged: `extension/manifest.json` stays at 1.23.0.
+
+### Fixed
+
+- **The plugin's hooks run on Windows.** `hooks/hooks.json` called `python3`,
+  which on stock Windows is the Microsoft Store alias: it exits 9009 (49 in Git
+  Bash), so SessionStart and Stop failed on every session and no tool error
+  was ever recorded, with nothing shown to the model. The hooks and
+  `/chrome-bridge:observe` now go through `observe/py.sh`, which runs the
+  first real Python 3.8+ among `python3`, `python` and `py -3`, with
+  `PYTHONUTF8=1`; with no Python it prints one line and exits 0. `observe/`
+  resynced from claude-observe d3fa492: UTF-8 on every file and pipe (an error
+  text outside cp1252 was lost, and a UTF-8 record written by the server
+  stopped all later recording), `/proc` only where it exists, the Claude Code
+  version read on Windows too.
+- **Error texts lose the Windows home and the user name.** The scrub in
+  `observe/observe.py` and its copy in `server/observe.js` (used without the
+  plugin) removed only this machine's home in its own spelling: `C:\Users\x`,
+  `C:/Users/x`, `/c/Users/x`, `/mnt/c/Users/x`, `\\?\C:\Users\x` and the
+  doubled backslashes of JSON stayed in records meant for an anonymous issue.
+  Now any user's home in any of those forms becomes `~`, and the user name
+  alone as a path segment becomes `<USER>`; the two copies still give the same
+  text and the same record id (parity test extended to these forms).
+- **Launch mode finds a browser on Windows and macOS.** The candidate list
+  held only Linux paths, so `--launch` failed with «No Chromium/Chrome binary
+  found» unless `CHROME_BRIDGE_BROWSER` was set. It now looks for Chromium,
+  Microsoft Edge, Brave and last Google Chrome in the standard Windows
+  (`%LOCALAPPDATA%`, `%ProgramFiles%`, `%ProgramFiles(x86)%`) and macOS
+  (`/Applications`) paths.
+- **Google Chrome in launch mode says why the extension never connects.**
+  Chrome 137+ ignores `--load-extension`: it started, and every tool waited
+  30 s for a generic «extension not connected». When the launched binary is
+  Google Chrome, the server warns at start and the not-connected error names
+  the cause and the alternatives (Chromium, Edge, Brave, Chrome for Testing).
+
+### Documentation
+
+- README: a Windows note in the Quickstart (the plugin path, or `install.sh`
+  from Git Bash; Python for the hooks; Edge for launch mode) and
+  `CHROME_BRIDGE_BROWSER` in the configuration table.
+
 ## 1.23.2 — 2026-09-27
 
 Two more turns the benchmark of 2026-09-27 showed the model losing on 1.23.1,

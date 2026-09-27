@@ -11,17 +11,50 @@ import { spawn } from 'node:child_process';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EXTENSION_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'extension');
 
-const BROWSER_CANDIDATES = [
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-];
+/**
+ * Percorsi standard per piattaforma. Chromium, Edge e Brave prima di Google
+ * Chrome: il Chrome brandizzato dalla 137 ignora --load-extension, parte ma
+ * l'estensione non si connette mai (test Windows del 27/09: Chrome 155 muto,
+ * Edge 154 connesso in meno di 6 s).
+ */
+export function browserCandidates(platform = process.platform, env = process.env) {
+  if (platform === 'win32') {
+    const bases = [env.LOCALAPPDATA, env.PROGRAMFILES, env['PROGRAMFILES(X86)']].filter(Boolean);
+    return [
+      ['Chromium', 'Application', 'chrome.exe'],
+      ['Microsoft', 'Edge', 'Application', 'msedge.exe'],
+      ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'],
+      ['Google', 'Chrome', 'Application', 'chrome.exe'],
+    ].flatMap((parts) => bases.map((b) => win32.join(b, ...parts)));
+  }
+  if (platform === 'darwin') {
+    return [
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    ];
+  }
+  return [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+  ];
+}
+
+/** Google Chrome brandizzato (non Chromium, non Chrome for Testing). */
+export function isBrandedChrome(path) {
+  return /google[\\/ _-]?chrome/i.test(path) && !/for[ _-]?testing/i.test(path);
+}
+
+export const BRANDED_CHROME_HINT = 'Google Chrome 137+ ignores --load-extension, so launch mode cannot load the extension into it:'
+  + ' set CHROME_BRIDGE_BROWSER to Chromium, Microsoft Edge, Brave or Chrome for Testing';
 
 export function findBrowser() {
   if (process.env.CHROME_BRIDGE_BROWSER) {
@@ -30,9 +63,10 @@ export function findBrowser() {
     }
     return process.env.CHROME_BRIDGE_BROWSER;
   }
-  const found = BROWSER_CANDIDATES.find((p) => existsSync(p));
+  const candidates = browserCandidates();
+  const found = candidates.find((p) => existsSync(p));
   if (!found) {
-    throw new Error(`No Chromium/Chrome binary found (tried: ${BROWSER_CANDIDATES.join(', ')}). Set CHROME_BRIDGE_BROWSER.`);
+    throw new Error(`No Chromium-based browser found (tried: ${candidates.join(', ')}). Set CHROME_BRIDGE_BROWSER to Chromium, Edge, Brave or Chrome for Testing.`);
   }
   return found;
 }
@@ -93,5 +127,7 @@ export async function launchBrowser({ port, headless = false }) {
   };
 
   console.error(`[chrome-bridge] launched ${browser}${headless ? ' (headless)' : ''} pid=${proc.pid}, ws port ${port}`);
-  return { pid: proc.pid, stop };
+  const branded = isBrandedChrome(browser);
+  if (branded) console.error(`[chrome-bridge] warning: ${BRANDED_CHROME_HINT}`);
+  return { pid: proc.pid, stop, branded };
 }

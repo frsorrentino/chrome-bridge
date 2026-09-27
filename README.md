@@ -42,6 +42,16 @@ element refs, `click(ref="n1")` follows with no discovery turn in between.
 > instead: an unpacked extension is dropped on every reboot, because the
 > container isn't mounted when Chrome starts.
 
+> **On Windows** `install.sh` does not run from PowerShell or cmd. Use the
+> plugin path below (`claude plugin marketplace add frsorrentino/chrome-bridge`,
+> then `claude plugin install chrome-bridge@chrome-bridge`) with the extension
+> from the Web Store, or run `install.sh` from Git Bash. The plugin's error
+> log hooks run in Git Bash, as Claude Code runs every hook, and need Python
+> 3.8+ as `python3`, `python` or `py` (the Microsoft Store `python3` alias is
+> skipped); without Python they stay silent and the tools work the same. For
+> launch mode see `CHROME_BRIDGE_BROWSER` below: Google Chrome cannot load the
+> extension there, Microsoft Edge can.
+
 `install.sh` registers the MCP server with `--scope user`. To do it by hand:
 `claude mcp add --scope user chrome-bridge node /path/to/server/index.js`.
 For `execute_js`, enable **Allow user scripts** in `chrome://extensions` →
@@ -138,6 +148,12 @@ isolated sessions or CI:
 node server/index.js --launch --headless
 ```
 
+It looks for Chromium, Microsoft Edge, Brave and last Google Chrome in their
+standard paths on Linux, macOS and Windows; `CHROME_BRIDGE_BROWSER` picks
+another binary. Google Chrome 137+ ignores `--load-extension`, so the
+extension never connects in it: use Chromium, Edge, Brave or Chrome for
+Testing.
+
 Pair it with `session_record` + `replay` for smoke tests with no model in the
 loop. In launch mode `execute_js` falls back to `new Function` when the
 user-script toggle isn't available.
@@ -186,6 +202,7 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. `install.sh` uses `all` |
 | `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
 | `CHROME_BRIDGE_READ_ROOT` / `--read-root` | unset | Where `upload_file` may read from. Unset: any file except keys and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `id_*`, `*.pem`, `*.key`, …), symlinks resolved first. Set: only files under this directory, whatever their name — the way to upload a certificate key on purpose |
+| `CHROME_BRIDGE_BROWSER` | unset | Launch mode only: the browser binary, e.g. `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Unset: the first of Chromium, Edge, Brave, Google Chrome found in the standard paths (on Linux Chromium, then Google Chrome). Google Chrome 137+ cannot load the extension |
 | `CHROME_BRIDGE_OBSERVE` | unset | `off` stops the local error log below. The plugin sets `hook`: its hooks keep the log and the server stays out of it |
 | `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
 

@@ -13,7 +13,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { WSManager } from './ws-manager.js';
 import { registerTools } from './tools.js';
 import { createObserver } from './observe.js';
-import { launchBrowser } from './launcher.js';
+import { BRANDED_CHROME_HINT, launchBrowser } from './launcher.js';
 import { DEFAULT_PORT, VERSION } from './protocol.js';
 
 // Launch mode: browser dedicato (profilo effimero + estensione unpacked).
@@ -108,6 +108,8 @@ async function main() {
       throw new Error(`--launch requires a dedicated port, but ${wsManager.port} is owned by another chrome-bridge. Unset CHROME_BRIDGE_PORT (ephemeral) or pick a free one.`);
     }
     browser = await launchBrowser({ port: wsManager.port, headless: HEADLESS });
+    // Il Chrome brandizzato parte ma resta muto: l'errore di connessione dice perche'
+    if (browser.branded) wsManager.notConnectedHint = BRANDED_CHROME_HINT;
   }
 
   // 3. Registra i tool MCP (filtrati per capability)

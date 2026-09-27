@@ -191,7 +191,7 @@ def load_config():
     path = path.replace("${XDG_CONFIG_HOME:-~/.config}", os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
     cfg = dict(DEFAULTS)
     try:
-        cfg.update(json.load(open(path)) or {})
+        cfg.update(json.load(open(path, encoding="utf-8")) or {})
     except (OSError, ValueError, TypeError):
         pass
     return cfg
@@ -204,7 +204,7 @@ def load_tool():
     """La voce del plugin di questa copia: tool.json accanto allo script (CLAUDE_OBSERVE_TOOL nei test). L'utente puo'
     aggiungere `known`, `benign_exits` o spegnere il plugin da tools.<nome> nella config."""
     try:
-        t = json.load(open(os.environ.get("CLAUDE_OBSERVE_TOOL") or HERE / "tool.json"))
+        t = json.load(open(os.environ.get("CLAUDE_OBSERVE_TOOL") or HERE / "tool.json", encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     over = (O.get("tools") or {}).get(t.get("name")) or {}
@@ -214,7 +214,9 @@ def load_tool():
 
 
 TOOL = load_tool()
-CMD = TOOL.get("command") or f'python3 "{HERE / "observe.py"}"'
+# il comando mostrato a Claude passa dal lanciatore, come gli hook: su Windows `python3` e' l'alias dello Store (27/09)
+CMD = TOOL.get("command") or (f'bash "{(HERE / "py.sh").as_posix()}" "{(HERE / "observe.py").as_posix()}"' if (HERE / "py.sh").is_file()
+                              else f'python3 "{HERE / "observe.py"}"')
 
 
 def language():
@@ -222,7 +224,7 @@ def language():
         return O["language"]
     conf = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     try:
-        lang = str(json.load(open(os.path.join(conf, "settings.json"))).get("language") or "").lower()
+        lang = str(json.load(open(os.path.join(conf, "settings.json"), encoding="utf-8")).get("language") or "").lower()
         if lang:
             return "it" if lang.startswith(("it", "ital")) else "en"
     except (OSError, ValueError, AttributeError):
@@ -250,14 +252,52 @@ def account_name():
 
 
 # ------------------------------------------------------------------ privacy: redattore e normalizzazione
+# una home in qualunque forma (27/09, invio anonimo da Windows): C:\Users\x, C:/Users/x, /c/Users/x, /mnt/c/Users/x,
+# /cygdrive/c/Users/x, \\?\C:\Users\x, i \\ dei traceback dentro JSON, /home/x, /Users/x; maiuscole o no. Di qualunque utente
+SEP = r"[\\/]+"
+DRIVE = r"(?:(?:[\\/]{2}\?[\\/]+)?\b[a-z]:|/mnt/[a-z]|/cygdrive/[a-z]|/[a-z](?=[\\/]))"
+SEG = r"[^\\/\s\"'`<>|:*?,;()\[\]]"
+# il nome della cartella puo' avere spazi («Mario Rossi»): con gli spazi solo se dopo viene un separatore
+HOME_ANY_RE = re.compile(rf"(?i){DRIVE}?{SEP}(?:users|home|documents and settings){SEP}(?:{SEG}+(?: {SEG}+)+(?=[\\/])|{SEG}+)")
+
+
+def home_res():
+    """Le home di questa macchina come regex senza distinzione di separatore, lettera di unita' e maiuscole (anche una
+    USERPROFILE fuori da Users, D:\\Profili\\x), e il nome utente come segmento di percorso."""
+    homes = {os.path.expanduser("~"), os.environ.get("USERPROFILE") or "", os.environ.get("HOME") or ""}
+    pats = []
+    for h in sorted(homes, key=len, reverse=True):
+        parts = [x for x in re.split(r"[\\/]+", h) if x and x != "?"]
+        if not parts:
+            continue
+        drive = re.fullmatch(r"([A-Za-z]):?", parts[0]) if len(parts) > 1 else None
+        if drive and (parts[0].endswith(":") or len(parts[0]) == 1):
+            d = drive.group(1)
+            head = rf"(?:(?:[\\/]{{2}}\?[\\/]+)?\b{d}:|/mnt/{d}|/cygdrive/{d}|/{d}(?=[\\/]))"
+            parts = parts[1:]
+        else:
+            head = ""
+        pats.append(head + "".join(SEP + re.escape(x) for x in parts))
+    names = {os.path.basename(re.sub(r"[\\/]+$", "", h.replace("\\", "/"))) for h in homes if h}
+    names |= {os.environ.get(k) or "" for k in ("USERNAME", "USER", "LOGNAME")}
+    names = sorted((n for n in names if len(n) >= 2 and n.lower() not in ("users", "home")), key=len, reverse=True)
+    return ([re.compile(rf"(?i){p}(?![^\\/\s\"'`<>|:*?,;()\[\]])") for p in pats],
+            re.compile(rf"(?i)(?<=[\\/])(?:{'|'.join(map(re.escape, names))})(?=[\\/\s\"'`<>|:*?,;()\[\]]|$)") if names else None)
+
+
+HOME_RES, USER_SEG_RE = home_res()
+
+
 def scrub(text, limit=300):
     """Il testo di un errore come si puo' tenere: niente home, email, query degli URL, segreti, valori digitati."""
     t = str(text or "")
-    home = os.path.expanduser("~")
-    if home and home != "/":
-        t = t.replace(home, "~")
     t = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<EMAIL>", t)
     t = re.sub(r"(https?://[^/\s?#\"'»]+)[^\s\"'»]*", r"\1/…", t)
+    for r in HOME_RES:
+        t = r.sub("~", t)
+    t = HOME_ANY_RE.sub("~", t)
+    if USER_SEG_RE is not None:
+        t = USER_SEG_RE.sub("<USER>", t)
     t = re.sub(r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|bearer)(\"?\s*[:=]\s*|\s+)\S+", r"\1\2<SECRET>", t)
     t = re.sub(r"(?i)\b(value_after|value|text)(\"?\s*[:=]?\s*)(\"[^\"]*\"|'[^']*'|«[^»]*»)", r"\1\2<STR>", t)
     t = re.sub(r"\b(?=[A-Za-z0-9_\-+/]*\d)(?=[A-Za-z0-9_\-+/]*[A-Za-z])[A-Za-z0-9_\-+/=]{24,}\b", "<SECRET>", t)
@@ -396,7 +436,7 @@ def tool_version(name, t):
     registro (un json con "version": per esempio il package.json di un server MCP), oppure ""."""
     conf = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     try:
-        plugins = (json.load(open(os.path.join(conf, "plugins", "installed_plugins.json"))) or {}).get("plugins") or {}
+        plugins = (json.load(open(os.path.join(conf, "plugins", "installed_plugins.json"), encoding="utf-8")) or {}).get("plugins") or {}
         for key, rows in plugins.items():
             if key.split("@")[0] == name and rows:
                 return str(rows[-1].get("version") or "")
@@ -405,7 +445,7 @@ def tool_version(name, t):
     vf = t.get("version_file") or (str(HERE.parent / t["version_from"]) if t.get("version_from") else "")
     if vf:
         try:
-            return str(json.load(open(expand(vf))).get("version") or "")
+            return str(json.load(open(expand(vf), encoding="utf-8")).get("version") or "")
         except (OSError, ValueError, AttributeError):
             pass
     return ""
@@ -415,13 +455,25 @@ def claude_code_version():
     exe = os.environ.get("CLAUDE_CODE_EXECPATH") or ""
     if VERSION_RE.fullmatch(os.path.basename(exe)):
         return os.path.basename(exe)
+    # AI_AGENT=claude-code_2-1-283_harness: su Windows (npm) l'unica traccia, CLAUDE_CODE_EXECPATH li' non c'e' (27/09)
+    m = re.fullmatch(r"claude-code_(\d+(?:-\d+)+)(?:_.*)?", os.environ.get("AI_AGENT") or "")
+    if m:
+        return m.group(1).replace("-", ".")
+    try:   # installazione npm (su Windows sempre): <pacchetto>/bin/claude.exe → <pacchetto>/package.json
+        pkg = json.load(open(Path(exe).parent.parent / "package.json", encoding="utf-8")) if exe else {}
+        if str(pkg.get("name") or "").startswith("@anthropic-ai/claude-code") and VERSION_RE.fullmatch(str(pkg.get("version") or "")):
+            return pkg["version"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    if not os.path.isdir("/proc"):
+        return ""
     pid = os.getppid()
     for _ in range(6):   # hook → shell → claude: si risale finche' un eseguibile si chiama come una versione
         try:
             name = os.path.basename(os.readlink(f"/proc/{pid}/exe"))
             if VERSION_RE.fullmatch(name):
                 return name
-            pid = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[1])
+            pid = int(open(f"/proc/{pid}/stat", encoding="utf-8").read().rsplit(")", 1)[1].split()[1])
         except (OSError, ValueError, IndexError):
             break
     return ""
@@ -454,7 +506,19 @@ def context(p, name, t):
     if calls and calls[-1] == p.get("tool_name"):
         calls = calls[:-1]   # l'ultima e' la chiamata fallita
     return {"tool_version": tool_version(name, t), "claude_code": claude_code_version(), "model": model,
-            "os": f"{platform.system()} {platform.release()}", "recent_tools": calls[-3:]}
+            "os": os_label(), "recent_tools": calls[-3:]}
+
+
+def os_label():
+    """platform.release() dice «10» anche su Windows 11: lo distingue la build, 22000 o piu'."""
+    system, release = platform.system(), platform.release()
+    if system == "Windows" and release == "10":
+        try:
+            if int(platform.version().split(".")[2]) >= 22000:
+                release = "11"
+        except (IndexError, ValueError):
+            pass
+    return f"{system} {release}"
 
 
 def known_hint(name, t, rec, head, err, ctx):
@@ -491,7 +555,7 @@ class Box:
         end = time.time() + LOCK_WAIT_S
         self.flock = None
         if fcntl is not None:
-            self.flock = open(self.dir / ".lock", "w")
+            self.flock = open(self.dir / ".lock", "w", encoding="utf-8")
             while True:
                 try:
                     fcntl.flock(self.flock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -537,7 +601,7 @@ class Box:
         if exc[0] is None and all(int(r.get("v") or 1) <= FORMAT for r in self.recs):
             rotate(self.recs)
             tmp = self.path.with_suffix(".tmp")
-            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8", newline="\n") as f:
                 for r in self.recs:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
             os.replace(tmp, self.path)
@@ -545,8 +609,8 @@ class Box:
                 self.taken.unlink(missing_ok=True)
         elif self.taken is not None:
             try:   # non riscritto: le voci prese tornano in attesa
-                with open(self.pending, "a") as f:
-                    f.write(self.taken.read_text())
+                with open(self.pending, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(self.taken.read_text(encoding="utf-8"))
                 self.taken.unlink()
             except OSError:
                 pass
@@ -569,7 +633,7 @@ class Box:
 def read(path):
     out = []
     try:
-        for line in open(path):
+        for line in open(path, encoding="utf-8", errors="replace"):
             try:
                 out.append(json.loads(line))
             except ValueError:
@@ -726,7 +790,7 @@ def find(rec_id):
 def mine_tools(real):
     """Gli strumenti di cui la cartella `real` e' la sessione che li mantiene (maintainer_dir, o il remote origin = repo)."""
     try:
-        origin = subprocess.run(["git", "-C", real, "remote", "get-url", "origin"], capture_output=True, text=True,
+        origin = subprocess.run(["git", "-C", real, "remote", "get-url", "origin"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 timeout=3).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         origin = ""
@@ -758,7 +822,7 @@ def stop(cwd):
                 continue
             f = box_dir() / f".shown-{suffix}{name}"
             try:
-                last = float(f.read_text().strip() or 0)
+                last = float(f.read_text(encoding="utf-8").strip() or 0)
             except (OSError, ValueError):
                 last = 0.0
             if now - last < float(O.get("propose_every_days") or 7) * 86400:
@@ -766,7 +830,7 @@ def stop(cwd):
             lines.append(M("observe.stop_line_security" if security else "observe.stop_line", tool=name, n=len(pend)))
             try:
                 box_dir().mkdir(parents=True, exist_ok=True)
-                f.write_text(str(now))
+                f.write_text(str(now), encoding="utf-8")
             except OSError:
                 pass
     return " ".join(lines)
@@ -783,7 +847,7 @@ def summary(cwd):
             continue
         seen_f = box_dir() / f".seen-{name}"
         try:
-            seen = float(seen_f.read_text().strip() or 0)
+            seen = float(seen_f.read_text(encoding="utf-8").strip() or 0)
         except (OSError, ValueError):
             seen = 0.0
         recs = [r for r in read(box_dir() / f"{name}.jsonl") if r.get("status") != "done" and r.get("attribution") != "uncertain"]
@@ -796,7 +860,7 @@ def summary(cwd):
             lines.append(prefix + M("observe.summary", tool=name, new=new, again=again))
             try:
                 box_dir().mkdir(parents=True, exist_ok=True)
-                seen_f.write_text(str(time.time()))
+                seen_f.write_text(str(time.time()), encoding="utf-8")
             except OSError:
                 pass
     return "\n".join(lines + proposals(real, mine_tools=mine_names))
@@ -843,13 +907,13 @@ def proposals(real, mine_tools=()):
 
     def gate(f):
         try:
-            last = float(f.read_text().strip() or 0)
+            last = float(f.read_text(encoding="utf-8").strip() or 0)
         except (OSError, ValueError):
             last = 0.0
         if now - last < float(O.get("propose_every_days") or 7) * 86400:
             return False
         try:
-            f.write_text(str(now))
+            f.write_text(str(now), encoding="utf-8")
         except OSError:
             pass
         return True
@@ -884,7 +948,7 @@ def gh_ok():
 
 def redact_out(text, tag):
     """Il testo che esce: blocklist dell'utente, poi l'anonimizzatore di fable-director se c'e'."""
-    words = [w.strip() for w in (Path(expand(O["blocklist"])).read_text().splitlines() if O.get("blocklist") and
+    words = [w.strip() for w in (Path(expand(O["blocklist"])).read_text(encoding="utf-8").splitlines() if O.get("blocklist") and
              os.path.isfile(expand(O["blocklist"])) else []) if w.strip() and not w.startswith("#")]
     for w in words:
         text = re.sub(re.escape(w), "[REDACTED]", text, flags=re.I)
@@ -892,7 +956,8 @@ def redact_out(text, tag):
     if an:
         try:
             res = subprocess.run([sys.executable, an, "redact", "--stdin", "--map", f"observe-{tag}"], input=text,
-                                 capture_output=True, text=True, timeout=30)
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+                                 env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
             if res.returncode == 0 and res.stdout.strip():
                 text = res.stdout.rstrip("\n")
         except (OSError, subprocess.SubprocessError):
@@ -907,7 +972,7 @@ def existing_issue(repo, recs):
     q = " ".join([str(top.get("call") or "").split()[0]] + words) + " in:title,body"
     try:
         res = subprocess.run(["gh", "issue", "list", "-R", repo, "--state", "open", "--search", q, "--json", "number,title,url",
-                              "--limit", "3"], capture_output=True, text=True, timeout=30)
+                              "--limit", "3"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         found = json.loads(res.stdout or "[]") if res.returncode == 0 else []
     except (OSError, subprocess.SubprocessError, ValueError):
         found = []
@@ -925,7 +990,7 @@ def draft(tool, recs, target=None, security=False):
         env_ = ", ".join(x for x in (f"{tool} {c['tool_version']}" if c.get("tool_version") else "",
                                      f"Claude Code {c['claude_code']}" if c.get("claude_code") else "", c.get("model") or "",
                                      c.get("os") or "") if x)
-        rows.append(f"- `{v.get('call')}` — {scrub(v.get('error') or '', 300)} (×{v.get('count')}, "
+        rows.append(f"- `{scrub(v.get('call') or '', 200)}` — {scrub(v.get('error') or '', 300)} (×{v.get('count')}, "
                     f"{when(v.get('first_seen'))}–{when(v.get('last_seen'))}{'; ' + env_ if env_ else ''}"
                     f"{'; after ' + ', '.join(c['recent_tools']) if c.get('recent_tools') else ''})")
         if v.get("workaround") and not v.get("anonymized"):
@@ -940,7 +1005,7 @@ def draft(tool, recs, target=None, security=False):
                           "(https://github.com/frsorrentino/claude-observe), for the maintainers only — never a public issue. "
                           "Parameter values are never stored.", "", *rows])
     else:
-        title = f"[{tool}] field observations: {kinds}, most frequent `{vs[0].get('call')}`"
+        title = f"[{tool}] field observations: {kinds}, most frequent `{scrub(vs[0].get('call') or '', 200)}`"
         body = "\n".join([f"Collected on {time.strftime('%Y-%m-%d')} by claude-observe (https://github.com/frsorrentino/claude-observe): "
                           "errors recorded by a hook and notes added by hand; parameter values are never stored.", "", *rows])
     text = redact_out(f"{title}\n\n{body}", tool)
@@ -986,7 +1051,7 @@ def later(tool):
     for f in (".proposed-", ".proposed-sec-", ".shown-", ".shown-sec-"):
         try:
             box_dir().mkdir(parents=True, exist_ok=True)
-            (box_dir() / f"{f}{tool}").write_text(now)
+            (box_dir() / f"{f}{tool}").write_text(now, encoding="utf-8")
         except OSError:
             pass
     print(M("observe.later", tool=tool, days=int(float(O.get("propose_every_days") or 7))))
@@ -1060,7 +1125,7 @@ def report_security(tool, t, repo, send, anonymous=False):
     elif has_gh:
         payload = json.dumps({"summary": title[:1024], "description": body[:65000]})
         res = subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/security-advisories/reports", "--input", "-"],
-                             input=payload, capture_output=True, text=True, timeout=60)
+                             input=payload, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         if res.returncode != 0:
             print(res.stderr.strip() or res.stdout.strip(), file=sys.stderr)
             return 4
@@ -1127,7 +1192,7 @@ def report(tool, send=None, security=False, anonymous=False):
     elif has_gh:
         args = (["gh", "issue", "comment", str(target["number"]), "-R", repo, "--body-file", "-"] if target else
                 ["gh", "issue", "create", "-R", repo, "--title", title, "--body-file", "-"])
-        res = subprocess.run(args, input=(f"**{title}**\n\n{body}" if target else body), capture_output=True, text=True, timeout=60)
+        res = subprocess.run(args, input=(f"**{title}**\n\n{body}" if target else body), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         if res.returncode != 0:
             print(res.stderr.strip() or res.stdout.strip(), file=sys.stderr)
             return 4
@@ -1156,6 +1221,12 @@ def opt(argv, name):
 
 
 def main(argv):
+    # Windows senza PYTHONUTF8 (lanciato senza py.sh): stdin/stdout in cp1252 rovinano il payload e fanno cadere list/show
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     sub = argv[0] if argv else "list"
     rest = list(argv[1:])
     if sub == "hook":

@@ -42,6 +42,8 @@ export class WSManager {
     // arrivava prima che il Chrome appena avviato si collegasse (4 run su 10
     // del benchmark del 27/09/2026), e il modello si arrendeva o indagava.
     this.connectWaitMs = opts.connectWait ?? (Number(process.env.CHROME_BRIDGE_CONNECT_WAIT_MS) || 10000);
+    // Launch mode con un browser che non puo' caricare l'estensione: sostituisce il consiglio generico
+    this.notConnectedHint = null;
     this.stopped = false;
     this.mode = null;            // 'primary' | 'relay'
     this.relayExtConnected = undefined;  // relay mode: stato estensione riportato dal primary
@@ -115,7 +117,7 @@ export class WSManager {
           `Chrome extension not connected (server ${this.mode} on ${this.host}:${this.port}`
           + `${this.mode === 'relay' ? ', reached through another chrome-bridge instance' : ''}`
           + `, waited ${Math.round(this.connectWaitMs / 1000)}s)`
-          + ' — open Chrome, check the chrome-bridge extension is enabled and its port matches',
+          + ` — ${this.notConnectedHint || 'open Chrome, check the chrome-bridge extension is enabled and its port matches'}`,
         );
       }
       return this._send(type, params);
