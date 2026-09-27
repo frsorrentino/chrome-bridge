@@ -23,8 +23,16 @@ non wall-clock.
 
 ## Risultato pubblicabile — set appaiato del 2026-09-27
 
-- **chrome-bridge 1.23.2** (commit `9078444`; preparata, non ancora
-  pubblicata), `--launch --headless`, `--caps all`.
+- **chrome-bridge 1.23.2** (server del commit `17e7f3d`, pubblicato il
+  27/09/2026), `--launch --headless`, `--caps all`. L'estensione usata nelle
+  run è quella del repo, identica alla 1.23.0; nella release il manifest resta
+  a 1.23.0 perché il codice dell'estensione non cambia.
+- Gli hash `git_head` nei `.meta.json` del 27/09 (`e0511b9`, `d6a6e25`,
+  `56bbdc1`, `9078444`) sono quelli al momento della run. Gli ultimi tre erano
+  commit locali, riscritti prima del push per togliere dagli stream gli output
+  degli hook di sessione. Il contenuto di `server/` ed `extension/` è identico:
+  `9078444` corrisponde a `17e7f3d`, `56bbdc1` è lo stato 1.23.1 intermedio,
+  descritto in `CHANGELOG.md`.
 - **Claude in Chrome**: estensione ufficiale nel Chrome di Franz, finestra
   visibile.
 - Entrambi gli arm: `claude` 2.1.283, `claude-sonnet-5`, stesso giorno
