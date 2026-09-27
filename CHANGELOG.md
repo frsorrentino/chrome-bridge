@@ -28,12 +28,12 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
-## 1.23.4 — not released
+## 1.23.4 — 2026-09-27
 
 Second round from the Windows compatibility test of 2026-09-27: two false
 successes found there, present on every OS. The extension code changes, so
 `extension/manifest.json` goes to 1.23.4 with the rest (it was 1.23.0) and this
-release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
+release goes to the Chrome Web Store.
 
 ### Fixed
 
@@ -69,7 +69,7 @@ release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
   was run against the old code and failed there first (click and navigate
   41/43, type_text/hover/press_key 43/46); all pass now (46/46).
 
-## 1.23.3 — not released
+## 1.23.3 — 2026-09-27
 
 Fixes from the Windows compatibility test of 2026-09-27 (Windows 11, Claude
 Code 2.1.283, PowerShell 5.1). The MCP server and the Web Store extension
