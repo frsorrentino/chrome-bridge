@@ -28,6 +28,54 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.23.2 — prepared 2026-09-27, not released
+
+Two more turns the benchmark of 2026-09-27 showed the model losing on 1.23.1,
+both on the server side.
+
+### Fixed
+
+- **`extract_table` `where` matches column names ignoring case and edge
+  spaces.** `{"sku": "SKU-0777"}` against the header `SKU` matched nothing, and
+  the model retried with the capital: one turn in 3 `heavy` runs out of 5. An
+  exact name still wins over one that differs only in case; the key `any` is
+  recognised the same way.
+- **`fill_form` takes `checked` for checkboxes and radios.** A field can carry
+  `checked: true|false` instead of `value: "true"|"false"`. The model wrote
+  `checked` and the schema, which required `value`, rejected the call: one
+  turn in 1 `form` run out of 5. A field with neither now fails before anything
+  is sent, naming the field.
+
+## 1.23.1 — prepared 2026-09-27, not released
+
+Three defects found by the paired benchmark of 2026-09-27 (`bench/RESULTS.md`),
+all on the server side: the extension is unchanged apart from its version.
+
+### Fixed
+
+- **A command sent before the extension connects now waits for it.**
+  `sendCommand` rejected at once with «Chrome extension not connected». Under
+  `--launch` the first `navigate` arrived before the freshly started Chrome
+  connected: 4 bridge runs out of 10 hit it, and two gave up with a wrong
+  answer. The wait is bounded: 10 s by default, 30 s under `--launch`, and
+  `CHROME_BRIDGE_CONNECT_WAIT_MS` overrides both. The error now says how long
+  it waited. After a wait that ran out, commands in the next 5 s fail at once,
+  so a tool that sends several commands does not add the waits up.
+- **`fill_form` takes refs.** Each field accepts `ref` (n1, n2…, from
+  `navigate` or `get_interactives`) instead of `selector`, and `submit_ref`
+  replaces `submit_selector`. The schema required `selector`, so a model that
+  passed the refs `navigate` had just returned lost a turn on a validation
+  error. The server instructions now name `fill_form` among the tools that take
+  refs.
+- **`fill_form` with a submit reports the outcome.** A new `after_submit` field
+  carries url, title and `new_text`: the lines of page text that were not
+  there before the submit, which is where a confirmation or a validation error
+  appears. It holds at most 800 characters. The server re-reads the page for up
+  to 2 s while the text is unchanged, then once more to let a «sending…» state
+  settle. The model used to spend 1-3 turns on `find_text`, `extract` and
+  `read_page` to read the confirmation. The before and after texts stay on the
+  server; only the difference reaches the model.
+
 ## 1.23.0 — 2026-09-26
 
 ### Fixed

@@ -37,6 +37,11 @@ export class WSManager {
     this.pingIntervalMs = opts.pingInterval ?? PING_INTERVAL_MS;
     this.pongGraceMs = opts.pongGrace ?? 10000;
     this.lastPong = 0;
+    // Quanto un comando aspetta un'estensione non ancora collegata prima di
+    // fallire. Rifiutare subito costava turni: con --launch il primo navigate
+    // arrivava prima che il Chrome appena avviato si collegasse (4 run su 10
+    // del benchmark del 27/09/2026), e il modello si arrendeva o indagava.
+    this.connectWaitMs = opts.connectWait ?? (Number(process.env.CHROME_BRIDGE_CONNECT_WAIT_MS) || 10000);
     this.stopped = false;
     this.mode = null;            // 'primary' | 'relay'
     this.relayExtConnected = undefined;  // relay mode: stato estensione riportato dal primary
@@ -101,18 +106,39 @@ export class WSManager {
    * Funziona identicamente in primary e relay mode.
    */
   sendCommand(type, params = {}) {
-    return new Promise((resolve, reject) => {
-      if (!this.isConnected()) {
+    if (this.isConnected()) return this._send(type, params);
+    return this._waitConnected(this.connectWaitMs).then((ok) => {
+      if (!ok) {
         // Un errore vago qui costa un turno intero al modello: dice cosa
         // osservare e qual è la prossima azione.
-        reject(new Error(
+        throw new Error(
           `Chrome extension not connected (server ${this.mode} on ${this.host}:${this.port}`
-          + `${this.mode === 'relay' ? ', reached through another chrome-bridge instance' : ''})`
+          + `${this.mode === 'relay' ? ', reached through another chrome-bridge instance' : ''}`
+          + `, waited ${Math.round(this.connectWaitMs / 1000)}s)`
           + ' — open Chrome, check the chrome-bridge extension is enabled and its port matches',
-        ));
-        return;
+        );
       }
+      return this._send(type, params);
+    });
+  }
 
+  /** Attende che isConnected() diventi vero, al più `ms`; false allo scadere o allo stop. */
+  async _waitConnected(ms) {
+    // Un tool fa spesso più invii di fila (snapshot, comando, snapshot): dopo
+    // un'attesa appena scaduta si fallisce subito, invece di sommare N attese.
+    if (this._waitFailedAt && Date.now() - this._waitFailedAt < 5000) return false;
+    const deadline = Date.now() + ms;
+    while (!this.stopped && Date.now() < deadline) {
+      if (this.isConnected()) return true;
+      await new Promise((r) => setTimeout(r, Math.min(100, Math.max(1, deadline - Date.now()))));
+    }
+    const ok = !this.stopped && this.isConnected();
+    this._waitFailedAt = ok ? 0 : Date.now();
+    return ok;
+  }
+
+  _send(type, params) {
+    return new Promise((resolve, reject) => {
       const command = createCommand(type, params);
       // Il timeout di trasporto non può essere più basso di quello chiesto dal
       // chiamante: `wait_for --timeout 90000` moriva a 60 s con un messaggio

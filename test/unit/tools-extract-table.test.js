@@ -118,3 +118,25 @@ test('extract_table where su righe-array (headers non usabili): match any-cell',
   assert.equal(out.match_count, 1);
   assert.deepEqual(out.rows[0], ['b', 'SKU-0777']);
 });
+
+test('extract_table where: il nome di colonna ignora maiuscole e spazi ai bordi', async () => {
+  // {"sku": …} contro l'intestazione "SKU" non trovava nulla: il modello
+  // ritentava con la maiuscola, un turno perso (benchmark del 27/09/2026).
+  const h = setup({ extract_table: CANNED });
+  for (const where of [{ sku: 'SKU-0777' }, { ' Sku ': 'SKU-0777' }, { ANY: 'SKU-0777' }]) {
+    const out = JSON.parse(textOf(await h.get('extract_table')({ where })));
+    assert.equal(out.match_count, 1, JSON.stringify(where));
+    assert.equal(out.rows[0].Nome, 'Prodotto 777');
+  }
+});
+
+test('extract_table where: il nome esatto vince su uno che differisce solo per maiuscole', async () => {
+  const h = setup({
+    extract_table: {
+      headers: ['id', 'ID'], row_count: 2, tables_found: 1, truncated: false,
+      rows: [{ id: 'a', ID: 'x' }, { id: 'x', ID: 'b' }],
+    },
+  });
+  const out = JSON.parse(textOf(await h.get('extract_table')({ where: { ID: 'x' } })));
+  assert.deepEqual(out.rows, [{ id: 'a', ID: 'x' }]);
+});

@@ -149,13 +149,25 @@ export function jsResultText(data, max) {
   return fitString('result_json_prefix', JSON.stringify(value));
 }
 
+// Nome di colonna del where → chiave della riga. Il nome esatto vince; poi
+// senza maiuscole e spazi ai bordi: con {"sku": …} contro l'intestazione
+// "SKU" il filtro non trovava nulla e il modello ritentava (3 run su 5 del
+// benchmark del 27/09/2026).
+const normCol = (c) => String(c).trim().toLowerCase();
+function tableCell(row, col) {
+  if (Object.hasOwn(row, col)) return row[col];
+  const k = normCol(col);
+  const hit = Object.keys(row).find((h) => normCol(h) === k);
+  return hit === undefined ? undefined : row[hit];
+}
+
 /** Una riga (oggetto colonna→valore o array di celle) soddisfa il filtro where. */
 function tableRowMatches(row, where) {
   return Object.entries(where).every(([col, needle]) => {
     const n = String(needle).toLowerCase();
     if (Array.isArray(row)) return row.some((cell) => String(cell).toLowerCase().includes(n));
-    if (col === 'any') return Object.values(row).some((cell) => String(cell).toLowerCase().includes(n));
-    const cell = row[col];
+    if (normCol(col) === 'any') return Object.values(row).some((cell) => String(cell).toLowerCase().includes(n));
+    const cell = tableCell(row, col);
     return cell != null && String(cell).toLowerCase().includes(n);
   });
 }
@@ -254,6 +266,12 @@ async function savedSummary(path, bytes, extra = {}) {
 
 const selectorField = (extra = '') => z.string()
   .describe(('CSS selector; ">>>" pierces shadow DOM. ' + extra).trim());
+// fill_form con invio: quanto aspettare che il testo della pagina cambi, ogni
+// quanto rileggerlo, quanto testo nuovo restituire al modello.
+const SUBMIT_SETTLE_MS = 2000;
+const SUBMIT_POLL_MS = 250;
+const SUBMIT_TEXT_MAX = 800;
+
 const waitAfter = z.enum(['none', 'navigation', 'networkidle']).optional().default('none')
   .describe('Settle before returning: navigation waits for a page load, networkidle for quiet traffic');
 
@@ -603,6 +621,44 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const tab = eff != null ? list.find((t) => t.id === eff) : list.find((t) => t.active);
       return tab ? { url: tab.url, title: tab.title } : null;
     } catch { return null; }
+  }
+
+  // Testo della pagina (o del frame) per il confronto prima/dopo un invio.
+  // Resta nel server: al modello arriva solo la differenza.
+  async function pageText(tab_id, frame_id) {
+    try {
+      const t = await send(MessageType.READ_PAGE, { mode: 'text', tab_id, frame_id });
+      return typeof t === 'string' ? t : null;
+    } catch { return null; }
+  }
+
+  // Esito di un invio: url, titolo e le righe di testo che la pagina ha
+  // guadagnato. Il testo può arrivare dopo (fetch, redirect): si rilegge per
+  // al più SUBMIT_SETTLE_MS e, al primo cambiamento, una volta ancora dopo una
+  // pausa breve, perché un «Invio in corso…» non venga preso per l'esito.
+  const cutText = (t, max) => (t.length <= max ? t : `${t.slice(0, max)}…[+${t.length - max} chars: read_page for the rest]`);
+
+  async function submitOutcome(tab_id, frame_id, textBefore, snap) {
+    const deadline = Date.now() + SUBMIT_SETTLE_MS;
+    let text = await pageText(tab_id, frame_id);
+    while ((text == null || text === textBefore) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, SUBMIT_POLL_MS));
+      text = await pageText(tab_id, frame_id);
+    }
+    if (text != null && text !== textBefore) {
+      await new Promise((r) => setTimeout(r, SUBMIT_POLL_MS));
+      text = (await pageText(tab_id, frame_id)) ?? text;
+    }
+    const seen = new Set(textBefore.split('\n').map((l) => l.trim()));
+    const gained = text == null ? [] : text.split('\n').map((l) => l.trim()).filter((l) => l && !seen.has(l));
+    const snapNow = await tabSnapshot(tab_id) ?? snap;
+    return {
+      url: snapNow?.url ?? null,
+      title: snapNow?.title ?? null,
+      // truncateText suggerirebbe parametri che fill_form non ha: taglio secco.
+      new_text: gained.length ? cutText(gained.join('\n'), SUBMIT_TEXT_MAX) : null,
+      ...(!gained.length && { note: text === textBefore ? 'page text unchanged after submit' : 'page text unavailable' }),
+    };
   }
 
   // Delta compatto dopo un'azione: solo ciò che è cambiato (url, title, conteggi
@@ -1268,24 +1324,55 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'fill_form',
     'Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea. '
-    + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly. '
+    + 'Fields and submit take a CSS selector or a ref (n1, n2…) from navigate/get_interactives. '
+    + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly; '
+    + 'after a submit, after_submit carries url, title and the text the page gained (the confirmation or the errors). '
     + 'Each field reports value_after and mismatch; page_changed carries the DOM delta.',
     {
       fields: z.array(z.object({
-        selector: z.string(),
-        value: z.string(),
-      })).describe('{selector, value} pairs'),
+        selector: z.string().optional().describe('CSS selector; ignored when ref is given'),
+        ref: z.string().optional().describe('From navigate or get_interactives, e.g. "n3"'),
+        value: z.string().optional().describe('Text, option value or label; for checkbox/radio "true"/"false"'),
+        checked: z.boolean().optional().describe('Checkbox/radio instead of value: true checks, false unchecks'),
+      })).describe('{selector or ref, value or checked} per field'),
       submit_selector: z.string().optional().describe('Submit button to click after filling'),
+      submit_ref: z.string().optional().describe('Submit button as a ref, instead of submit_selector'),
       wait_after: waitAfter,
       tab_id: tabId,
       frame_id: frameId,
     },
-    async ({ fields, submit_selector, wait_after, tab_id, frame_id }) => {
+    async ({ fields, submit_selector, submit_ref, wait_after, tab_id, frame_id }) => {
+      // I ref che navigate e get_interactives danno valevano per click,
+      // type_text e hover ma non qui: il modello li passava comunque e
+      // perdeva un turno sull'errore di validazione. Il ref vince sul
+      // selettore, come negli altri tool.
+      // checked: il modello lo scriveva per le checkbox e lo schema, che
+      // voleva solo value, lo rifiutava (un turno, benchmark del 27/09/2026).
+      // L'estensione capisce "true"/"false": la traduzione resta qui.
+      const resolved = fields.map((f) => {
+        const selector = resolveTarget(f.ref ? undefined : f.selector, f.ref, tab_id);
+        const value = f.value ?? (typeof f.checked === 'boolean' ? String(f.checked) : undefined);
+        if (value === undefined) throw new Error(`fill_form: field ${f.ref ?? f.selector} needs value or checked`);
+        return { selector, value };
+      });
+      const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id) : submit_selector;
       const before = await tabSnapshot(tab_id);
-      const data = await send(MessageType.FILL_FORM, { fields, submit_selector, tab_id, frame_id });
+      const textBefore = submitSel ? await pageText(tab_id, frame_id) : null;
+      const data = await send(MessageType.FILL_FORM, { fields: resolved, submit_selector: submitSel, tab_id, frame_id });
       const waited = await applyWaitAfter(send, wait_after, tab_id);
-      const changed = pageDelta(before, await tabSnapshot(tab_id));
-      const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
+      const after = await tabSnapshot(tab_id);
+      const changed = pageDelta(before, after);
+      // Dopo un invio il modello vuole sapere com'è andata: prima spendeva 1-3
+      // turni fra find_text, extract e read_page per leggere la conferma.
+      const afterSubmit = submitSel && textBefore != null
+        ? await submitOutcome(tab_id, frame_id, textBefore, after)
+        : null;
+      const out = {
+        ...data,
+        ...(waited && { wait_after: waited }),
+        ...(changed && { page_changed: changed }),
+        ...(afterSubmit && { after_submit: afterSubmit }),
+      };
       // I campi che non hanno tenuto il valore in testa, in chiaro: sono la
       // riga che il modello deve leggere prima del JSON.
       const mism = (data?.fields ?? []).filter((f) => f && f.mismatch);
@@ -2014,7 +2101,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       selector: z.string().optional().default('table').describe('The table to read; ">>>" pierces shadow DOM'),
       index: z.number().optional().default(0).describe('Which table to take when the selector matches several, 0-based'),
       max_rows: z.number().optional().default(100).describe('Max rows returned to you (output cap).'),
-      where: z.record(z.string(), z.string()).optional().describe('{column: substring} rows must match, case-insensitive contains. Key "any" matches any cell.'),
+      where: z.record(z.string(), z.string()).optional().describe('{column: substring} rows must match, case-insensitive (names too). Key "any" matches any cell.'),
       columns: z.array(z.string()).optional().describe('Return only these columns per row.'),
       offset: z.number().optional().default(0).describe('Skip N rows of the (filtered) set before applying max_rows.'),
       scan_rows: z.number().optional().default(2000).describe('Max rows materialized in-page to scan/filter; raise for very large tables.'),

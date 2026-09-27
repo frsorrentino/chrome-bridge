@@ -59,7 +59,7 @@ async function main() {
     instructions: [
       'Selectors on DOM tools pierce shadow DOM with ">>>" ("my-app >>> button.save").',
       'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
-      'To find targets use get_interactives, not read_page(html); its refs (n1, n2…) are the ref param of click/type_text/hover, and navigate already returns them.',
+      'To find targets use get_interactives, not read_page(html); its refs (n1, n2…) are the ref param of click/type_text/hover and of fill_form fields, and navigate already returns them.',
       // Il costo dominante sono i TURNI, non i byte: un turno vale ~15-30 volte
       // un KB di output risparmiato. Queste due clausole si pagano una volta
       // qui e valgono più di qualunque ottimizzazione di schema.
@@ -74,7 +74,9 @@ async function main() {
   });
 
   // 2. Avvia il WebSocket server
-  const wsManager = new WSManager(PORT, { host: HOST });
+  // Con --launch l'estensione arriva solo dopo l'avvio a freddo di Chrome: su
+  // una macchina carica servono decine di secondi, non i 10 s del default.
+  const wsManager = new WSManager(PORT, { host: HOST, ...(LAUNCH && !process.env.CHROME_BRIDGE_CONNECT_WAIT_MS && { connectWait: 30000 }) });
   await wsManager.start();
 
   // 2b. Launch mode: browser dedicato che si connette alla nostra porta.
