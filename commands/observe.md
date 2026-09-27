@@ -13,14 +13,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/observe/py.sh" "${CLAUDE_PLUGIN_ROOT}/observe/observ
 
 - `send`: prints ONE anonymized issue with the unsent observations of chrome-bridge (or a comment on an open issue about the
   same error), then the OPTIONS block: one JSON line per option (label, description, command). Show the draft to the
-  user as it is, then ask with **AskUserQuestion** — buttons, never free text — using exactly those labels and
-  descriptions: «Send from my GitHub» (an issue in the user's name, through gh or a prefilled link they open), «Send
-  anonymously» (only when the maintainers' endpoint is configured: their service account opens the issue, without the
-  user's name), «Not now» (the offer comes back in seven days). Then run ONLY the command of the chosen option. What
-  was sent is never offered again.
-- `send --security`: the same for the observations marked `--security`, on a PRIVATE path: anonymous through the
-  endpoint, or a GitHub private vulnerability report / the address in the maintainers' SECURITY.md. The public «Send
-  from my GitHub» option never appears for them.
+  user as it is, then ask with **AskUserQuestion** — buttons, never free text — using exactly the labels and
+  descriptions of the OPTIONS block, nothing else: «Send from my GitHub» (an issue in the user's name, through gh or,
+  without gh, a prefilled GitHub link they open) and «Not now» (the offer comes back in seven days). Anonymous sending
+  is coming but not available yet: never offer or promise it unless the OPTIONS block lists it. Then run ONLY the
+  command of the chosen option. What was sent is never offered again.
+- `send --security`: the same for the observations marked `--security`, on a PRIVATE path: a GitHub private
+  vulnerability report, or the address in the maintainers' SECURITY.md. The public «Send from my GitHub» option never
+  appears for them.
 - `list [--all]`, `show ID`, `mark ID D|L|S|done` (D our defect, L someone else's limit, S the site's behaviour),
   `export chrome-bridge`.
 - `add chrome-bridge "what happened" [--error "…"] [--workaround "…"] [--class D|L|S] [--security] [--severity high]`, or

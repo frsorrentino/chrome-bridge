@@ -58,6 +58,12 @@ release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
   http://127.0.0.1:…/ (tab N shows the browser's error page)`. The same goes
   for DNS and other net errors; `net::ERR_ABORTED` (a download, a 204, a
   navigation replaced by another) is not an error.
+- **observe/ resynced from claude-observe f01376e.** `/chrome-bridge:observe
+  send` works as documented (the plugin name is no longer required); notes
+  added with `add --on` are in the draft; file names in errors go out as
+  `<file>.mp4` and folders the user named under the home as `<dir>`; the
+  command no longer offers «Send anonymously», which does not exist yet (the
+  code path stays behind the empty endpoint).
 - Tests: `test/unit/command-outcome.test.js`, and end-to-end cases in
   `test/test-devtools.js` for the four element commands and navigate: each
   was run against the old code and failed there first (click and navigate

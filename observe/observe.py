@@ -17,7 +17,7 @@ contro il 100 % di quelli scritti da un hook.
   observe show ID [--raw]
   observe mark ID [D|L|S|done|new] [--fixed-in VERSIONE]   --fixed-in: corretto in quella versione dello strumento
   observe export TOOL                  tabella markdown per il triage
-  observe report TOOL [--send HASH]    UNA issue con le osservazioni non ancora inviate dello strumento: bozza
+  observe report [TOOL] [--send HASH]  UNA issue con le osservazioni non ancora inviate dello strumento: bozza
                                        anonimizzata; con --send (l'hash della bozza mostrata) la apre con gh, o commenta
                                        quella uguale gia' aperta, o senza gh stampa il link GitHub precompilato
 
@@ -110,7 +110,7 @@ MSG = {
   "observe.security_contact": "manda il testo qui sotto a {contact} (indirizzo in SECURITY.md); il record è segnato come inviato",
   "observe.no_security_channel": "{cmd}: tool.json di «{tool}» non dice dove vanno le segnalazioni di sicurezza (chiave security: «advisory», un mailto: o un URL): non invio; chiedi al maintainer, mai in una issue pubblica",
   "observe.usage_mark": "uso: {cmd} mark ID [D|L|S|done|new] [--fixed-in VERSIONE]",
-  "observe.usage_report": "uso: {cmd} report STRUMENTO [--send HASH]",
+  "observe.usage_report": "uso: {cmd} report [STRUMENTO] [--send HASH]",
   "observe.usage": "uso: {cmd} <add|list|show|mark|export|report> [...]",
   "observe.draft_head": "BOZZA per {repo}: {n} osservazioni in una issue (anonimizzata; niente è stato inviato)",
   "observe.draft_tail": "Mostra questo testo all'utente com'è. Poi chiedi con AskUserQuestion, con le opzioni qui sotto (tasti, non testo libero), ed esegui SOLO il comando dell'opzione scelta. Hash della bozza: {hash}",
@@ -164,7 +164,7 @@ MSG = {
   "observe.security_contact": "send the text below to {contact} (the address in SECURITY.md); the record is marked as sent",
   "observe.no_security_channel": "{cmd}: tool.json of “{tool}” does not say where security reports go (key security: “advisory”, a mailto: or a URL): not sending; ask the maintainer, never a public issue",
   "observe.usage_mark": "usage: {cmd} mark ID [D|L|S|done|new] [--fixed-in VERSION]",
-  "observe.usage_report": "usage: {cmd} report TOOL [--send HASH]",
+  "observe.usage_report": "usage: {cmd} report [TOOL] [--send HASH]",
   "observe.usage": "usage: {cmd} <add|list|show|mark|export|report> [...]",
   "observe.draft_head": "DRAFT for {repo}: {n} observations in one issue (anonymized; nothing has been sent)",
   "observe.draft_tail": "Show this text to the user as it is. Then ask with AskUserQuestion, with the options below (buttons, not free text), and run ONLY the command of the chosen option. Draft hash: {hash}",
@@ -965,10 +965,96 @@ def redact_out(text, tag):
     return text
 
 
+# i nomi di file negli errori sono dati dell'utente (27/09: «clip.mp4» in una bozza da Windows): nel testo che esce
+# restano solo l'estensione (<file>.mp4) e i nomi dei file del plugin stesso (video-sheet.sh), che servono a chi mantiene
+FILE_EXTS = ("mp4|mov|avi|mkv|webm|m4v|mpg|mpeg|wmv|flv|3gp|mp3|wav|m4a|aac|flac|ogg|opus|wma|jpg|jpeg|png|gif|webp|heic|heif|"
+             "bmp|tif|tiff|svg|ico|cr2|nef|psd|indd|sketch|fig|pdf|doc|docx|xls|xlsx|xlsm|ppt|pptx|odt|ods|odp|rtf|txt|"
+             "md|csv|tsv|json|jsonl|xml|yaml|yml|toml|ini|cfg|conf|log|html|htm|eml|vcf|ics|srt|vtt|ass|zip|tar|gz|tgz|bz2|"
+             "xz|7z|rar|iso|dmg|sql|db|sqlite|bak|pem|p12|pfx|crt|py|sh|ps1|bat|cmd|js|mjs|cjs|ts|tsx|jsx|php|rb|rs|java|cpp|"
+             "cs|swift|kt|ipynb|epub|exe|msi|apk|dll|lock|tmp")
+_END = r"(?![\w-]|\.\w)"
+# fra un separatore o una virgoletta e la fine del nome (virgoletta, «:», fine riga) il nome puo' avere spazi
+# («'~/Video/clip finale.mp4'», «…/clip finale.mp4: No such file»); altrove finisce allo spazio
+FILE_RES = (re.compile(rf"(?im)(?<=[\\/\"'`«])([^\\/\"'`<>|:*?\[\]«»…\n]+?)\.({FILE_EXTS}){_END}(?=[\"'`»:]|\s*$)"),
+            re.compile(rf"(?i)(?<![^\s\\/\"'`<>|:(\[=«,;])([^\s\\/\"'`<>|:*?,;\[\]«»()]+?)\.({FILE_EXTS}){_END}"))
+# nomi che tutti hanno uguali, non dicono nulla dell'utente e servono a capire l'errore
+GENERIC_FILES = {"package.json", "package-lock.json", "settings.json", "settings.local.json", "plugin.json", "hooks.json",
+                 "marketplace.json", "installed_plugins.json", "tool.json", "config.json", "manifest.json", "skill.md",
+                 "claude.md", "readme.md", "node.js", "console.log", "tsconfig.json", "pyproject.toml", "requirements.txt"}
+
+
+def own_names():
+    """I nomi dei file e delle cartelle di questa copia e, se e' dentro un plugin (<plugin>/observe/), del plugin (la sua
+    cartella compresa): non sono dati dell'utente."""
+    names = {p.name.lower() for p in HERE.iterdir()} if HERE.is_dir() else set()
+    names |= {str(TOOL.get(k) or "").lower() for k in ("name", "plugin")} - {""}   # ~/.claude/plugins/cache/<mkt>/<plugin>/
+    if HERE.name == "observe":
+        names.add(HERE.parent.name.lower())
+        n = 0
+        for dirpath, dirs, files in os.walk(HERE.parent):
+            dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "__pycache__")]
+            names |= {f.lower() for f in files + dirs}
+            n += len(files)
+            if n > 5000:
+                break
+    return names
+
+
+def generalize_files(text, keep=None):
+    """clip.mp4 → <file>.mp4, anche in fondo a un percorso (~/Video/clip.mp4 → ~/Video/<file>.mp4); gli host degli URL, i
+    nomi generici e quelli del plugin restano."""
+    keep = GENERIC_FILES | (own_names() if keep is None else keep)
+
+    def sub(m):
+        if m.group(0).lower() in keep or text[max(0, m.start() - 3):m.start()] == "://":
+            return m.group(0)
+        return f"<file>.{m.group(2)}"
+    text = str(text or "")
+    for r in FILE_RES:
+        text = r.sub(sub, text)
+    return text
+
+
+# le cartelle sotto la home le sceglie l'utente (27/09: «~\\Videos\\Vacanze 2026\\»): restano solo quelle standard, di
+# sistema e degli strumenti, e quelle del plugin; le altre diventano <dir> (<name> l'ultimo segmento senza estensione)
+STD_DIRS = {"desktop", "documents", "documenti", "downloads", "download", "videos", "video", "pictures", "immagini", "music",
+            "musica", "appdata", "local", "locallow", "roaming", "temp", "tmp", "programs", ".claude", ".config", ".cache",
+            ".local", "state", "share", "bin", "node_modules", "plugins", "cache", "marketplaces", "claude-observe", "npm"}
+# un segmento con spazi: se dopo viene un separatore (cartella) o se finisce con un'estensione nota e poi la fine del nome
+HOME_PATH_RE = re.compile(rf"(?i)~((?:[\\/]+(?:{SEG}+(?: {SEG}+)+(?=[\\/])|{SEG}+(?: {SEG}+)+?\.(?:{FILE_EXTS}){_END}(?=[\"'`»:]|\s*$)|{SEG}+))+)", re.M)
+
+
+def generalize_dirs(text, keep=None):
+    """~/Videos/Vacanze 2026/x.mp4 → ~/Videos/<dir>/x.mp4 (il nome del file lo toglie generalize_files); ~/progetti/acme →
+    ~/<dir>/<name>. Solo i percorsi sotto la home (scrub li ha gia' portati a ~)."""
+    keep = STD_DIRS | (own_names() if keep is None else keep)
+
+    def seg(part, last):
+        core = part.rstrip(".")
+        low = core.lower()
+        if not core or low in keep or core.startswith("<") or VERSION_RE.fullmatch(core) or core in (".", ".."):
+            return part
+        if last and "." in core.lstrip("."):
+            return part   # un file: ci pensa generalize_files (estensioni note); il resto non e' un nome di cartella
+        return ("<name>" if last else "<dir>") + part[len(core):]
+
+    def sub(m):
+        parts = re.split(r"([\\/]+)", m.group(1))
+        idx = [i for i, x in enumerate(parts) if x and not re.fullmatch(r"[\\/]+", x)]
+        return "~" + "".join(seg(x, i == idx[-1]) if i in idx else x for i, x in enumerate(parts))
+    return HOME_PATH_RE.sub(sub, str(text or ""))
+
+
+def generalize(text, keep=None):
+    """Tutto quello che esce: prima le cartelle sotto la home, poi i nomi di file."""
+    keep = own_names() if keep is None else keep
+    return generalize_files(generalize_dirs(text, keep), keep)
+
+
 def existing_issue(repo, recs):
     """Una issue aperta sullo stesso errore: si cerca la chiamata e le parole dell'errore piu' frequente."""
     top = recs[0]
-    words = [w for w in re.findall(r"[A-Za-z][A-Za-z_]{3,}", str(view(top).get("error") or ""))][:5]
+    words = [w for w in re.findall(r"[A-Za-z][A-Za-z_]{3,}", generalize(view(top).get("error")))][:5]   # la ricerca esce anche lei
     q = " ".join([str(top.get("call") or "").split()[0]] + words) + " in:title,body"
     try:
         res = subprocess.run(["gh", "issue", "list", "-R", repo, "--state", "open", "--search", q, "--json", "number,title,url",
@@ -984,17 +1070,23 @@ def draft(tool, recs, target=None, security=False):
     security=True il testo della segnalazione privata (advisory GitHub o indirizzo di SECURITY.md), mai di una issue."""
     vs = [view(r) for r in sorted(recs, key=lambda r: -int(r.get("count") or 0))]
     recs_by_id = {r.get("id"): r for r in recs}
+    keep = own_names()
+    out = lambda x, n: generalize(scrub(x, n), keep)  # noqa: E731 — ogni testo che esce
     rows = []
     for v in vs[:20]:
         c = (recs_by_id.get(v.get("id")) or {}).get("context") or {}
         env_ = ", ".join(x for x in (f"{tool} {c['tool_version']}" if c.get("tool_version") else "",
                                      f"Claude Code {c['claude_code']}" if c.get("claude_code") else "", c.get("model") or "",
                                      c.get("os") or "") if x)
-        rows.append(f"- `{scrub(v.get('call') or '', 200)}` — {scrub(v.get('error') or '', 300)} (×{v.get('count')}, "
+        rows.append(f"- `{out(v.get('call') or '', 200)}` — {out(v.get('error') or '', 300)} (×{v.get('count')}, "
                     f"{when(v.get('first_seen'))}–{when(v.get('last_seen'))}{'; ' + env_ if env_ else ''}"
                     f"{'; after ' + ', '.join(c['recent_tools']) if c.get('recent_tools') else ''})")
+        # la nota di `add --on` (27/09: la causa vera di un errore stava li' e non usciva); come l'aggiramento, solo
+        # dai record di questo account
+        if v.get("note") and not v.get("anonymized"):
+            rows.append(f"  - note: {out(v['note'], 500)}")
         if v.get("workaround") and not v.get("anonymized"):
-            rows.append(f"  - workaround: {scrub(v['workaround'], 300)}")
+            rows.append(f"  - workaround: {out(v['workaround'], 300)}")
     if len(vs) > 20:
         rows.append(f"- … and {len(vs) - 20} more")
     errors = sum(1 for v in vs if v.get("kind") != "note")
@@ -1005,7 +1097,7 @@ def draft(tool, recs, target=None, security=False):
                           "(https://github.com/frsorrentino/claude-observe), for the maintainers only — never a public issue. "
                           "Parameter values are never stored.", "", *rows])
     else:
-        title = f"[{tool}] field observations: {kinds}, most frequent `{scrub(vs[0].get('call') or '', 200)}`"
+        title = f"[{tool}] field observations: {kinds}, most frequent `{out(vs[0].get('call') or '', 200)}`"
         body = "\n".join([f"Collected on {time.strftime('%Y-%m-%d')} by claude-observe (https://github.com/frsorrentino/claude-observe): "
                           "errors recorded by a hook and notes added by hand; parameter values are never stored.", "", *rows])
     text = redact_out(f"{title}\n\n{body}", tool)
@@ -1360,6 +1452,8 @@ def main(argv):
         send = opt(rest, "--send")
         security, anonymous, is_later = "--security" in rest, "--anonymous" in rest, "--later" in rest
         rest = [x for x in rest if x not in ("--security", "--anonymous", "--later")]
+        if not rest and len(tools()) == 1:
+            rest = list(tools())   # `/<plugin>:observe send` come e' documentato: lo strumento e' il plugin che ospita la copia
         if not rest:
             print(M("observe.usage_report"), file=sys.stderr)
             return 2
