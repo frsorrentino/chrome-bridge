@@ -28,10 +28,16 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
-## 1.23.2 — prepared 2026-09-27, not released
+## 1.23.2 — 2026-09-27
 
 Two more turns the benchmark of 2026-09-27 showed the model losing on 1.23.1,
-both on the server side.
+both on the server side. Server-only release: the extension code is unchanged,
+so `extension/manifest.json` stays at 1.23.0 and nothing goes to the Chrome Web
+Store. `publish-extension.yml` now publishes only when the manifest matches the
+tag; when it does not and `extension/` is identical to the tag of the manifest
+version, it stops before any Store call (a forgotten bump, with `extension/`
+changed, is still an error). `retry-store-publish.yml` targets the manifest
+version inside the latest tag, not the tag number.
 
 ### Fixed
 
@@ -46,10 +52,10 @@ both on the server side.
   turn in 1 `form` run out of 5. A field with neither now fails before anything
   is sent, naming the field.
 
-## 1.23.1 — prepared 2026-09-27, not released
+## 1.23.1 — not released (shipped in 1.23.2)
 
 Three defects found by the paired benchmark of 2026-09-27 (`bench/RESULTS.md`),
-all on the server side: the extension is unchanged apart from its version.
+all on the server side: the extension is unchanged.
 
 ### Fixed
 
