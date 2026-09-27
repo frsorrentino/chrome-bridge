@@ -2,15 +2,17 @@
 
 > By [frsorrentino](https://github.com/frsorrentino) · npm `chrome-bridge-mcp` · not affiliated with other projects named "chrome-bridge".
 
-![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-375%20unit%20%2B%2032%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
+![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-388%20unit%20%2B%2041%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
 
 **Claude Code borrows a tab from the Chrome you are already using — signed in,
 with your extensions and your cookies — works in it, and hands it back. What
 only a person can do (a login, a 2FA code, a CAPTCHA, a choice) comes back to
 you through `handoff`: a banner in the page, you act, the agent continues.**
 
-Measured on a form-filling task: 2.75× fewer turns and 2.28× lower cost than
-the official browser extension, with ~3× the toolset and no paid plan. 60
+Measured against the official browser extension (paired runs, 27/09/2026, n=5
+per task, same model): filling a form, 2.5× fewer turns and 1.9× lower cost;
+finding one row in a 1,500-row table, 2.3× lower cost in about the same number
+of turns. ~3× the toolset and no paid plan. 60
 web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for
 CI. Self-hosted, local-only. Works on ChromeOS.
@@ -94,9 +96,10 @@ the ChatGPT app required. Claude in Chrome documents Linux desktop since
 September 2026; ChromeOS and WSL stay out. Competitor figures measured on
 2026-09-01 and 2026-09-11 (`docs/analisi-2026-09-11-concorrenti.md`).
 
-It wins on **round trips, not payload size**: short element refs instead of the
-screenshot-and-click loop, `fill_form` filling N fields in one call, table
-filtering done server-side. Per single turn it actually costs slightly *more*.
+It wins on **round trips** — short element refs instead of the
+screenshot-and-click loop, `fill_form` filling N fields in one call — and, on
+big pages, on **payload**: table filtering is done server-side. On the form, per single turn it actually costs
+slightly *more*.
 
 The full benchmark — method, every raw run including the unfavourable ones, and
 what the harness can't measure — is in

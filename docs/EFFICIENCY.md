@@ -2,25 +2,34 @@
 
 ## The benchmark
 
-Same model (Claude Sonnet 5), same task, paired runs on the same date and
-versions, **all runs included** — n=2 per arm. A small sample: direction, not
-precision.
+Same model (Claude Sonnet 5), same task, same day and same `claude` version,
+**all runs included** — n=5 per arm and per task, 27/09/2026, Chrome Bridge
+1.23.2. Medians, range in brackets.
 
 | Task | Chrome Bridge | Claude in Chrome | Ratio |
 | :--- | :--- | :--- | :--- |
-| **Form fill** | 6.0 turns (6-6) / $0.211 | 16.5 turns (16-17) / $0.481 | **2.75× turns, 2.28× cost** |
-| **1500-row table lookup** | see note | not re-run on this version | *not published* |
+| **Form fill** | 6.0 turns (4-6) / $0.225 | 15.0 turns (10-16) / $0.432 | **2.50× turns, 1.92× cost** |
+| **1500-row table lookup** | 6.0 turns (4-6) / $0.217 | 7.0 turns (7-9) / $0.501 | **1.17× turns, 2.31× cost** |
 
-On the table-lookup task an `extract_table` fix took our side from 13.5 to 4.0
-turns, but the Claude-in-Chrome arm has not been re-run on that version — so no
-ratio is published for it.
+On the table lookup the gain is cost, not turns: Claude in Chrome reads the
+page text (40 KB into the context) and counts the rows in JavaScript, and it
+re-reads that text on every turn. Chrome Bridge answers with one
+`extract_table` call that returns 0.2 KB. Correct answers: 10/10 for Chrome
+Bridge, 9/10 for Claude in Chrome.
+
+The same day's runs on 1.23.0 found five defects that cost turns or answers;
+fixing them in 1.23.1 and 1.23.2 took Chrome Bridge from 8/10 to 10/10 correct
+answers. In 3 runs out of 5 per task the model loads the chrome-bridge skill
+first, which costs 2 turns: without it the runs take 4 turns.
 
 The inclusion rule, every raw run (the unfavourable ones included) and the
 harness limits are in [bench/RESULTS.md](../bench/RESULTS.md).
 
-**Honest caveat:** per *turn*, Chrome Bridge costs slightly more than Claude in
-Chrome — 41,985 vs 36,613 cache-read tokens, $0.0373 vs $0.0337. The win is in
-the number of turns, not in the size of each one.
+**Honest caveat:** on the form, per *turn*, Chrome Bridge costs more than Claude
+in Chrome — about 45k vs 42k cache-read tokens, $0.037 vs $0.029 (27/09/2026).
+The win there is in the number of turns, not in the size of each one. On the
+table lookup it is the other way round: about the same turns, each one cheaper
+(45k vs 65k cache-read tokens).
 
 ## Why it wins: fewer round trips, not smaller payloads
 
