@@ -28,6 +28,34 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.23.4 — not released
+
+Second round from the Windows compatibility test of 2026-09-27: two false
+successes found there, present on every OS. The extension code changes, so
+`extension/manifest.json` goes to 1.23.4 with the rest (it was 1.23.0) and this
+release goes to the Chrome Web Store. It includes the unreleased 1.23.3 below.
+
+### Fixed
+
+- **`click` on a selector that matches nothing fails.** `query_dom
+  #checkout-button` gave `count 0` and `click #checkout-button` answered
+  `{"clicked":true}`: the injected function throws «Element not found»,
+  `chrome.scripting.executeScript` resolves with no `result`, and the fallback
+  `?? { clicked: true }` turned that into a success. Now it is an error:
+  `Element not found: #checkout-button (no element matches; check it with
+  query_dom)`. An occluded element still answers `clicked: false, occluded:
+  true`, as before.
+- **`navigate` reports a network error.** A refused connection answered
+  `{url, title: "127.0.0.1"}`: Chrome's error page reaches status `complete`
+  like a real page. The command now listens to
+  `webNavigation.onErrorOccurred` (main frame, registered before the tab is
+  created or updated) and fails with `net::ERR_CONNECTION_REFUSED loading
+  http://127.0.0.1:…/ (tab N shows the browser's error page)`. The same goes
+  for DNS and other net errors; `net::ERR_ABORTED` (a download, a 204, a
+  navigation replaced by another) is not an error.
+- Tests: `test/unit/command-outcome.test.js`, and two end-to-end cases in
+  `test/test-devtools.js` that fail on 1.23.3 (41/43) and pass now (43/43).
+
 ## 1.23.3 — not released
 
 Fixes from the Windows compatibility test of 2026-09-27 (Windows 11, Claude

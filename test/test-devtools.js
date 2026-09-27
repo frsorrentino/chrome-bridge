@@ -14,6 +14,7 @@
 import { WSManager } from '../server/ws-manager.js';
 import { MessageType } from '../server/protocol.js';
 import { launchBrowser } from '../server/launcher.js';
+import { createServer } from 'node:net';
 
 // Con un'altra sessione che tiene la 8765 il test non partiva mai: la porta
 // viene dall'ambiente, e con --launch il browser lo apre lo script stesso
@@ -701,6 +702,52 @@ async function testWaitForTextHiddenWindow() {
   if (winTab?.id) await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: winTab.id }).catch(() => {});
 }
 
+// 1.23.4 (test Windows del 27/09): due successi falsi, su ogni OS.
+async function testClickNoMatch(tabId) {
+  const name = 'click on a selector with no match fails, does not report clicked';
+  try {
+    let data;
+    try {
+      data = await wsManager.sendCommand(MessageType.CLICK, { selector: '#__cb_nothing_here', tab_id: tabId });
+    } catch (e) {
+      if (!/Element not found: #__cb_nothing_here/.test(e.message)) throw new Error(`wrong error: ${e.message}`);
+      ok(name);
+      return;
+    }
+    throw new Error(`no error, got ${JSON.stringify(data)}`);
+  } catch (e) { fail(name, e.message); }
+}
+
+async function closedPort() {
+  const srv = createServer();
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address();
+  await new Promise((r) => srv.close(r));
+  return port;
+}
+
+async function testNavigateConnectionRefused(tabId) {
+  const name = 'navigate to a refused connection reports net::ERR_CONNECTION_REFUSED (given tab and new tab)';
+  const url = `http://127.0.0.1:${await closedPort()}/`;
+  let newTabId = null;
+  try {
+    for (const params of [{ url, tab_id: tabId }, { url }]) {
+      let data;
+      try {
+        data = await wsManager.sendCommand(MessageType.NAVIGATE, params);
+      } catch (e) {
+        if (!/^net::ERR_CONNECTION_REFUSED loading http:\/\/127\.0\.0\.1:\d+\/ \(tab \d+/.test(e.message)) throw new Error(`wrong error: ${e.message}`);
+        if (!params.tab_id) newTabId = Number(e.message.match(/\(tab (\d+)/)[1]);
+        continue;
+      }
+      if (!params.tab_id) newTabId = data?.tabId;
+      throw new Error(`no error with ${params.tab_id ? 'tab_id' : 'a new tab'}: ${JSON.stringify(data)}`);
+    }
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+  if (newTabId) await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: newTabId }).catch(() => {});
+}
+
 // --- Main ---
 
 // Unreleased: get_css_styles. example.com: <style>body{background:#eee;width:60vw;
@@ -806,6 +853,10 @@ async function main() {
 
     // 1.21.0
     await testGetCssStyles(testTabId);
+
+    // 1.23.4
+    await testClickNoMatch(testTabId);
+    await testNavigateConnectionRefused(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

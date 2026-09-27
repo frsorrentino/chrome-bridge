@@ -12,6 +12,7 @@ import { createPacer } from './lib/capture-pacing.js';
 import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 import { findTextInPage } from './lib/find-text.js';
+import { clickOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -779,29 +780,40 @@ async function cmdGetTabs({ include_windows = false, ended } = {}) {
 async function cmdNavigate({ url, tab_id }) {
   if (!url) throw new Error('Missing required parameter: url');
 
-  // Senza tab_id esplicito: apri SEMPRE in una nuova scheda (attiva) per non
-  // sovrascrivere la scheda/sessione corrente dell'utente. Con tab_id: naviga
-  // quella scheda specifica.
-  if (!tab_id) {
-    const newTab = await chrome.tabs.create({ url, active: true });
-    // Se la pagina è già 'complete' (es. cache) non aspettare il listener
-    if (newTab.status !== 'complete') {
-      await waitForComplete(newTab.id);
+  // La pagina d'errore di Chrome (connessione rifiutata, DNS) arriva a
+  // 'complete' come una pagina vera: l'errore si legge solo qui.
+  const navErrors = watchNavErrors(chrome.webNavigation.onErrorOccurred);
+  try {
+    // Senza tab_id esplicito: apri SEMPRE in una nuova scheda (attiva) per non
+    // sovrascrivere la scheda/sessione corrente dell'utente. Con tab_id: naviga
+    // quella scheda specifica.
+    if (!tab_id) {
+      const newTab = await chrome.tabs.create({ url, active: true });
+      // Se la pagina è già 'complete' (es. cache) non aspettare il listener
+      if (newTab.status !== 'complete') {
+        await waitForComplete(newTab.id);
+      }
+      const failed = navErrors.errorFor(newTab.id);
+      if (failed) throw new Error(navErrorMessage(failed, newTab.id));
+      const createdTab = await chrome.tabs.get(newTab.id);
+      return { url: createdTab.url, title: createdTab.title, tabId: newTab.id };
     }
-    const createdTab = await chrome.tabs.get(newTab.id);
-    return { url: createdTab.url, title: createdTab.title, tabId: newTab.id };
+
+    const tabId = await resolveTabId(tab_id);
+
+    // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
+    // può emettere 'complete' prima che il listener esista
+    const done = waitForComplete(tabId);
+    await chrome.tabs.update(tabId, { url });
+    await done;
+
+    const failed = navErrors.errorFor(tabId);
+    if (failed) throw new Error(navErrorMessage(failed, tabId));
+    const updatedTab = await chrome.tabs.get(tabId);
+    return { url: updatedTab.url, title: updatedTab.title, tabId };
+  } finally {
+    navErrors.stop();
   }
-
-  const tabId = await resolveTabId(tab_id);
-
-  // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
-  // può emettere 'complete' prima che il listener esista
-  const done = waitForComplete(tabId);
-  await chrome.tabs.update(tabId, { url });
-  await done;
-
-  const updatedTab = await chrome.tabs.get(tabId);
-  return { url: updatedTab.url, title: updatedTab.title, tabId };
 }
 
 async function cmdScreenshot({ tab_id }) {
@@ -907,7 +919,7 @@ async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'l
     world: 'MAIN',
   });
 
-  return results?.[0]?.result ?? { clicked: true };
+  return clickOutcome(results, selector);
 }
 
 async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
