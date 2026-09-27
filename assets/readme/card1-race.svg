@@ -8,8 +8,8 @@
   <rect width="1200" height="630" fill="url(#bg1)"/>
 
   <!-- titolo -->
-  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">The same form. 6 turns instead of 16.5.</text>
-  <text x="70" y="152" fill="#9db7d8" font-size="26">Measured against the official Claude in Chrome extension — same model, same task.</text>
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">The same form. 6 turns instead of 15.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">Paired runs against the official Claude in Chrome extension, 27/09/2026, n=5.</text>
 
   <!-- corsia lenta -->
   <text x="70" y="253" fill="#8b98a9" font-size="24" font-weight="700">Claude in Chrome</text>
@@ -29,10 +29,8 @@
     <rect x="454" y="270" width="26" height="36" rx="5"/>
     <rect x="486" y="270" width="26" height="36" rx="5"/>
     <rect x="518" y="270" width="26" height="36" rx="5"/>
-    <rect x="550" y="270" width="26" height="36" rx="5"/>
-    <rect x="582" y="270" width="26" height="36" rx="5" opacity="0.45"/>
   </g>
-  <text x="628" y="297" fill="#8b98a9" font-size="24">16.5 turns · $0.481</text>
+  <text x="564" y="297" fill="#8b98a9" font-size="24">15 turns · $0.432</text>
 
   <!-- corsia veloce -->
   <text x="70" y="393" fill="#4fd1f9" font-size="24" font-weight="700">Chrome Bridge</text>
@@ -44,15 +42,15 @@
     <rect x="198" y="410" width="26" height="36" rx="5"/>
     <rect x="230" y="410" width="26" height="36" rx="5"/>
   </g>
-  <text x="276" y="437" fill="#e6f6ff" font-size="24" font-weight="700">6 turns · $0.211</text>
+  <text x="276" y="437" fill="#e6f6ff" font-size="24" font-weight="700">6 turns · $0.225</text>
 
   <!-- stat grandi a destra -->
-  <text x="1130" y="330" fill="#7ee2a0" font-size="84" font-weight="800" text-anchor="end">2.75×</text>
-  <text x="1130" y="366" fill="#9db7d8" font-size="24" text-anchor="end">fewer turns</text>
-  <text x="1130" y="440" fill="#7ee2a0" font-size="56" font-weight="800" text-anchor="end">2.28×</text>
-  <text x="1130" y="474" fill="#9db7d8" font-size="24" text-anchor="end">lower cost</text>
+  <text x="1130" y="330" fill="#7ee2a0" font-size="84" font-weight="800" text-anchor="end">2.5×</text>
+  <text x="1130" y="366" fill="#9db7d8" font-size="24" text-anchor="end">fewer turns on the form</text>
+  <text x="1130" y="440" fill="#7ee2a0" font-size="56" font-weight="800" text-anchor="end">Half</text>
+  <text x="1130" y="474" fill="#9db7d8" font-size="24" text-anchor="end">the cost, roughly — form and 1,500-row table</text>
 
   <!-- tagline -->
   <rect x="70" y="520" width="620" height="60" rx="30" fill="#1d4ed8"/>
-  <text x="380" y="559" fill="#ffffff" font-size="26" font-weight="700" text-anchor="middle">Fewer round trips — that is the whole trick.</text>
+  <text x="380" y="559" fill="#ffffff" font-size="26" font-weight="700" text-anchor="middle">Fewer round trips, smaller payloads.</text>
 </svg>

@@ -17,7 +17,7 @@ web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for
 CI. Self-hosted, local-only. Works on ChromeOS.
 
-![The same form filled in 6 turns instead of 16.5 — 2.75× fewer turns, 2.28× lower cost](assets/readme/card1-race.png)
+![The same form filled in 6 turns instead of 15 — 2.5× fewer turns on the form, about half the cost on the form and on a 1,500-row table (paired runs, 27/09/2026, n=5)](assets/readme/card1-race.png)
 
 ## Quickstart
 

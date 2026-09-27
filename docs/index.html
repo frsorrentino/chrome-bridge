@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chrome Bridge for Claude Code — your real, logged-in Chrome</title>
-<meta name="description" content="An MCP server that gives Claude Code your real, logged-in Chrome: 60 browser automation tools over a local WebSocket. Measured 2.75× fewer turns than the official Claude in Chrome extension. Self-hosted, no accounts, ChromeOS included.">
+<meta name="description" content="An MCP server that gives Claude Code your real, logged-in Chrome: 60 browser automation tools over a local WebSocket. Measured against the official Claude in Chrome extension: 2.5× fewer turns on a form and about half the cost (paired runs, 27/09/2026). Self-hosted, no accounts, ChromeOS included.">
 <link rel="canonical" href="https://www.francescosorrentino.com/plugins/chrome-bridge">
 <meta property="og:title" content="Chrome Bridge for Claude Code">
 <meta property="og:description" content="60 browser automation tools over a local WebSocket. Your real Chrome, where you are already logged in. Self-hosted, no accounts.">
@@ -230,24 +230,24 @@ footer .container { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-
 
 <section class="alt">
     <div class="container">
-        <h2 class="section-title">The same form, in 6 turns instead of 16.5.</h2>
-        <p class="section-lead">Measured against the official “Claude in Chrome” extension — same model, same task. It wins on round trips, not payload size: <code>navigate</code> already returns element refs, so <code>click(ref="n1")</code> follows with no discovery turn in between, and <code>fill_form</code> fills N fields in one call.</p>
+        <h2 class="section-title">The same form, in 6 turns instead of 15.</h2>
+        <p class="section-lead">Paired runs against the official “Claude in Chrome” extension — same model, same day, n=5 per task (27/09/2026). On a form it wins on round trips: <code>navigate</code> already returns element refs, and <code>fill_form</code> fills N fields, submits and reports the result in one call. On a 1,500-row table the turns are about even (6 against 7) and it wins on payload: <code>extract_table</code> filters server-side and returns 0.2 KB instead of 40 KB of page text.</p>
         <div class="split">
             <div class="art">
-                <svg class="sk" viewBox="0 0 300 150" width="300" height="150" role="img" aria-label="Chart: Claude in Chrome 16.5 turns and $0.481; Chrome Bridge 6 turns and $0.211">
+                <svg class="sk" viewBox="0 0 300 150" width="300" height="150" role="img" aria-label="Chart: Claude in Chrome 15 turns and $0.432; Chrome Bridge 6 turns and $0.225">
                     <text class="sk-label" x="0" y="16">Claude in Chrome</text>
-                    <rect class="sk-bar" x="0" y="24" width="220" height="20" rx="4"/>
-                    <text class="sk-num" x="228" y="39">16.5</text>
-                    <text class="sk-label" x="0" y="62">turns · $0.481</text>
+                    <rect class="sk-bar" x="0" y="24" width="200" height="20" rx="4"/>
+                    <text class="sk-num" x="208" y="39">15</text>
+                    <text class="sk-label" x="0" y="62">turns · $0.432</text>
                     <text class="sk-label sk-label--acc" x="0" y="96">Chrome Bridge</text>
                     <rect class="sk-bar sk-bar--acc" x="0" y="104" width="80" height="20" rx="4"/>
                     <text class="sk-num sk-num--acc" x="88" y="119">6</text>
-                    <text class="sk-label" x="0" y="142">turns · $0.211</text>
+                    <text class="sk-label" x="0" y="142">turns · $0.225</text>
                 </svg>
             </div>
             <div class="cards">
-                <div class="card"><p class="card__n">turns</p><h3>2.75× fewer</h3><p>Round trips between the model and the browser, on the same form-filling task.</p></div>
-                <div class="card"><p class="card__n">cost</p><h3>2.28× lower</h3><p>Per task. Per single turn it actually costs slightly more — the saving is in not needing the turn.</p></div>
+                <div class="card"><p class="card__n">turns</p><h3>2.5× fewer</h3><p>Round trips between the model and the browser, on the form. On the table lookup: 1.17×.</p></div>
+                <div class="card"><p class="card__n">cost</p><h3>About half</h3><p>Per task, on both: 1.9× lower on the form, 2.3× on the table. On the form each turn costs slightly more — the saving is in not needing the turn.</p></div>
             </div>
         </div>
         <p class="note">Method, every raw run including the unfavourable ones, and what the harness cannot measure: <a href="https://github.com/frsorrentino/chrome-bridge/blob/main/docs/EFFICIENCY.md">docs/EFFICIENCY.md</a>. Competitor figures measured on 2026-09-01 and 2026-09-11.</p>
