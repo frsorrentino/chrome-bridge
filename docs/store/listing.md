@@ -6,6 +6,8 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
+On the Store the summary is the manifest `description` (today: "Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included."). The line below is the positioning version: it reaches the Store only by moving it into `extension/manifest.json` in a release that uploads a new package.
+
 Lend Claude Code a tab of your own logged-in Chrome and get it back; 2FA and CAPTCHA stay yours. 60 web-dev tools. ChromeOS too.
 
 ## Category

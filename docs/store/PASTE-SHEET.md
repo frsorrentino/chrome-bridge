@@ -1,7 +1,7 @@
 # Foglio copia-incolla — submission CWS nell'ordine esatto del form
 
-**Prima submission** (item nuovo): https://chrome.google.com/webstore/devconsole → **+ New item** → trascina `dist/chrome-bridge-extension-1.7.0.zip`.
-**Update** (item già pubblicato, es. 1.6.0 → 1.7.0): apri l'item → tab **Package** → **Upload new package** → `dist/chrome-bridge-extension-1.7.0.zip`. Il listing sotto resta invariato tranne i blocchi aggiornati (Summary/Description con 59 tool + riga token-efficient).
+**Prima submission** (item nuovo): https://chrome.google.com/webstore/devconsole → **+ New item** → trascina lo zip generato da `scripts/package-extension.sh` (`dist/chrome-bridge-extension-<versione>.zip`).
+**Update** (item già pubblicato): il pacchetto lo carica `tools/cws-upload.mjs` via API (1.23.4 già live dal 27/09); per il solo listing apri l'item → tab **Store listing** e sostituisci Description, i 3 screenshot e la promo tile con quelli sotto. Title e Summary vengono dal manifest del pacchetto.
 Poi segui questo foglio dall'alto in basso. Ogni blocco tra righe ``` va incollato integro.
 
 ---
@@ -14,20 +14,20 @@ Poi segui questo foglio dall'alto in basso. Ogni blocco tra righe ``` va incolla
 Chrome Bridge for Claude Code
 ```
 
-**Summary** (precompilato dal manifest, verifica):
+**Summary** (dal manifest del pacchetto, non modificabile qui; verifica):
 
 ```
-Bridge your browser to Claude Code: 59 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
+Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.
 ```
 
 **Description:**
 
 ```
-Chrome Bridge connects Claude Code — Anthropic's CLI coding agent — to your real, logged-in Chrome browser. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension.
+Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — borrow a tab of the Chrome you are already using, signed in, and hand it back. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. What only you can do — a login, a 2FA code, a CAPTCHA, a choice — comes back to you as a banner in the page (the handoff tool): you act, the agent continues. It never types your credentials.
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 
-59 specialized web-development tools:
+60 specialized web-development tools:
 
 • Navigation & tabs — open, close, navigate, list tabs; move, tile and lay out windows
 • DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, read a form as filled, modify the DOM

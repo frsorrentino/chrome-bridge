@@ -36,16 +36,14 @@
 <span class="dim">⏺</span> I'll audit the page in your browser.
 
 <span class="c">⏺ navigate</span>(url: "https://myapp.dev/pricing")
-  <span class="dim">⎿ opened in new tab (id 42)</span>
+  <span class="dim">⎿ tab 42 · 31 interactive elements: n1 "Start free" button, n2 "Compare plans" link…</span>
 
-<span class="c">⏺ accessibility_audit</span>(tab_id: 42)
-  <span class="dim">⎿ 3 issues: 2 missing alt attributes, 1 low-contrast button (2.8:1)</span>
+<span class="c">⏺ audit</span>(kinds: ["a11y", "vitals"])
+  <span class="dim">⎿ a11y: 3 issues (2 images without alt, 1 button at 2.8:1 contrast)
+    vitals: LCP 1.9 s · CLS 0.14 · INP 80 ms</span>
 
-<span class="c">⏺ web_vitals</span>(tab_id: 42)
-  <span class="dim">⎿ LCP 1.9s · CLS 0.14 · INP 80ms</span>
-
-<span class="c">⏺ element_screenshot</span>(selector: ".pricing-cards", tab_id: 42)
-  <span class="dim">⎿ captured 1180×640 — runs in background, no window focus steal</span>
+<span class="c">⏺ element_screenshot</span>(selector: ".pricing-cards")
+  <span class="dim">⎿ 1180×640 PNG, captured in the background, no window focus steal</span>
 
 <span class="ok">✓</span> Found it: the CLS (0.14) comes from the promo banner loading without a
   reserved height. The two product images are missing alt text, and the
