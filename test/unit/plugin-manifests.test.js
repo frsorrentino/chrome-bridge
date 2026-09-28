@@ -48,6 +48,8 @@ test('.claude-plugin/plugin.json: stessa versione, skill del repo, server npm co
   assert.equal(srv.command, 'npx');
   assert.ok(srv.args.includes(`chrome-bridge-mcp@${pkg.version}`));
   assert.equal(srv.env?.CHROME_BRIDGE_CAPS, undefined);
+  // Solo Claude Code: i tool del core arrivano senza ToolSearch (circa -2 turni a sessione).
+  assert.equal(srv.alwaysLoad, true);
 });
 
 test('.claude-plugin/marketplace.json pubblica il plugin dalla radice del repo', () => {

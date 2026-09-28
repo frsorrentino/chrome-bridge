@@ -53,6 +53,11 @@ Web Store.
   to switch optional caps on. 1,560 characters, under Claude Code's 2,048 cap.
 - The skill says the same, and the recipes that need an optional cap enable it
   in one call instead of asking the user to reinstall.
+- **The Claude Code plugin sets `alwaysLoad: true`.** The 43 core tools
+  arrive without a ToolSearch round trip (measured 2.0 per session). Trade-off:
+  ≈11.7k tokens always in context, which on long sessions can cost more than the
+  turns saved; to be checked with the benchmark. `mcp.json` (other clients) and
+  `install.sh` keep the normal deferral.
 
 ## 1.24.0 — 2026-09-28
 

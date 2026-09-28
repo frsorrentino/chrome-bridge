@@ -23,6 +23,7 @@
   "skills": "./skills/",
   "mcpServers": {
     "chrome-bridge": {
+      "alwaysLoad": true,
       "command": "npx",
       "args": [
         "-y",
