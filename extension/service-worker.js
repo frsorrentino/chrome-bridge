@@ -88,7 +88,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30000;
+// 5 s e non 30: il server aspetta un'estensione non collegata solo 10 s
+// (ws-manager.js, connectWait), e con 30 s il primo comando di una sessione
+// nuova poteva fallire. Un tentativo su localhost chiuso costa pochissimo.
+const RECONNECT_MAX_MS = 5000;
 const KEEPALIVE_ALARM = 'chrome-bridge-keepalive';
 
 let ws = null;
@@ -120,7 +123,9 @@ chrome.storage.session.get({ swBootedAt: null }).then(({ swBootedAt: prev }) => 
 chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM) {
-    // Il solo fatto che l'handler esista tiene il service worker attivo
+    // Tiene attivo il service worker e, se il socket è giù senza un tentativo
+    // in coda (worker appena rianimato), riprova subito.
+    nudgeConnect();
   }
   if (alarm.name.startsWith(WATCH_ALARM_PREFIX)) runWatch(alarm.name.slice(WATCH_ALARM_PREFIX.length)).catch(() => {});
 });
@@ -283,6 +288,17 @@ function setConnectionState(state) {
     // Popup non aperto, ignora
   });
 }
+
+// Un worker addormentato si risveglia a ogni evento del browser: il cambio di
+// scheda è frequente, e se il server nel frattempo è partito ci si collega
+// subito invece di aspettare l'allarme dei 30 s.
+function nudgeConnect() {
+  if (connectionState !== 'connected' && !(ws && ws.readyState === WebSocket.CONNECTING)) {
+    reconnectDelay = RECONNECT_BASE_MS;
+    connect();
+  }
+}
+chrome.tabs.onActivated.addListener(() => nudgeConnect());
 
 function forceReconnect() {
   clearTimeout(reconnectTimer);

@@ -50,6 +50,12 @@ Server and extension: this release goes to the Chrome Web Store too.
   https://…/logo.png`) instead of `Uncaught  at ?:0:0`.
 - **Refs carry their frame**, `extract_table` reports an incomplete scan,
   `monitor_network` prints `?` instead of `nullms` (see the commits).
+- **The first call of a session no longer waits for a 30 s retry.** The
+  extension retried an absent server with backoff up to 30 s while the server
+  waits 10 s for it: now at most 5 s, and a sleeping worker retries at once on
+  a tab switch or at the keepalive alarm.
+- The skill is a 10.5 KB core plus one file per recipe, read on demand
+  (was 23.4 KB loaded whole), and says when it is not needed.
 - The e2e suite serves its own copy of the old example.com page: the real one
   changed markup on 28/09 and three tests went red with no change of ours.
 
