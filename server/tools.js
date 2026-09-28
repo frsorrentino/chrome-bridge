@@ -1416,8 +1416,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         return { selector, value };
       });
       const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id, frame_id).selector : submit_selector;
-      const before = await tabSnapshot(tab_id);
-      const textBefore = submitSel ? await pageText(tab_id, frame_id) : null;
+      const [before, textBefore] = await Promise.all([tabSnapshot(tab_id), submitSel ? pageText(tab_id, frame_id) : null]);
       const data = await send(MessageType.FILL_FORM, { fields: resolved, submit_selector: submitSel, tab_id, frame_id });
       const waited = await applyWaitAfter(send, wait_after, tab_id);
       const after = await tabSnapshot(tab_id);
@@ -1831,11 +1830,19 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         const pat = String(url_filter ?? '').replace(/^\|\|/, '').replace(/^\|/, '').replace(/\|$/, '');
         const filter = url_filter ? new RegExp(pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')) : /./;
         const urls = [...new Set((log?.requests ?? []).filter((r) => r.url && filter.test(r.url) && (r.method ?? 'GET') === 'GET').map((r) => r.url))].slice(0, 50);
-        const entries = [];
-        for (const url of urls) {
-          try { const r = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' }); entries.push({ url, status: r.status, content_type: r.content_type || 'application/json', body: r.body ?? '' }); }
-          catch (err) { entries.push({ url, error: err.message }); }
-        }
+        // Fino a 50 richieste indipendenti: 6 alla volta invece di una dopo l'altra,
+        // nello stesso ordine di prima nel file (come checkRedirects).
+        const entries = new Array(urls.length);
+        let next = 0;
+        const worker = async () => {
+          while (next < urls.length) {
+            const idx = next++;
+            const url = urls[idx];
+            try { const r = await send(MessageType.HTTP_REQUEST, { url, method: 'GET' }); entries[idx] = { url, status: r.status, content_type: r.content_type || 'application/json', body: r.body ?? '' }; }
+            catch (err) { entries[idx] = { url, error: err.message }; }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(6, urls.length) }, worker));
         await mkdir(FIXTURES_DIR, { recursive: true });
         const file = join(FIXTURES_DIR, `${name}.json`);
         await writeFile(file, JSON.stringify({ recorded_at: new Date().toISOString(), url_filter: url_filter ?? null, entries }, null, 1));
@@ -2444,13 +2451,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         }
       }
       const restored = { localStorage: 0, sessionStorage: 0, cookies: 0, cookie_errors: [] };
-      for (const storageType of ['localStorage', 'sessionStorage']) {
-        for (const [k, v] of Object.entries(fixture[storageType] || {})) {
+      // Scritture indipendenti fra loro: tutte insieme, non una per giro.
+      await Promise.all(['localStorage', 'sessionStorage'].flatMap((storageType) => Object.entries(fixture[storageType] || {})
+        .map(async ([k, v]) => {
           await send(MessageType.SET_STORAGE, { type: storageType, action: 'set', key: k, value: v, tab_id });
           restored[storageType]++;
-        }
-      }
-      for (const c of fixture.cookies || []) {
+        })));
+      await Promise.all((fixture.cookies || []).map(async (c) => {
         try {
           await send(MessageType.SET_STORAGE, {
             type: 'cookie', action: 'set', key: c.name, value: c.value,
@@ -2464,7 +2471,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         } catch (err) {
           restored.cookie_errors.push({ name: c.name, error: err.message });
         }
-      }
+      }));
       if (restored.cookie_errors.length === 0) delete restored.cookie_errors;
       return { content: [{ type: 'text', text: jsonText({ restored: name, ...restored }) }] };
     }
