@@ -32,7 +32,9 @@ test('click: page_changed riporta il delta DOM fra le impronte prima e dopo', as
   assert.equal(out.clicked, true);
   assert.deepEqual(out.page_changed, { nodes: '+12', expanded: '+1', focus: 'ul#menu' });
   const order = sent.map((s) => s.type);
-  assert.deepEqual(order, [MessageType.PAGE_FINGERPRINT, MessageType.CLICK, MessageType.PAGE_FINGERPRINT], 'impronta, click, impronta');
+  // expanded +1: il click ha aperto qualcosa, quindi segue l'anteprima dei ref
+  // (qui GET_INTERACTIVES lancia: l'anteprima è best-effort e la risposta resta JSON puro).
+  assert.deepEqual(order, [MessageType.PAGE_FINGERPRINT, MessageType.CLICK, MessageType.PAGE_FINGERPRINT, MessageType.GET_INTERACTIVES], 'impronta, click, impronta, anteprima');
 });
 
 test('click: pagina stabile → nessun page_changed, zero byte in più', async () => {
