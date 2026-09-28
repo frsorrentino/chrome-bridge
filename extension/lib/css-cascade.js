@@ -290,7 +290,21 @@
     const out = [];
     for (let i = 0; i < style.length; i += 1) {
       const prop = style[i];
-      out.push({ prop, value: style.getPropertyValue(prop), important: style.getPropertyPriority(prop) === 'important' });
+      let value = style.getPropertyValue(prop);
+      // `background: var(--x)`: per la specifica CSSOM le proprietà singole
+      // valgono "" (sostituzione in sospeso). Il testo vero sta nella
+      // abbreviata: background-color → background, border-top-color →
+      // border-top → border.
+      let shorthand;
+      if (value === '' && !prop.startsWith('--')) {
+        const parts = prop.split('-');
+        for (let k = parts.length - 1; k >= 1 && value === ''; k -= 1) {
+          const sh = parts.slice(0, k).join('-');
+          const v = style.getPropertyValue(sh);
+          if (v) { value = v; shorthand = sh; }
+        }
+      }
+      out.push({ prop, value, ...(shorthand && { shorthand }), important: style.getPropertyPriority(prop) === 'important' });
     }
     return out;
   };
@@ -330,6 +344,7 @@
   const fmtEntry = (list, computed, inheritedFrom) => {
     const [winner, ...rest] = list;
     const entry = { value: winner.value };
+    if (winner.shorthand) entry.shorthand = winner.shorthand;
     if (winner.important) entry.important = true;
     if (computed != null) entry.computed = computed;
     if (inheritedFrom) entry.inherited_from = inheritedFrom;

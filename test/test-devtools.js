@@ -15,6 +15,7 @@ import { WSManager } from '../server/ws-manager.js';
 import { MessageType } from '../server/protocol.js';
 import { launchBrowser } from '../server/launcher.js';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 
 // Con un'altra sessione che tiene la 8765 il test non partiva mai: la porta
 // viene dall'ambiente, e con --launch il browser lo apre lo script stesso
@@ -202,6 +203,35 @@ async function testReadConsole(tabId) {
     ok(name);
   } catch (e) {
     fail(name, e.message);
+  }
+}
+
+// 1.25.0: una scheda aperta dall'agente registra la rete fin dal caricamento.
+// Prima la prima monitor_network tornava vuota e la richiesta fallita
+// all'avvio (il caso tipico da debuggare) non si vedeva.
+async function testNetworkFromLoad() {
+  const name = 'monitor_network: requests made during page load are captured';
+  const http = createHttpServer((req, res) => {
+    if (req.url === '/api/boot') { res.writeHead(404); res.end('no'); return; }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end("<!doctype html><title>boot</title><script>fetch('/api/boot').catch(() => {})</script>");
+  });
+  await new Promise((r) => http.listen(0, '127.0.0.1', r));
+  let tabId;
+  try {
+    const nav = await wsManager.sendCommand(MessageType.NAVIGATE, { url: `http://127.0.0.1:${http.address().port}/` });
+    tabId = nav?.tabId;
+    await new Promise((r) => setTimeout(r, 500));
+    const data = await wsManager.sendCommand(MessageType.MONITOR_NETWORK, { tab_id: tabId });
+    const hit = (data.requests ?? []).find((q) => String(q.url).endsWith('/api/boot'));
+    if (!hit) throw new Error(`load-time fetch missing: ${JSON.stringify((data.requests ?? []).map((q) => q.url))}`);
+    if (hit.status !== 404) throw new Error(`status ${hit.status}, expected 404`);
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  } finally {
+    if (tabId) await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: tabId }).catch(() => {});
+    http.close();
   }
 }
 
@@ -542,7 +572,7 @@ async function testListAssetsAndTiming(tabId) {
   const name = 'list_assets + resource_timing';
   try {
     const assets = await wsManager.sendCommand(MessageType.LIST_ASSETS, { tab_id: tabId });
-    if (!/^https:\/\/example\.com/.test(assets.page)) throw new Error(`Unexpected page ${assets.page}`);
+    if (!String(assets.page).startsWith(FIXTURE_URL)) throw new Error(`Unexpected page ${assets.page}`);
     const timing = await wsManager.sendCommand(MessageType.RESOURCE_TIMING, { tab_id: tabId });
     if (!Array.isArray(timing.entries) || !timing.navigation) throw new Error('Missing entries/navigation');
     ok(name);
@@ -696,7 +726,7 @@ async function testWaitForTextHiddenWindow() {
   const name = 'wait_for text in a minimized window: answers within its timeout, says page_hidden';
   let winTab = null;
   try {
-    winTab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: 'https://example.com', new_window: true });
+    winTab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: FIXTURE_URL, new_window: true });
     await new Promise((r) => setTimeout(r, 1000));
     await wsManager.sendCommand(MessageType.VIEWPORT_RESIZE, { state: 'minimized', tab_id: winTab.id });
     await new Promise((r) => setTimeout(r, 800));
@@ -773,7 +803,7 @@ async function testGetCssStyles(tabId) {
   const name = 'get_css_styles: winner with sheet and rule, shorthand expanded, inherited from body';
   try {
     // I test precedenti lasciano la scheda dove capita: la pagina va scelta qui.
-    await wsManager.sendCommand(MessageType.NAVIGATE, { url: 'https://example.com/', tab_id: tabId });
+    await wsManager.sendCommand(MessageType.NAVIGATE, { url: FIXTURE_URL, tab_id: tabId });
     await new Promise((r) => setTimeout(r, 500));
     const body = await wsManager.sendCommand(MessageType.GET_CSS_STYLES, { selector: 'body', properties: ['width', 'margin'], tab_id: tabId });
     const width = body.properties?.width;
@@ -794,8 +824,24 @@ async function testGetCssStyles(tabId) {
   }
 }
 
+// Copia locale della pagina di example.com com'era fino a settembre 2026: il
+// sito vero ha cambiato markup (niente h1, niente width) e i test che ci
+// contavano sono diventati rossi senza che il nostro codice cambiasse.
+const EXAMPLE_HTML = '<!doctype html><html><head><title>Example Domain</title><meta charset="utf-8">'
+  + '<style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}</style></head>'
+  + '<body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission.</p>'
+  + '<p><a href="https://www.iana.org/help/example-domains">Learn more</a></p></div></body></html>';
+let FIXTURE_URL = 'https://example.com/';
+async function startFixture() {
+  const http = createHttpServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(EXAMPLE_HTML); });
+  await new Promise((r) => http.listen(0, '127.0.0.1', r));
+  FIXTURE_URL = `http://127.0.0.1:${http.address().port}/`;
+  return http;
+}
+
 async function main() {
   console.log('=== Chrome Bridge DevTools Test ===\n');
+  const fixture = await startFixture();
 
   wsManager = new WSManager(PORT);
   await wsManager.start();
@@ -807,7 +853,7 @@ async function main() {
 
     // Crea un nuovo tab dedicato per i test (evita di sovrascrivere il terminale su ChromeOS)
     console.log('Creating test tab...');
-    const tabData = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: 'https://example.com', active: true });
+    const tabData = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: FIXTURE_URL, active: true });
     const testTabId = tabData.id;
     console.log(`Test tab created: id=${testTabId}, url=${tabData.url}\n`);
     await new Promise((r) => setTimeout(r, 500));
@@ -826,6 +872,7 @@ async function main() {
     await testInjectCss(testTabId);
     await testReadConsole(testTabId);
     await testMonitorNetwork(testTabId);
+    await testNetworkFromLoad();
 
     // New 12 tests
     await testWaitForElement(testTabId);
@@ -885,6 +932,7 @@ async function main() {
   } finally {
     try { if (browser) await browser.stop(); } catch {}
     await wsManager.stop();
+    fixture.close();
   }
 
   process.exit(failed > 0 ? 1 : 0);

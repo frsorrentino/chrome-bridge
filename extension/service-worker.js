@@ -45,10 +45,16 @@ async function _applyInstrumentation() {
   try {
     const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [INSTRUMENTATION_ID] });
     const isReg = existing.some((s) => s.id === INSTRUMENTATION_ID);
-    if (instrument && !isReg) {
+    // network-hook.js dalla 1.25.0: la registrazione persiste agli
+    // aggiornamenti, quindi un elenco vecchio va riscritto, non solo creato.
+    const JS = ['console-capture.js', 'network-hook.js', 'page-instrumentation.js'];
+    const stale = isReg && JSON.stringify(existing.find((s) => s.id === INSTRUMENTATION_ID)?.js ?? []) !== JSON.stringify(JS);
+    if (instrument && stale) {
+      await chrome.scripting.updateContentScripts([{ id: INSTRUMENTATION_ID, js: JS }]);
+    } else if (instrument && !isReg) {
       await chrome.scripting.registerContentScripts([{
         id: INSTRUMENTATION_ID,
-        js: ['console-capture.js', 'page-instrumentation.js'],
+        js: JS,
         matches: ['<all_urls>'],
         runAt: 'document_start',
         world: 'MAIN',
@@ -639,6 +645,16 @@ async function pageHidden(tabId) {
   }
 }
 
+// Cattura della scheda solo se la pagina è visibile: su una finestra coperta o
+// in secondo piano captureVisibleTab restituiva l'ultimo fotogramma disegnato,
+// cioè un'immagine vecchia senza nessun avviso (osservato il 28/09/2026: modulo
+// già compilato, screenshot con i campi vuoti). Su chrome:// lo script non entra
+// e pageHidden dice false: lì si cattura come prima.
+async function captureVisibleOf(tab) {
+  if (await pageHidden(tab.id)) throw new Error(`No screenshot taken: it would be a stale frame. ${HIDDEN_HINT}`);
+  return captureVisible(tab.windowId);
+}
+
 // Esegue run(); se non risponde entro deadlineMs restituisce onTimeout. In
 // entrambi i casi un esito negativo su pagina nascosta porta page_hidden e il
 // suggerimento, così chi chiama non ritenta tre volte la stessa attesa.
@@ -803,6 +819,8 @@ async function cmdNavigate({ url, tab_id }) {
 
     // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
     // può emettere 'complete' prima che il listener esista
+    // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
+    // può emettere 'complete' prima che il listener esista
     const done = waitForComplete(tabId);
     await chrome.tabs.update(tabId, { url });
     await done;
@@ -824,7 +842,7 @@ async function cmdScreenshot({ tab_id }) {
     await new Promise((r) => setTimeout(r, 200));
     // tab.width/height sono il viewport in CSS px, senza script: è il sistema
     // di riferimento di element_screenshot.region.
-    return { dataUrl: await captureVisible(tab.windowId), viewport: { width: tab.width, height: tab.height } };
+    return { dataUrl: await captureVisibleOf(tab), viewport: { width: tab.width, height: tab.height } };
   });
 
   const bitmap = await dataUrlToBitmap(dataUrl);
@@ -1725,96 +1743,7 @@ async function cmdReadConsole({ clear = false, level = 'all', limit = 0, tab_id 
 async function ensureNetworkHook(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: () => {
-      if (window.__chromeBridge_networkHooked) return;
-      window.__chromeBridge_networkHooked = true;
-      window.__chromeBridge_networkRequests = [];
-      window.__chromeBridge_inflight = 0;
-      window.__chromeBridge_lastNetActivity = Date.now();
-      const MAX = 1000;
-
-      // --- Patch fetch ---
-      const origFetch = window.fetch.bind(window);
-      window.fetch = async (...args) => {
-        const req = args[0];
-        const url = typeof req === 'string' ? req : req?.url || String(req);
-        const method = (args[1]?.method || (req?.method) || 'GET').toUpperCase();
-        const entry = { type: 'fetch', method, url, startTime: Date.now(), status: null, duration: null, error: null };
-        window.__chromeBridge_inflight += 1;
-        window.__chromeBridge_lastNetActivity = Date.now();
-        try {
-          const resp = await origFetch(...args);
-          entry.status = resp.status;
-          entry.duration = Date.now() - entry.startTime;
-          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
-          // faceva consegnare al modello le richieste dei primi secondi di vita
-          // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
-          if (window.__chromeBridge_networkRequests.length > MAX) {
-            window.__chromeBridge_networkRequests.shift();
-          }
-          window.__chromeBridge_inflight -= 1;
-          window.__chromeBridge_lastNetActivity = Date.now();
-          return resp;
-        } catch (err) {
-          entry.error = err.message;
-          entry.duration = Date.now() - entry.startTime;
-          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
-          // faceva consegnare al modello le richieste dei primi secondi di vita
-          // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
-          if (window.__chromeBridge_networkRequests.length > MAX) {
-            window.__chromeBridge_networkRequests.shift();
-          }
-          window.__chromeBridge_inflight -= 1;
-          window.__chromeBridge_lastNetActivity = Date.now();
-          throw err;
-        }
-      };
-
-      // --- Patch XMLHttpRequest ---
-      const OrigXHR = window.XMLHttpRequest;
-      const origOpen = OrigXHR.prototype.open;
-      const origSend = OrigXHR.prototype.send;
-      OrigXHR.prototype.open = function (method, url, ...rest) {
-        this.__cb_method = method;
-        this.__cb_url = url;
-        return origOpen.call(this, method, url, ...rest);
-      };
-      OrigXHR.prototype.send = function (...args) {
-        const entry = { type: 'xhr', method: (this.__cb_method || 'GET').toUpperCase(), url: this.__cb_url || '', startTime: Date.now(), status: null, duration: null, error: null };
-        this.addEventListener('load', () => {
-          entry.status = this.status;
-          entry.duration = Date.now() - entry.startTime;
-          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
-          // faceva consegnare al modello le richieste dei primi secondi di vita
-          // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
-          if (window.__chromeBridge_networkRequests.length > MAX) {
-            window.__chromeBridge_networkRequests.shift();
-          }
-        });
-        this.addEventListener('error', () => {
-          entry.error = 'Network error';
-          entry.duration = Date.now() - entry.startTime;
-          // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
-          // faceva consegnare al modello le richieste dei primi secondi di vita
-          // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
-          if (window.__chromeBridge_networkRequests.length > MAX) {
-            window.__chromeBridge_networkRequests.shift();
-          }
-        });
-        // loadend copre load, error e abort: traccia sempre la fine dell'in-flight
-        this.addEventListener('loadend', () => {
-          window.__chromeBridge_inflight -= 1;
-          window.__chromeBridge_lastNetActivity = Date.now();
-        });
-        window.__chromeBridge_inflight += 1;
-        window.__chromeBridge_lastNetActivity = Date.now();
-        return origSend.apply(this, args);
-      };
-    },
+    files: ['network-hook.js'],
     world: 'MAIN',
   });
 }
@@ -2219,7 +2148,7 @@ async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = t
       });
       const actualY = sRes?.[0]?.result ?? target;
       await new Promise((r) => setTimeout(r, safeDelay));
-      const dataUrl = await captureVisible(tab.windowId);
+      const dataUrl = await captureVisibleOf(tab);
       shots.push({ dataUrl, y: actualY });
       if (actualY + viewportHeight >= scrollHeight) break;
     }
@@ -2796,7 +2725,7 @@ async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
       // regione funziona anche su chrome:// dove executeScript è rifiutato.
       rect = { x: Number(x) || 0, y: Number(y) || 0, width, height, dpr: null };
     }
-    const dataUrl = await captureVisible(tab.windowId);
+    const dataUrl = await captureVisibleOf(tab);
     return { rect, dataUrl, tabWidth: tab.width };
   });
   const bitmap = await dataUrlToBitmap(dataUrl);
@@ -3748,7 +3677,7 @@ async function captureForDiff(tabId, selector) {
     }
 
     await new Promise((r) => setTimeout(r, 300));
-    const dataUrl = await captureVisible(tab.windowId);
+    const dataUrl = await captureVisibleOf(tab);
     return { cropRect, dataUrl };
   });
   const bitmap = await dataUrlToBitmap(dataUrl);

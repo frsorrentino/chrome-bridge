@@ -30,8 +30,29 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
 ## 1.25.0 — not released
 
-Server only: the extension does not change, so this release skips the Chrome
-Web Store.
+Server and extension: this release goes to the Chrome Web Store too.
+
+### Fixed
+
+- **Screenshots of a hidden page are refused, not stale.** On a covered or
+  background window `captureVisibleTab` returned the last painted frame: a
+  form already filled showed empty. `screenshot`, `full_page_screenshot`,
+  `element_screenshot` and the `screenshot_diff` captures now check the page
+  visibility first and fail with the reason.
+- **`monitor_network` sees the requests made while the page loads.** The
+  fetch/XHR hook (`extension/network-hook.js`) now loads at `document_start`
+  with the console capture; before, it was installed by the first call and the
+  failing request at startup, the one worth debugging, was missing.
+- **`get_css_styles` with `var()` inside a shorthand.** For
+  `background: var(--x)` the CSSOM leaves every longhand empty; the value now
+  comes from the shorthand, with `shorthand: "background"`.
+- **A resource that fails to load says which one** (`Failed to load img
+  https://…/logo.png`) instead of `Uncaught  at ?:0:0`.
+- **Refs carry their frame**, `extract_table` reports an incomplete scan,
+  `monitor_network` prints `?` instead of `nullms` (see the commits).
+- The e2e suite serves its own copy of the old example.com page: the real one
+  changed markup on 28/09 and three tests went red with no change of ours.
+
 
 ### Changed
 

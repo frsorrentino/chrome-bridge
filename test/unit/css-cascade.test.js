@@ -254,3 +254,17 @@ test('specificità: i casi che decidono una cascata', () => {
   ];
   for (const [sel, want] of cases) assert.deepEqual(specificity(sel), want, sel);
 });
+
+test('var() in una proprietà abbreviata: il valore viene dall\'abbreviata, non resta ""', () => {
+  // Come il CSSOM vero: le singole sono indicizzate e valgono "", l'abbreviata
+  // non è indicizzata ma getPropertyValue la restituisce.
+  const rule = new CSSStyleRule('.pay', [['background-color', ''], ['color', 'rgb(255, 255, 255)']]);
+  const inner = rule.style.getPropertyValue;
+  rule.style.getPropertyValue = (p) => (p === 'background' ? 'var(--brand-primary)' : inner(p));
+  const r = root(sheet([rule], { href: 'https://a.test/style.css' }));
+  const out = run(el({ tag: 'button', classes: ['pay'], matches: ['.pay'], root: r }), {}, env({ computed: { 'background-color': 'rgba(0, 0, 0, 0)' } }));
+  const bg = out.properties['background-color'];
+  assert.equal(bg.value, 'var(--brand-primary)');
+  assert.equal(bg.shorthand, 'background');
+  assert.equal(bg.computed, 'rgba(0, 0, 0, 0)');
+});

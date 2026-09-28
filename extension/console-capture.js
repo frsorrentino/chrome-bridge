@@ -42,6 +42,15 @@
   }
   window.addEventListener('error', (e) => {
     try {
+      // Un'immagine o uno script che non si carica arriva qui in fase di
+      // cattura, con target l'elemento e nessun messaggio: prima diventava
+      // «Uncaught  at ?:0:0». Ora dice quale risorsa.
+      const t = e.target;
+      if (t && t !== window && t.tagName) {
+        const url = t.currentSrc || t.src || t.href || '';
+        push({ level: 'error', args: [`Failed to load ${String(t.tagName).toLowerCase()}${url ? ` ${url}` : ''}`], timestamp: Date.now() });
+        return;
+      }
       // Con la colonna il frame diventa url:riga:colonna, risolvibile dalla source map.
       const stack = errorText(e.error);
       push({

@@ -60,3 +60,11 @@ test('rejection non gestita: stack del reason', () => {
   listeners.unhandledrejection({ reason: 'plain' });
   assert.equal(logs()[1][0], 'Unhandled rejection: plain');
 });
+
+test('risorsa che non si carica: dice quale, non «Uncaught  at ?:0:0»', () => {
+  const { win, listeners, logs } = loadCapture();
+  listeners.error({ target: { tagName: 'IMG', src: 'http://x/missing.png' }, message: '', filename: '', lineno: 0, colno: 0, error: null });
+  assert.equal(logs()[0][0], 'Failed to load img http://x/missing.png');
+  listeners.error({ target: win, message: 'boom', filename: 'http://x/a.js', lineno: 1, colno: 2, error: null });
+  assert.equal(logs()[1][0], 'Uncaught boom at http://x/a.js:1:2');
+});
