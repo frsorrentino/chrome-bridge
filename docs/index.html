@@ -257,7 +257,7 @@ footer .container { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; justify-
 <section>
     <div class="container">
         <h2 class="section-title">60 tools, in seven groups</h2>
-        <p class="section-lead">Only <code>core</code> (39 tools) loads by default; the rest are opt-in with <code>--caps</code>, so the schema you pay for stays small.</p>
+        <p class="section-lead"><code>core</code> (43 tools, every tool used in 101 real sessions) loads by default; the other 17 are switched on mid-session with <code>get_status({enable})</code>, so the schema you pay for stays small.</p>
         <div class="wrap">
             <table>
                 <thead><tr><th>Group</th><th>N</th><th>What’s in it</th></tr></thead>
@@ -314,7 +314,7 @@ chrome-bridge replay --file ./recordings/login.jsonl</pre>
                 <thead><tr><th></th><th>Chrome Bridge</th><th>Claude in Chrome</th><th>DevTools MCP</th><th>Playwright MCP</th></tr></thead>
                 <tbody>
                     <tr><td>ChromeOS / Crostini</td><td class="yes">Yes (real host)</td><td>No</td><td>Container only</td><td>Container only</td></tr>
-                    <tr><td>Tools</td><td class="yes">60 (39 core)</td><td>22</td><td>29 default</td><td>24 core</td></tr>
+                    <tr><td>Tools</td><td class="yes">60 (43 core)</td><td>22</td><td>29 default</td><td>24 core</td></tr>
                     <tr><td>Requires paid plan</td><td class="yes">No</td><td>Yes (Pro+)</td><td>No</td><td>No</td></tr>
                     <tr><td>Network mocking</td><td class="yes">Yes</td><td>No</td><td>No</td><td>Yes</td></tr>
                     <tr><td>Visual regression</td><td class="yes">Yes</td><td>No</td><td>No</td><td>No</td></tr>

@@ -56,6 +56,9 @@ async function main() {
     name: 'chrome-bridge',
     version: VERSION,
   }, {
+    // get_status({enable}) accende N tool uno per uno: una sola notifica,
+    // non N (un ciclo di list_changed costava CPU a Claude Code, 2.1.271).
+    debouncedNotificationMethods: ['notifications/tools/list_changed'],
     instructions: [
       'Selectors on DOM tools pierce shadow DOM with ">>>" ("my-app >>> button.save").',
       'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
@@ -69,6 +72,9 @@ async function main() {
       // Il blocco più frequente sul campo (Meta Ads Manager, 23/09/2026): tre
       // attese scadute e due screenshot falliti prima di capire che la
       // finestra era dietro un'altra.
+      // Il 42% delle sessioni reali caricava i tool con 2+ ToolSearch (media 2,0).
+      'When tools are deferred, batch every tool needed for the next workflow into ONE ToolSearch call using exact names (select:name1,name2,...); do not search one tool at a time.',
+      'Missing optional tools: call get_status({enable:["group",...]}) once for all required groups (audits, visual, network, storage, dom, files; "all" enables all). After tools/list_changed, use them next turn; if still deferred, batch-search their names once. No restart or user configuration needed.',
       'A tab in a minimized, covered or background window does not render: screenshots fail, timers slow down. get_page_info reports visibility (page_hidden in a result means the same); bring the window on screen, or create_tab new_window with bounds.',
     ].join(' '),
   });

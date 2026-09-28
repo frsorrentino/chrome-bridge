@@ -45,9 +45,11 @@ table lookup it is the other way round: about the same turns, each one cheaper
 
 ## The schema cost, and why it grew
 
-34 core tools cost ≈9.1k tokens of `tools/list`; all 63 cost ≈16.3k. Specialized
-groups (`audits`, `visual`, `network`, `storage`, `dom`, `files`) are opt-in via
-`--caps`.
+The 43 core tools cost ≈11.7k tokens of `tools/list`; all 60 cost ≈15.6k
+(`npm run measure`, 2026-09-28). Core is every tool used in 101 real sessions;
+the 17 never used sit in six optional caps (`audits`, `visual`, `network`,
+`storage`, `dom`, `files`) that the agent switches on mid-session with
+`get_status({enable})`. Until 1.24 the plugin and `install.sh` forced all 60.
 
 That core figure was ≈3.8k in 1.8.0 and roughly doubled in 1.10.0: MCP
 annotations on every tool, rewritten descriptions, and a documented

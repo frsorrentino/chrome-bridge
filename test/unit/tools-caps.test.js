@@ -36,22 +36,22 @@ test('caps=all registra tutti i 60 tool', () => {
   assert.equal(setup().size, 60);
 });
 
-test('caps=core registra solo il set core (39 tool)', () => {
+test('caps=core registra solo il set core (43 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
   assert.equal(handlers.size, 60 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
-  assert.ok(!handlers.has('audit'));
-  assert.ok(!handlers.has('screenshot_diff'));
+  assert.ok(!handlers.has('cookie_audit'));
+  assert.ok(!handlers.has('inject_css'));
   assert.ok(!handlers.has('session_fixture'));
 });
 
 test('caps con gruppi aggiunge solo quei gruppi al core', () => {
   const handlers = setup({}, 'audits,visual');
-  assert.ok(handlers.has('audit'));
-  assert.ok(handlers.has('screenshot_diff'));
-  assert.ok(!handlers.has('network_rules'));
+  assert.ok(handlers.has('cookie_audit'));
+  assert.ok(handlers.has('inject_css'));
+  assert.ok(!handlers.has('track_events'));
   assert.ok(!handlers.has('session_fixture'));
 });
 
@@ -65,6 +65,33 @@ test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', 
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
   assert.equal(tools.length, 60);
+  await client.close();
+});
+
+test('caps=core con il server MCP reale: gruppi spenti, get_status({enable}) li accende con una sola notifica', async () => {
+  const server = new McpServer({ name: 't', version: '0' }, { debouncedNotificationMethods: ['notifications/tools/list_changed'] });
+  registerTools(server, { isConnected: () => true, mode: 'p', port: 1, sendCommand: async () => ({}) }, 'core');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'c', version: '0' });
+  let notices = 0;
+  const { ToolListChangedNotificationSchema } = await import('@modelcontextprotocol/sdk/types.js');
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => { notices++; });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const optIn = Object.values(TOOL_CAPS).flat().length;
+  let { tools } = await client.listTools();
+  assert.equal(tools.length, 60 - optIn);
+  assert.ok(tools.some((t) => t.name === 'extract_table'), 'extract_table sta nel core');
+  assert.ok(!tools.some((t) => t.name === 'cookie_audit'));
+  const res = await client.callTool({ name: 'get_status', arguments: { enable: ['audits', 'visual'] } });
+  const status = JSON.parse(res.content[0].text);
+  assert.deepEqual(status.enabled.sort(), [...TOOL_CAPS.audits, ...TOOL_CAPS.visual].sort());
+  assert.ok(status.caps_active.includes('audits') && status.caps_active.includes('visual'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(notices, 1, 'N tool accesi, una notifica');
+  ({ tools } = await client.listTools());
+  assert.equal(tools.length, 60 - optIn + TOOL_CAPS.audits.length + TOOL_CAPS.visual.length);
+  const again = JSON.parse((await client.callTool({ name: 'get_status', arguments: { enable: ['audits'] } })).content[0].text);
+  assert.deepEqual(again.enabled, [], 'riaccendere un gruppo attivo non fa nulla');
   await client.close();
 });
 

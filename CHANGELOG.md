@@ -28,6 +28,32 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.25.0 — not released
+
+Server only: the extension does not change, so this release skips the Chrome
+Web Store.
+
+### Changed
+
+- **The default tool set follows real use.** 101 Claude Code sessions (3,560
+  calls, 28/09/2026): every tool used at least once is now in `core`, 43
+  tools, adding `extract_table`, `audit`, `screenshot_diff` and
+  `network_rules`. The 17 never used sit in six optional caps: `audits`
+  (`cookie_audit`), `visual`, `network`, `storage`, `dom`, `files`.
+- **Optional caps switch on mid-session.** `get_status({enable: ["visual"]})`
+  turns caps on with no restart: their tools are registered from the start,
+  disabled, and the SDK sends a single `tools/list_changed` for the whole
+  batch. `--caps` / `CHROME_BRIDGE_CAPS` still work at startup.
+- **The plugin, `mcp.json` and `install.sh` no longer force `all`.** A session
+  that loads the whole `tools/list` now carries ≈11.7k tokens instead of
+  ≈15.6k (`npm run measure`).
+- **Server instructions ask for one ToolSearch.** In 42% of the sessions the
+  tools were loaded with two or more ToolSearch calls (2.0 on average): the
+  instructions now ask for every needed tool in one `select:` call, and say how
+  to switch optional caps on. 1,560 characters, under Claude Code's 2,048 cap.
+- The skill says the same, and the recipes that need an optional cap enable it
+  in one call instead of asking the user to reinstall.
+
 ## 1.24.0 — 2026-09-28
 
 The Chrome Web Store listing promises "console logs with source-mapped stacks";

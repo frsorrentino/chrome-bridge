@@ -37,10 +37,10 @@ fi
 echo ""
 if command -v claude &>/dev/null; then
   echo "Registering MCP server in Claude Code..."
-  # -e CHROME_BRIDGE_CAPS=all: senza questo il default e caps=core (30 tool su 59)
-  # e chi installa non ha extract_table/audits, che i doc promettono.
-  claude mcp add --scope user chrome-bridge -e CHROME_BRIDGE_CAPS=all -- node "$SERVER_ENTRY" 2>/dev/null && \
-    echo "[OK] MCP server registered (scope: user, all tools)" || \
+  # Default core (43 tool, tutti quelli usati nelle sessioni reali): gli altri
+  # 17 li accende get_status({enable}) a sessione in corso, senza riavvio.
+  claude mcp add --scope user chrome-bridge -- node "$SERVER_ENTRY" 2>/dev/null && \
+    echo "[OK] MCP server registered (scope: user; 43 tools active, 17 on demand)" || \
     echo "[SKIP] MCP server already registered or claude command failed"
 else
   echo "[SKIP] 'claude' CLI not found. Register manually:"

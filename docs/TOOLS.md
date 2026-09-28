@@ -1,13 +1,23 @@
 # Tool reference
 
-All 60 tools, by capability group. The group name is the value to pass to
-`--caps` / `CHROME_BRIDGE_CAPS`. Only `core` loads by default (39 tools);
-`install.sh` registers the server with `all`.
+All 60 tools, by area. `core` (43 tools, every tool used in 101 real
+sessions) loads by default. The other 17 sit in six optional caps, which the
+agent switches on mid-session with `get_status({enable: [...]})` (no restart)
+or you set at startup with `--caps` / `CHROME_BRIDGE_CAPS`:
+
+| Cap | Tools |
+|---|---|
+| `audits` | `cookie_audit` |
+| `visual` | `inject_css`, `measure_spacing`, `emulate_media`, `viewport_resize` |
+| `network` | `http_auth`, `set_geolocation`, `track_events` |
+| `storage` | `get_storage`, `set_storage`, `session_fixture` |
+| `dom` | `modify_dom`, `watch_dom`, `drag_and_drop` |
+| `files` | `save_page`, `manage_downloads`, `session_record` |
 
 Check what is active in your session with `get_status` → `caps_active` /
 `caps_available`, and the schema cost of that set with `npm run measure`.
 
-## Core & Navigation (13) — group `core`
+## Core & Navigation (13)
 
 `get_status`, `get_tabs`, `create_tab`, `navigate`, `tab_action`,
 `move_tab` (between windows), `tile_windows` (split one monitor evenly),
@@ -31,7 +41,7 @@ tab into a replayable flow and a readable procedure, never recording sensitive v
 `navigate` returns clickable element refs (`n1`, `n2`, …) with the page, so the
 agent can act without a separate discovery call.
 
-## Interaction (11) — group `core`
+## Interaction (11)
 
 `click`, `type_text`, `fill_form`, `hover`, `press_key`, `scroll`,
 `drag_and_drop`, `upload_file`, `dismiss_overlays`, `handle_dialogs`,
@@ -40,7 +50,7 @@ agent can act without a separate discovery call.
 `fill_form` fills N fields and submits in one call — 3 calls instead of 9 on the
 benchmark form, at the same byte count.
 
-## DOM & Inspection (11) — group `dom`
+## DOM & Inspection (11)
 
 `read_page`, `extract`, `get_page_info`, `query_dom`, `get_css_styles`, `modify_dom`, `find_text`,
 `get_interactives`, `inject_css`, `watch_dom`, `get_page_info` (with `dev`: dev server and
@@ -63,7 +73,7 @@ Code 2.1.283 every image a tool returns (`screenshot`, `element_screenshot`,
 client, and the result names the path: reuse it with Read or Bash instead of
 capturing again. `save_to` still decides where the file goes.
 
-## Debugging & Network (8) — group `network`
+## Debugging & Network (8)
 
 `execute_js`, `read_console`, `monitor_network` (page, browser or websocket source),
 `network_rules` (block, redirect, headers, stub, and record/replay of real API responses with forced errors) (block / redirect / stub / headers),
@@ -72,7 +82,7 @@ capturing again. `save_to` still decides where the file goes.
 
 `execute_js` needs **Allow user scripts** enabled in the extension details.
 
-## Visual & Responsive (5) — group `visual`
+## Visual & Responsive (5)
 
 `element_screenshot`, `full_page_screenshot`, `screenshot_diff`,
 `viewport_resize` (presets, explicit size, zoom), `emulate_media`, `set_geolocation`.
@@ -86,7 +96,7 @@ crops a box (by `selector`, or by `region` in viewport CSS px) and enlarges it
 with `scale` (1-4). Full-page captures are sliced into readable segments. `screenshot_diff` compares the current page against a named
 baseline.
 
-## Audits (2) — group `audits`
+## Audits (2)
 
 `audit` (accessibility, keyboard = tab order and focus issues, SEO, security headers, broken links verified server-side,
 Core Web Vitals, unused CSS, `resources` = which plugin/theme/module/host slows
@@ -98,7 +108,7 @@ The six former single audits stay available as CLI commands.
 `extract_table` filters server-side: 236 bytes to find one row among 1500,
 against 50,070 bytes for `read_page` on the same table.
 
-## State, Storage & Files (9) — groups `storage`, `files`
+## State, Storage & Files (9)
 
 `get_storage`, `set_storage`, `session_fixture`, `http_auth`,
 `save_page` (MHTML), `manage_downloads`, `session_record`, `wait_for`, `assert`.

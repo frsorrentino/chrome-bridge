@@ -21,7 +21,7 @@ const CORE = measure('core').totals.n_tools;
 
 test('il conteggio misurato è quello dichiarato nei metadati', () => {
   assert.equal(ALL, 60, 'se il numero di tool cambia, aggiorna i documenti sotto');
-  assert.equal(CORE, 39);
+  assert.equal(CORE, 43);
 
   const pkg = JSON.parse(read('package.json'));
   assert.match(pkg.description, new RegExp(`${ALL} tools`), `package.json: "${pkg.description}"`);
@@ -34,7 +34,7 @@ test('il conteggio misurato è quello dichiarato nei metadati', () => {
 });
 
 test('README e listing non citano un conteggio diverso da quello misurato', () => {
-  for (const file of ['README.md', 'docs/index.html', 'docs/store/listing.md']) {
+  for (const file of ['README.md', 'docs/index.html', 'docs/store/listing.md', 'docs/EFFICIENCY.md', 'docs/TOOLS.md']) {
     const text = read(file);
     // Qualunque "<numero> tools" nel testo deve essere il conteggio reale
     // (totale) o quello del set core.
@@ -59,11 +59,7 @@ test('il Dockerfile espone tutti i tool ai registry, non solo il core', () => {
   );
 });
 
-test('install.sh registra il server con le capability esplicite', () => {
+test('install.sh non forza caps=all: i gruppi opt-in si accendono a runtime', () => {
   const sh = read('install.sh');
-  assert.match(
-    sh,
-    /CHROME_BRIDGE_CAPS|--caps/,
-    'senza caps espliciti l\'utente ottiene 30 tool su 59 mentre i doc ne promettono 59',
-  );
+  assert.doesNotMatch(sh, /CHROME_BRIDGE_CAPS=all|--caps[= ]all/);
 });

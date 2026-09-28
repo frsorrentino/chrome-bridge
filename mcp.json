@@ -9,10 +9,7 @@
         "${PLUGIN_DATA}",
         "-y",
         "chrome-bridge-mcp@1.24.0"
-      ],
-      "env": {
-        "CHROME_BRIDGE_CAPS": "all"
-      }
+      ]
     }
   }
 }

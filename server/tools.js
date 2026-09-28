@@ -242,12 +242,16 @@ async function applyWaitAfter(send, wait_after, tab_id) {
  * CHROME_BRIDGE_CAPS (valore speciale "all" = tutto).
  */
 export const TOOL_CAPS = {
-  audits: ['audit', 'cookie_audit'],
-  visual: ['screenshot_diff', 'inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
-  network: ['network_rules', 'http_auth', 'set_geolocation', 'track_events'],
+  // Nel core ciò che si usa davvero: nelle 101 sessioni reali del 28/09/2026
+  // ogni tool usato almeno una volta è nel core (audit, screenshot_diff,
+  // network_rules, extract_table compresi). I gruppi tengono i 17 mai usati,
+  // che get_status({enable}) accende a sessione in corso.
+  audits: ['cookie_audit'],
+  visual: ['inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
+  network: ['http_auth', 'set_geolocation', 'track_events'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
-  files: ['save_page', 'manage_downloads', 'extract_table', 'session_record'],
+  files: ['save_page', 'manage_downloads', 'session_record'],
 };
 
 // Parametri ubiqui: un solo testo, così `tab_id` non significa una cosa in un
@@ -440,6 +444,10 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   const activeCaps = caps === 'all'
     ? ['core', ...Object.keys(TOOL_CAPS)]
     : ['core', ...String(caps).split(',').map((s) => s.trim()).filter((s) => s && s !== 'core')];
+  // Tool dei gruppi non attivi: registrati ma spenti, così get_status({enable})
+  // li accende a sessione in corso (tools/list_changed) invece di chiedere un
+  // riavvio con --caps. Nome del tool → handle dell'SDK.
+  const dormant = new Map();
 
   // Un errore del tool (eccezione, o risultato isError) va all'osservatore,
   // che lo annota in locale senza i valori dei parametri (server/observe.js).
@@ -472,16 +480,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     server = {
       tool(name, desc, schema, handler) {
         if (noJs && JS_TOOLS.has(name)) return;
-        if (enabled) {
-          const group = TOOL_TO_CAP.get(name);
-          if (group && !enabled.has(group) && !enabled.has('all')) return;
-        }
+        const group = enabled ? TOOL_TO_CAP.get(name) : null;
+        const inactive = Boolean(group && !enabled.has(group) && !enabled.has('all'));
+        // Un server senza disable() (i finti dei test, measure-schema) non può
+        // tenere un tool spento: lì il tool inattivo non si registra, come prima.
+        if (inactive && typeof target.sendToolListChanged !== 'function') return;
         const annotations = TOOL_ANNOTATIONS[name];
         const run = observed(name, handler);
         // Un tool senza voce resta registrato (meglio di un crash all'avvio):
         // è il test tool-annotations a segnalarlo.
-        if (annotations) target.tool(name, desc, schema, annotations, run);
-        else target.tool(name, desc, schema, run);
+        const reg = annotations ? target.tool(name, desc, schema, annotations, run) : target.tool(name, desc, schema, run);
+        if (inactive) { reg.disable(); dormant.set(name, reg); }
       },
     };
   }
@@ -683,9 +692,29 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'get_status',
     'Bridge status: extension connection, server mode (primary/relay), host, port, server and extension versions, js_evaluation '
       + '(false under --no-js), write_root and read_root, caps_active and caps_available (a tool missing from the list lives in an '
-      + 'inactive cap), session_tab_id (the implicit tab), owned_tabs (created by this session), uptime_sec.',
-    {},
-    async () => {
+      + 'inactive cap), session_tab_id (the implicit tab), owned_tabs (created by this session), uptime_sec. '
+      + 'enable switches caps on for this session, no restart. Optional caps: '
+      + `${Object.entries(TOOL_CAPS).map(([g, t]) => `${g} (${t.join(', ')})`).join('; ')}.`,
+    {
+      enable: z.array(z.enum(['all', ...Object.keys(TOOL_CAPS)])).optional()
+        .describe('Caps to switch on now, all in one call; "all" = every cap'),
+    },
+    async ({ enable } = {}) => {
+      let enabledNow;
+      if (enable?.length) {
+        const groups = enable.includes('all') ? Object.keys(TOOL_CAPS) : enable;
+        enabledNow = [];
+        for (const g of groups) {
+          for (const name of TOOL_CAPS[g]) {
+            const reg = dormant.get(name);
+            if (!reg) continue;
+            reg.enable();
+            dormant.delete(name);
+            enabledNow.push(name);
+          }
+          if (!activeCaps.includes(g)) activeCaps.push(g);
+        }
+      }
       return {
         content: [{
           type: 'text',
@@ -706,6 +735,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
             session_tab_id: sessionTabId,
             owned_tabs: [...ownedTabs],
             uptime_sec: Math.round((Date.now() - startedAt) / 1000),
+            ...(enabledNow && { enabled: enabledNow }),
           }),
         }],
       };

@@ -26,17 +26,19 @@ test('plugin.json (Agent Plugins 1.0) identifica il plugin con la versione di pa
   for (const k of ['browser', 'chrome', 'mcp']) assert.ok(plugin.keywords.includes(k), `keyword ${k}`);
 });
 
-test('mcp.json (Agent Plugins 1.0) avvia il pacchetto npm alla stessa versione, con tutte le capability', () => {
+test('mcp.json (Agent Plugins 1.0) avvia il pacchetto npm alla stessa versione, col core di default', () => {
   const mcp = readJson('mcp.json');
   assert.match(mcp.$schema, /agent-plugins\.org\/schemas\/1\.0\.0\/mcp\.schema\.json$/);
   const srv = mcp.mcpServers['chrome-bridge'];
   assert.equal(srv.type, 'stdio');
   assert.equal(srv.command, 'npx');
   assert.ok(srv.args.includes(`chrome-bridge-mcp@${pkg.version}`), `args ${JSON.stringify(srv.args)} non fissano la versione ${pkg.version}`);
-  assert.equal(srv.env.CHROME_BRIDGE_CAPS, 'all', 'senza caps=all il plugin espone 38 tool su 59, come install.sh sa già');
+  // I gruppi opt-in si accendono a runtime (get_status enable): forzare all
+  // costava schema in ogni sessione per 17 tool mai usati.
+  assert.equal(srv.env?.CHROME_BRIDGE_CAPS, undefined);
 });
 
-test('.claude-plugin/plugin.json: stessa versione, skill del repo, server npm con tutte le capability', () => {
+test('.claude-plugin/plugin.json: stessa versione, skill del repo, server npm col core di default', () => {
   const plugin = readJson('.claude-plugin/plugin.json');
   assert.equal(plugin.name, 'chrome-bridge');
   assert.equal(plugin.version, pkg.version);
@@ -45,7 +47,7 @@ test('.claude-plugin/plugin.json: stessa versione, skill del repo, server npm co
   const srv = plugin.mcpServers['chrome-bridge'];
   assert.equal(srv.command, 'npx');
   assert.ok(srv.args.includes(`chrome-bridge-mcp@${pkg.version}`));
-  assert.equal(srv.env.CHROME_BRIDGE_CAPS, 'all');
+  assert.equal(srv.env?.CHROME_BRIDGE_CAPS, undefined);
 });
 
 test('.claude-plugin/marketplace.json pubblica il plugin dalla radice del repo', () => {

@@ -94,7 +94,7 @@ or let you pick one or more elements on the page.
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **60** (39 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
+| **Tools** | **60** (43 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
@@ -163,8 +163,10 @@ user-script toggle isn't available.
 
 ## Tools
 
-60 in total, in seven groups. Only `core` (39 tools) loads by default; the rest
-are opt-in via `--caps`.
+60 in total. `core` (43 tools, every tool used in 101 real sessions) loads by
+default; the other 17 sit in six optional caps that the agent switches on
+mid-session with `get_status({enable: ["visual"]})`, with no restart
+(`--caps` still sets them at startup).
 
 ![60 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
 
@@ -202,7 +204,7 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_PORT` | `8765` | |
 | `CHROME_BRIDGE_HOST` / `--host` | `127.0.0.1` | `0.0.0.0` **only** where the browser lives outside the container (ChromeOS/Crostini port-forward) — and only with a token |
 | `CHROME_BRIDGE_TOKEN` | unset | Required on both `ext_init` and `relay_init`. Strongly recommended whenever the bind isn't loopback |
-| `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. `install.sh` uses `all` |
+| `CHROME_BRIDGE_CAPS` / `--caps` | `core` | `core`, `audits`, `visual`, `network`, `storage`, `dom`, `files`, `all`. Optional caps can also be switched on at runtime with `get_status({enable})` |
 | `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
 | `CHROME_BRIDGE_READ_ROOT` / `--read-root` | unset | Where `upload_file` may read from. Unset: any file except keys and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `id_*`, `*.pem`, `*.key`, …), symlinks resolved first. Set: only files under this directory, whatever their name — the way to upload a certificate key on purpose |
 | `CHROME_BRIDGE_BROWSER` | unset | Launch mode only: the browser binary, e.g. `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Unset: the first of Chromium, Edge, Brave, Google Chrome found in the standard paths (on Linux Chromium, then Google Chrome). Google Chrome 137+ cannot load the extension |
