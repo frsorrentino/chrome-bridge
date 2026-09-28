@@ -1,0 +1,9 @@
+body { margin: 0; min-height: 100vh; background: #f4f6fa; font-family: system-ui, sans-serif; color: #1c2533;
+  display: flex; align-items: center; justify-content: center; }
+.card { width: 460px; background: #fff; border-radius: 12px; padding: 30px 34px; box-shadow: 0 8px 30px rgba(20,35,60,0.12); }
+.brand { font-weight: 800; font-size: 15px; color: #3b5bdb; margin-bottom: 6px; }
+h1 { font-size: 22px; margin: 0 0 18px; }
+#items { list-style: none; margin: 0 0 16px; padding: 0; min-height: 60px; border: 1px dashed #c9d2e0; border-radius: 8px; }
+.total { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 18px; }
+.pay { width: 100%; padding: 12px; font-size: 15px; font-weight: 600; color: #fff;
+  background-color: var(--brand-primary); border: 0; border-radius: 8px; }

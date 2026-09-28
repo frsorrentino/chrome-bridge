@@ -1,0 +1,14 @@
+== 23:06:55 bridge debug v125a-1 load=5.57
+{"file": "bridge-debug-v125a-1.json", "turns": 12, "in": 18, "out": 4323, "cache_w": 39832, "cache_r": 494867, "cost": 0.3016, "result_head": "**Carrello vuoto \u2014 errore JS**\n`TypeError: Cannot read properties of undefined (reading 'items')`\nFile sorgente: `src/cart.js:10:3`, dentro `renderCart` (chiama"}
+== 23:08:01 bridge debug v125a-2 load=4.25
+{"file": "bridge-debug-v125a-2.json", "turns": 11, "in": 12, "out": 2153, "cache_w": 45403, "cache_r": 340697, "cost": 0.2713, "result_head": "Trovate cause di entrambi problemi.\n\n**Carrello vuoto \u2014 errore JS:**\n`Cannot read properties of undefined (reading 'items')` in `renderCart`, `src/cart.js:10:3`"}
+== 23:08:41 bridge debug v125a-3 load=4.69
+{"file": "bridge-debug-v125a-3.json", "turns": 12, "in": 18, "out": 2933, "cache_w": 38616, "cache_r": 492366, "cost": 0.2823, "result_head": "Due bug indipendenti, cause trovate.\n\n**1. Carrello vuoto \u2014 errore JS**\n`src/cart.js:10` in `renderCart()`: `for (const item of cart.items)` legge `.items` da `"}
+== 23:09:29 bridge debug v125a-4 load=3.70
+{"file": "bridge-debug-v125a-4.json", "turns": 8, "in": 10, "out": 2287, "cache_w": 36201, "cache_r": 250750, "cost": 0.2178, "result_head": "Trovate cause di entrambi problemi.\n\n**Errore JavaScript** (sorgente originale via sourcemap):\n```\nTypeError: Cannot read properties of undefined (reading 'item"}
+== 23:10:13 bridge debug v125a-5 load=5.47
+{"file": "bridge-debug-v125a-5.json", "turns": 13, "in": 16, "out": 2854, "cache_w": 47758, "cache_r": 481963, "cost": 0.316, "result_head": "**Causa 1 \u2014 carrello vuoto (errore JS):**\n`src/cart.js:10:3`, funzione `renderCart` \u2014 `cart.items` letto su `undefined`. Sorgente bundle: `app.min.js:1:231`.\nCa"}
+== fine 23:11:03
+list_connected_browsers: [{"deviceId": "98e47723-b4d7-4407-9d48-ec7fb46a189a", "name": "Browser 1", "osPlatform": "Windows", "connectedAt": 1790617099338, "isLocal": false, "inUse": true}]
+STOP: browser non ammesso [{"deviceId": "98e47723-b4d7-4407-9d48-ec7fb46a189a", "name": "Browser 1", "osPlatform": "Windows", "connectedAt": 1790617099338, "isLocal": false, "inUse": true}] (CIC_DEVICE_ID=3865739a-ac6d-457e-8c82-bc250629de7e)
+DEBUG FINITO 23:11
