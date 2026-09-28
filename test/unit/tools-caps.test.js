@@ -266,3 +266,18 @@ test('click che apre un menu allega i ref dei nuovi interactives; uno che non ca
   const text2 = textOf(await handlers.get('click')({ selector: '#noop' }));
   assert.doesNotMatch(text2, /#menu-item-1/, 'niente anteprima senza cambiamenti');
 });
+
+test('screenshot: stessi pixel della volta prima → nota invece dell\'immagine; if_changed:false la manda', async () => {
+  let img = 'AAAA';
+  const handlers = setup({ screenshot: () => ({ image: img, viewport: { width: 800, height: 600 } }) });
+  const first = await handlers.get('screenshot')({});
+  assert.ok(first.content.some((c) => c.type === 'image'));
+  const second = await handlers.get('screenshot')({});
+  assert.ok(!second.content.some((c) => c.type === 'image'));
+  assert.match(textOf(second), /unchanged/);
+  const forced = await handlers.get('screenshot')({ if_changed: false });
+  assert.ok(forced.content.some((c) => c.type === 'image'));
+  img = 'BBBB';
+  const changed = await handlers.get('screenshot')({});
+  assert.ok(changed.content.some((c) => c.type === 'image'));
+});

@@ -54,6 +54,9 @@ Server and extension: this release goes to the Chrome Web Store too.
   extension retried an absent server with backoff up to 30 s while the server
   waits 10 s for it: now at most 5 s, and a sleeping worker retries at once on
   a tab switch or at the keepalive alarm.
+- **`screenshot` does not resend the same pixels** (`if_changed`, default
+  on): a check after an action that changed nothing returns a one-line note
+  instead of a ≈1,500-token image. `if_changed:false` forces it.
 - The skill is a 10.5 KB core plus one file per recipe, read on demand
   (was 23.4 KB loaded whole), and says when it is not needed.
 - The e2e suite serves its own copy of the old example.com page: the real one

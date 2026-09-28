@@ -5,6 +5,7 @@
  * e restituisce il risultato al client MCP.
  */
 
+import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
@@ -453,6 +454,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // li accende a sessione in corso (tools/list_changed) invece di chiedere un
   // riavvio con --caps. Nome del tool → handle dell'SDK.
   const dormant = new Map();
+  // Impronta dell'ultimo screenshot per scheda (screenshot if_changed).
+  const lastShot = new Map();
 
   // Un errore del tool (eccezione, o risultato isError) va all'osservatore,
   // che lo annota in locale senza i valori dei parametri (server/observe.js).
@@ -844,8 +847,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       tab_id: tabId,
       save_to: saveToField('the PNG'),
       presets: z.array(z.enum(['mobile', 'tablet', 'desktop'])).optional().describe('Resizes the window per preset, then restores it; not phone emulation. A refused width is reported, not shot. save_to = directory'),
+      if_changed: z.boolean().optional().default(true).describe('Same pixels as the last screenshot of this tab: a note instead of the image. false = always send it'),
     },
-    async ({ tab_id, save_to, presets }) => {
+    async ({ tab_id, save_to, presets, if_changed }) => {
       guardWrite(save_to);
       // Matrice responsive: viewport_resize + screenshot per preset erano 2N
       // turni; qui è una chiamata, e la finestra torna com'era.
@@ -897,6 +901,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // riferimento di element_screenshot.region: senza, il modello non sa
       // mappare ciò che vede sull'immagine ridotta a ≤1568px.
       if (data && data.image) {
+        // Un'immagine costa ~1.500 token: rimandarla uguale (controllo dopo
+        // un'azione che non ha cambiato nulla) è solo spesa.
+        const key = refsKey(tab_id);
+        const hash = createHash('sha1').update(data.image).digest('hex');
+        const same = lastShot.get(key) === hash;
+        lastShot.set(key, hash);
+        if (same && if_changed !== false) {
+          return { content: [{ type: 'text', text: 'unchanged: same pixels as the previous screenshot of this tab, image not sent again (if_changed:false forces it)' }] };
+        }
         const content = [];
         if (data.viewport?.width) {
           content.push({ type: 'text', text: `viewport ${data.viewport.width}×${data.viewport.height} CSS px` });
