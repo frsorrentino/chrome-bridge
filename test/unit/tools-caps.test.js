@@ -253,3 +253,16 @@ test('ref legati al frame: lo stesso selettore in due frame ha due ref, e il cli
   assert.equal(sent.at(-1).frame_id, undefined, 'frame principale');
   await assert.rejects(handlers.get('click')({ ref: 'n2', frame_id: 3 }), /belongs to frame 7/);
 });
+
+test('click che apre un menu allega i ref dei nuovi interactives; uno che non cambia nulla no', async () => {
+  let open = 0;
+  const handlers = setup({
+    page_fingerprint: () => ({ url: 'https://x.test', title: 'X', nodes: 100 + open * 10, open }),
+    click: () => { open = 1; return { clicked: true }; },
+    get_interactives: { elements: [{ selector: '#menu-item-1', label: 'Profile' }] },
+  });
+  const text = textOf(await handlers.get('click')({ selector: '#menu' }));
+  assert.match(text, /#menu-item-1/, 'ref del menu aperto nella stessa risposta');
+  const text2 = textOf(await handlers.get('click')({ selector: '#noop' }));
+  assert.doesNotMatch(text2, /#menu-item-1/, 'niente anteprima senza cambiamenti');
+});

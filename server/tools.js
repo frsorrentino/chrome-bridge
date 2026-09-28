@@ -701,6 +701,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     } catch { return null; }
   }
 
+  // Un'azione che apre o mostra qualcosa (menu, dialog, pannello, pagina
+  // nuova) allega i ref degli interactives visibili: senza, il modello
+  // spendeva un turno di get_interactives per trovare cosa era comparso.
+  const grew = (v) => typeof v === 'string' && v.startsWith('+');
+  const revealed = (d) => Boolean(d && (d.url || grew(d.open) || grew(d.expanded) || grew(d.dialogs)
+    || (grew(d.nodes) && Number(d.nodes) >= 5)));
+  const withPreview = async (text, changed, tab_id) => {
+    const preview = revealed(changed) ? await interactivesPreview(tab_id) : null;
+    return preview ? `${text}\n${preview}` : text;
+  };
+
   // --- get_status ---
   server.tool(
     'get_status',
@@ -932,7 +943,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'click',
     'Click an element by CSS selector or by a ref (n1, n2…) from get_interactives or navigate. A real pointer sequence: it can submit, '
       + 'open a dialog or navigate — use wait_after. Not idempotent; a native confirm() blocks the bridge: handle_dialogs first. '
-      + 'Returns page_changed (url, title and DOM deltas: nodes, text, open, expanded, checked, dialogs, focus): the effect, without a screenshot.',
+      + 'Returns page_changed (url, title and DOM deltas: nodes, text, open, expanded, checked, dialogs, focus): the effect, without a screenshot; '
+      + 'when the click opens or reveals something, the refs of the visible interactives follow, no get_interactives needed.',
     {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
@@ -957,7 +969,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return {
         content: [{
           type: 'text',
-          text: jsonText(out),
+          text: await withPreview(jsonText(out), changed, tab_id),
         }],
       };
     }
@@ -1371,7 +1383,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     + 'Fields and submit take a CSS selector or a ref (n1, n2…) from navigate/get_interactives. '
     + 'With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly; '
     + 'after a submit, after_submit carries url, title and the text the page gained (the confirmation or the errors). '
-    + 'Each field reports value_after and mismatch; page_changed carries the DOM delta.',
+    + 'Each field reports value_after and mismatch; page_changed carries the DOM delta, and the refs of what appeared.',
     {
       fields: z.array(z.object({
         selector: z.string().optional().describe('CSS selector; ignored when ref is given'),
@@ -1428,7 +1440,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return {
         content: [{
           type: 'text',
-          text: head + jsonText(out),
+          text: await withPreview(head + jsonText(out), changed, tab_id),
         }],
       };
     }
