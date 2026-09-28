@@ -17,6 +17,13 @@
     if (buf.length >= MAX) buf.shift(); // ring buffer: tieni i più recenti, non i primi 1000
     buf.push(entry);
   };
+  // Un Error passato a console.error diventava "{}" (JSON.stringify non vede
+  // message e stack, che non sono enumerabili): lo stack è l'unica cosa che
+  // read_console(sourcemap) può riportare ai sorgenti. Duck typing e non
+  // instanceof, perché un Error di un iframe viene da un altro realm.
+  const errorText = (v) => (v && typeof v === 'object' && typeof v.message === 'string'
+    ? (typeof v.stack === 'string' && v.stack ? v.stack : `${v.name || 'Error'}: ${v.message}`)
+    : null);
   for (const method of ['log', 'warn', 'error', 'info', 'debug']) {
     const orig = console[method].bind(console);
     console[method] = (...args) => {
@@ -24,7 +31,7 @@
         push({
           level: method,
           args: args.map((a) => {
-            try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+            try { return errorText(a) ?? (typeof a === 'object' ? JSON.stringify(a) : String(a)); }
             catch { return String(a); }
           }),
           timestamp: Date.now(),
@@ -34,12 +41,20 @@
     };
   }
   window.addEventListener('error', (e) => {
-    try { push({ level: 'error', args: [`Uncaught ${e.message} at ${e.filename || '?'}:${e.lineno || 0}`], timestamp: Date.now() }); } catch {}
+    try {
+      // Con la colonna il frame diventa url:riga:colonna, risolvibile dalla source map.
+      const stack = errorText(e.error);
+      push({
+        level: 'error',
+        args: [stack ? `Uncaught ${stack}` : `Uncaught ${e.message} at ${e.filename || '?'}:${e.lineno || 0}:${e.colno || 0}`],
+        timestamp: Date.now(),
+      });
+    } catch {}
   }, true);
   window.addEventListener('unhandledrejection', (e) => {
     try {
       let reason;
-      try { reason = String(e.reason); } catch { reason = '<unstringifiable>'; }
+      try { reason = errorText(e.reason) ?? String(e.reason); } catch { reason = '<unstringifiable>'; }
       push({ level: 'error', args: [`Unhandled rejection: ${reason}`], timestamp: Date.now() });
     } catch {}
   });

@@ -28,6 +28,33 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.24.0 — not released
+
+The Chrome Web Store listing promises "console logs with source-mapped stacks";
+on 2026-09-28, while preparing the new listing screenshots, that held only when
+the page logged `err.stack` as a string. The extension code changes, so
+`extension/manifest.json` goes to 1.24.0 with the rest and this release goes to
+the Chrome Web Store, together with the new listing.
+
+### Fixed
+
+- **`console.error(err)` keeps the stack.** An `Error` argument was stored as
+  `{}`: `JSON.stringify` does not see `message` and `stack`, which are not
+  enumerable. Now it is stored as its stack (or `Name: message` without one),
+  so `read_console(sourcemap: true)` can map `bundle.js:1:231` back to
+  `src/cart.js:10:3`. Error-like objects from another realm (an iframe) count
+  too: the check is on `message` and `stack`, not `instanceof`.
+- **Uncaught errors carry the column and the stack.** The `error` event gave
+  `Uncaught <message> at <file>:<line>`, with no column, so no frame the source
+  map could resolve. Now it records `Uncaught <stack>` when the event has an
+  `error`, else `<file>:<line>:<column>`.
+- **Unhandled rejections carry the stack** of their reason, not just its
+  message.
+
+Tests: `test/unit/console-capture.test.js` (6), and `read_console` in the e2e
+suite now checks that an `Error` passed to `console.error` arrives with
+`at …` frames.
+
 ## 1.23.4 — 2026-09-27
 
 Second round from the Windows compatibility test of 2026-09-27: two false

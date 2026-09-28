@@ -1,7 +1,7 @@
 {
   "name": "chrome-bridge-mcp",
   "mcpName": "io.github.frsorrentino/chrome-bridge",
-  "version": "1.23.4",
+  "version": "1.24.0",
   "type": "module",
   "description": "Chrome Bridge by frsorrentino: MCP server that lets Claude Code borrow a tab from your own logged-in Chrome and hand it back — logins, 2FA and CAPTCHAs stay with you (handoff). 60 tools; about half the cost of Claude in Chrome, measured; ChromeOS included.",
   "main": "server/index.js",

@@ -189,6 +189,16 @@ async function testReadConsole(tabId) {
       m.args && m.args.some((a) => a.includes('__chromeBridge_test_message__'))
     );
     if (!found) throw new Error('Test console.log message not captured');
+
+    // 1.24.0: un Error passato a console.error arriva con il suo stack, non come "{}".
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: "(() => { const s = document.createElement('script'); s.textContent = \"console.error('__cb_err__', new Error('__cb_boom__'))\"; document.head.appendChild(s); s.remove(); })()",
+      tab_id: tabId,
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const errs = await wsManager.sendCommand(MessageType.READ_CONSOLE, { clear: true, level: 'error', tab_id: tabId });
+    const errArgs = errs.messages.find((m) => m.args?.[0] === '__cb_err__')?.args ?? [];
+    if (!/^Error: __cb_boom__\n\s+at /.test(errArgs[1] ?? '')) throw new Error(`Error arg without stack: ${JSON.stringify(errArgs[1])}`);
     ok(name);
   } catch (e) {
     fail(name, e.message);

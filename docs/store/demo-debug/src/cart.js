@@ -12,4 +12,4 @@ function renderCart(cart) {
   }
 }
 
-loadCart().catch((err) => console.error('Cart failed to load:', err.stack));
+loadCart().catch((err) => console.error('Cart failed to load:', err));
