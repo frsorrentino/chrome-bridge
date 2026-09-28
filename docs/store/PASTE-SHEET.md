@@ -23,7 +23,7 @@ Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools 
 **Description:**
 
 ```
-Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — borrow a tab of the Chrome you are already using, signed in, and hand it back. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. What only you can do — a login, a 2FA code, a CAPTCHA, a choice — comes back to you as a banner in the page (the handoff tool): you act, the agent continues. It never types your credentials.
+Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — borrow a tab of the Chrome you are already using, signed in, and hand it back. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. When a step needs you, it hands the tab back and continues after you.
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 
@@ -31,7 +31,7 @@ Built to be token-efficient: the agent acts on compact element references instea
 
 • Navigation & tabs — open, close, navigate, list tabs; move, tile and lay out windows
 • DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, read a form as filled, modify the DOM
-• Input — click, type, press keys, fill forms, drag & drop, upload files; hand the browser to the user for 2FA, CAPTCHA or a choice
+• Input — click, type, press keys, fill forms, drag & drop, upload files; hand the tab back to the user when a step needs them
 • Screenshots — viewport (one per device preset), element with zoom, full page, visual regression against a baseline, a design mockup or another URL; captures run in the background without stealing window focus
 • Audits — one call for accessibility, keyboard navigation, SEO, security headers, broken links, web vitals, unused CSS, slow plugins and CDN cache; cookie-consent audit; tracking pixels decoded
 • Network — monitor requests, mock/block/redirect, record and replay API responses with forced errors, HAR export
