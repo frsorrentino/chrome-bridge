@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 800px; overflow: hidden;
+    background: linear-gradient(135deg, #0f1722, #23395d);
+    font-family: system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .caption { color: #e8f0fa; font-size: 26px; font-weight: 700; margin-bottom: 26px; }
+  .row { display: flex; gap: 22px; align-items: stretch; }
+  .win { border-radius: 10px; overflow: hidden; box-shadow: 0 22px 55px rgba(0,0,0,0.5); border: 1px solid #2a3542; }
+  .bar { height: 34px; background: #161d27; display: flex; align-items: center; padding: 0 14px; gap: 7px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .bar .t { margin-left: 10px; color: #7d8ea3; font-size: 12px; font-family: ui-monospace, monospace; }
+  .page {
+    position: relative; width: 520px; height: 520px;
+    background: url(/real-debug.png) center / 800px auto no-repeat #f4f6fa;
+  }
+  .flag {
+    position: absolute; border: 2px dashed #e5484d; border-radius: 8px;
+  }
+  .flag span {
+    position: absolute; left: -2px; top: calc(100% + 6px); white-space: nowrap;
+    font: 600 12px ui-monospace, monospace; color: #fff; background: #e5484d; padding: 2px 7px; border-radius: 5px;
+  }
+  .term { width: 640px; background: #0d1117; }
+  pre {
+    padding: 20px 22px; font-family: 'Noto Sans Mono', ui-monospace, monospace;
+    font-size: 13.5px; line-height: 1.6; color: #c9d6e5; white-space: pre-wrap;
+  }
+  .c { color: #e8b45f; } .dim { color: #6f8196; } .err { color: #ff8589; } .ok { color: #7fd8a8; }
+</style></head><body>
+  <div class="caption">Debug the page you're building: console, network, styles</div>
+  <div class="row">
+    <div class="win">
+      <div class="bar">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="t">localhost:8791/demo-debug/</span>
+      </div>
+      <div class="page">
+        <div class="flag" id="flag"><span>.pay — "Pay now", invisible</span></div>
+      </div>
+    </div>
+    <div class="win term">
+      <div class="bar">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="t">claude — Claude Code</span>
+      </div>
+<pre><span class="c">⏺ read_console</span>(sourcemap: true)
+  <span class="dim">⎿</span> <span class="err">error</span> Cart failed to load: TypeError: Cannot read
+    properties of undefined (reading 'items')
+      at renderCart (dist/app.min.js:1:231 <span class="ok">→ src/cart.js:10:3</span>)
+      at loadCart (dist/app.min.js:1:116 <span class="ok">→ src/cart.js:5:3</span>)
+
+<span class="c">⏺ monitor_network</span>(source: "browser")
+  <span class="dim">⎿</span> 200 GET /demo-debug/dist/app.min.js
+    <span class="err">404 GET /api/cart</span>
+
+<span class="c">⏺ get_css_styles</span>(selector: ".pay")
+  <span class="dim">⎿</span> background-color: var(--brand-primary)
+      computed rgba(0, 0, 0, 0)  <span class="dim">(style.css, .pay)</span>
+    color: rgb(255, 255, 255)
+
+<span class="ok">✓</span> /api/cart answers 404, so cart is undefined at
+  src/cart.js:10. "Pay now" is white on white:
+  --brand-primary is never defined.</pre>
+    </div>
+  </div>
+  <script>
+    // Box of button.pay in the real capture (query_dom rect 270,390 460×42 at dpr 1.25),
+    // mapped onto the scaled, centred background of .page.
+    const shot = { w: 1250, h: 799 }, btn = { x: 338, y: 488, w: 575, h: 52 };
+    const page = document.querySelector('.page'), s = 800 / shot.w;
+    const ox = (page.clientWidth - shot.w * s) / 2, oy = (page.clientHeight - shot.h * s) / 2;
+    Object.assign(document.getElementById('flag').style, {
+      left: (ox + btn.x * s - 4) + 'px', top: (oy + btn.y * s - 4) + 'px',
+      width: (btn.w * s + 8) + 'px', height: (btn.h * s + 8) + 'px',
+    });
+  </script>
+</body></html>

@@ -24,19 +24,19 @@ This extension has a single purpose: it lets the user's own Claude Code CLI (run
 
 ## Detailed description
 
-Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — borrow a tab of the Chrome you are already using, signed in, and hand it back. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. When a step needs you, it hands the tab back and continues after you.
+Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — develop and debug web pages in the Chrome you are already using, signed in. No headless instance, no debugging port, no cloud service: a local WebSocket (localhost:8765) bridges the Claude Code MCP server on your machine to this extension. When a step needs you, it hands the tab back and continues after you.
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 
 60 specialized web-development tools:
 
-• Navigation & tabs — open, close, navigate, list tabs; move, tile and lay out windows
-• DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, read a form as filled, modify the DOM
-• Input — click, type, press keys, fill forms, drag & drop, upload files; hand the tab back to the user when a step needs them
+• Debugging — console logs with source-mapped stacks, which CSS rule sets each style, JS execution, dev-server error overlays, background page watch
+• Network — monitor requests, mock/block/redirect, record and replay API responses with forced errors, HAR export
 • Screenshots — viewport (one per device preset), element with zoom, full page, visual regression against a baseline, a design mockup or another URL; captures run in the background without stealing window focus
 • Audits — one call for accessibility, keyboard navigation, SEO, security headers, broken links, web vitals, unused CSS, slow plugins and CDN cache; cookie-consent audit; tracking pixels decoded
-• Network — monitor requests, mock/block/redirect, record and replay API responses with forced errors, HAR export
-• Debugging — console logs with source-mapped stacks, JS execution, dev-server error overlays, background page watch
+• DOM — query selectors (shadow-DOM piercing), read pages as markdown, list interactive elements, read a form as filled, modify the DOM
+• Input — click, type, press keys, fill forms, drag & drop, upload files; hand the tab back to the user when a step needs them
+• Navigation & tabs — open, close, navigate, list tabs; move, tile and lay out windows
 • Emulation — media, geolocation, viewport, zoom
 
 Cross-platform: Windows, macOS, Linux — any desktop Chrome 135+. Also the only Claude Code browser automation that works on ChromeOS (Crostini).
