@@ -8,12 +8,18 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { z } from 'zod';
 import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { registerTools } from '../../server/tools.js';
 
-const SKILL = readFileSync(new URL('../../skills/chrome-bridge/SKILL.md', import.meta.url), 'utf8');
+// Il nucleo più le ricette in recipes/, lette su richiesta: i controlli valgono
+// sul testo che il modello può leggere, tutto.
+const SKILL_DIR = new URL('../../skills/chrome-bridge/', import.meta.url);
+const RECIPES = readdirSync(new URL('recipes/', SKILL_DIR)).filter((f) => f.endsWith('.md')).sort()
+  .map((f) => readFileSync(new URL(`recipes/${f}`, SKILL_DIR), 'utf8'));
+const CORE = readFileSync(new URL('SKILL.md', SKILL_DIR), 'utf8');
+const SKILL = [CORE, ...RECIPES.map((r) => r.replace(/^# /, '### '))].join('\n');
 
 function tools() {
   const out = new Map();
@@ -62,4 +68,11 @@ test('ogni comando della corsia CLI è un comando reale', () => {
   const cmds = [...cliSection.matchAll(/`chrome-bridge ([a-z_]+)/g)].map((m) => m[1]);
   const unknown = cmds.filter((c) => !TOOLS.has(c) && !CLI_ONLY.has(c));
   assert.deepEqual(unknown, []);
+});
+
+test("l'indice delle ricette nel nucleo e i file in recipes/ coincidono", () => {
+  const listed = [...CORE.matchAll(/`recipes\/([a-z0-9-]+\.md)`/g)].map((m) => m[1]).sort();
+  const files = readdirSync(new URL('recipes/', SKILL_DIR)).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(listed, files);
+  assert.ok(CORE.length < 12000, `il nucleo della skill resta corto: ${CORE.length} byte`);
 });
