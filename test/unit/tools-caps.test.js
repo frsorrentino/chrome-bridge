@@ -235,3 +235,21 @@ test('click occluso non calcola delta né attese', async () => {
   assert.equal(out.occluded, true);
   assert.equal(out.page_changed, undefined);
 });
+
+test('ref legati al frame: lo stesso selettore in due frame ha due ref, e il click va nel frame giusto', async () => {
+  const sent = [];
+  const handlers = setup({
+    get_interactives: ({ frame_id }) => ({ elements: [{ selector: '#save', label: `save ${frame_id ?? 0}` }] }),
+    page_fingerprint: {},
+    click: (p) => { sent.push(p); return { clicked: true }; },
+  });
+  const main = textOf(await handlers.get('get_interactives')({}));
+  const inner = textOf(await handlers.get('get_interactives')({ frame_id: 7 }));
+  assert.match(main, /n1\t#save/);
+  assert.match(inner, /n2\t#save/, 'ref distinto nel frame 7');
+  await handlers.get('click')({ ref: 'n2' });
+  assert.equal(sent.at(-1).frame_id, 7, 'il ref porta il suo frame');
+  await handlers.get('click')({ ref: 'n1' });
+  assert.equal(sent.at(-1).frame_id, undefined, 'frame principale');
+  await assert.rejects(handlers.get('click')({ ref: 'n2', frame_id: 3 }), /belongs to frame 7/);
+});

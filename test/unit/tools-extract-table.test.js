@@ -140,3 +140,13 @@ test('extract_table where: il nome esatto vince su uno che differisce solo per m
   const out = JSON.parse(textOf(await h.get('extract_table')({ where: { ID: 'x' } })));
   assert.deepEqual(out.rows, [{ id: 'a', ID: 'x' }]);
 });
+
+test('extract_table where oltre scan_rows: niente «0 match, non troncato» falso', async () => {
+  const handlers = setup({ extract_table: CANNED });
+  const out = JSON.parse(textOf(await handlers.get('extract_table')({
+    where: { SKU: 'SKU-1400' }, scan_rows: 1000,
+  })));
+  assert.equal(out.match_count, 0);
+  assert.equal(out.truncated, true, 'la scansione non ha visto tutte le righe');
+  assert.match(out.scan_incomplete, /first 1000 of 1500 rows/);
+});

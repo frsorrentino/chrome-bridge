@@ -189,6 +189,10 @@ function projectCols(row, columns) {
 function shapeTable(data, { where, columns, offset = 0, max_rows = 100 } = {}) {
   let rows = Array.isArray(data.rows) ? data.rows : [];
   const total = data.row_count ?? rows.length;
+  // L'estensione materializza al più scan_rows righe: con where il filtro vede
+  // solo quelle, e «0 match, non troncato» sarebbe falso oltre il limite.
+  const scanned = rows.length;
+  const scanIncomplete = Boolean(data.truncated) || total > scanned;
   const hasWhere = where && Object.keys(where).length > 0;
   let match_count;
   if (hasWhere) {
@@ -203,10 +207,11 @@ function shapeTable(data, { where, columns, offset = 0, max_rows = 100 } = {}) {
     headers: data.headers ?? [],
     row_count: total,
     rows: projected,
-    truncated: (offset + page.length) < available || Boolean(data.truncated && !hasWhere),
+    truncated: (offset + page.length) < available || scanIncomplete,
     tables_found: data.tables_found ?? 0,
   };
   if (hasWhere) out.match_count = match_count;
+  if (hasWhere && scanIncomplete) out.scan_incomplete = `filtered the first ${scanned} of ${total} rows: raise scan_rows to search them all`;
   if (offset) out.offset = offset;
   return out;
 }
@@ -566,22 +571,26 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
 
   // Assegna i ref agli elementi (in place). Solo gli elementi con selector
   // ricevono un ref: senza, non ci sarebbe nulla da risolvere.
-  function assignRefs(tab_id, elements) {
+  // Il ref ricorda anche il frame: lo stesso "#save" in due frame riceveva lo
+  // stesso n1, e un click col solo ref andava nel frame principale.
+  const selKey = (frame, selector) => `${frame}\u0000${selector}`;
+  function assignRefs(tab_id, elements, frame_id) {
     const reg = refRegistry(tab_id);
+    const frame = frame_id ?? 0;
     for (const e of elements) {
       if (!e.selector) continue;
-      let ref = reg.bySel.get(e.selector);
+      let ref = reg.bySel.get(selKey(frame, e.selector));
       if (!ref) {
         ref = `n${reg.next++}`;
-        reg.bySel.set(e.selector, ref);
-        reg.byRef.set(ref, e.selector);
+        reg.bySel.set(selKey(frame, e.selector), ref);
+        reg.byRef.set(ref, { selector: e.selector, frame });
       }
       e.ref = ref;
     }
     while (reg.byRef.size > REFS_MAX) {
-      const [oldRef, oldSel] = reg.byRef.entries().next().value;
+      const [oldRef, old] = reg.byRef.entries().next().value;
       reg.byRef.delete(oldRef);
-      reg.bySel.delete(oldSel);
+      reg.bySel.delete(selKey(old.frame, old.selector));
     }
     return reg.byRef.size;
   }
@@ -596,12 +605,14 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     reg.floor = reg.next;
   }
 
-  function resolveTarget(selector, ref, tab_id) {
-    if (selector) return selector;
+  // Selettore e frame del bersaglio. Con un ref il frame viene dal ref; un
+  // frame_id esplicito diverso è un errore, non un click altrove.
+  function resolveTarget(selector, ref, tab_id, frame_id) {
+    if (selector) return { selector, frame_id };
     if (ref) {
       const reg = interactivesRefs.get(refsKey(tab_id));
-      const sel = reg?.byRef.get(ref);
-      if (!sel) {
+      const entry = reg?.byRef.get(ref);
+      if (!entry) {
         const num = Number(String(ref).replace(/^n/, ''));
         const why = !reg || reg.next === 1 ? 'no refs issued for this tab yet'
           : num >= reg.next ? `refs issued so far go up to n${reg.next - 1}`
@@ -609,7 +620,10 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
               : 'it was evicted from the ref cache';
         throw new Error(`Unknown ref ${ref} (${why}) — run get_interactives or find_text again`);
       }
-      return sel;
+      if (frame_id != null && frame_id !== entry.frame) {
+        throw new Error(`ref ${ref} belongs to frame ${entry.frame}, not frame ${frame_id}: pass that frame_id or omit it`);
+      }
+      return { selector: entry.selector, frame_id: entry.frame || frame_id };
     }
     throw new Error('Either selector or ref is required');
   }
@@ -930,9 +944,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, force, button, count, wait_after, tab_id, frame_id }) => {
-      const target = resolveTarget(selector, ref, tab_id);
+      const { selector: target, frame_id: frame } = resolveTarget(selector, ref, tab_id, frame_id);
       const before = await tabSnapshot(tab_id);
-      const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id, tab_id });
+      const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id: frame, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id);
       // Senza wait_after un breve settle: i framework aggiornano il DOM dopo il
@@ -966,8 +980,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, text, mode, wait_after, tab_id, frame_id }) => {
-      const target = resolveTarget(selector, ref, tab_id);
-      const data = await send(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id });
+      const { selector: target, frame_id: frame } = resolveTarget(selector, ref, tab_id, frame_id);
+      const data = await send(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id: frame });
       const waited = await applyWaitAfter(send, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
       const warn = data?.mismatch
@@ -1379,13 +1393,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // checked: il modello lo scriveva per le checkbox e lo schema, che
       // voleva solo value, lo rifiutava (un turno, benchmark del 27/09/2026).
       // L'estensione capisce "true"/"false": la traduzione resta qui.
+      // Campi indicati per ref: il frame viene dai ref, e devono stare tutti nello stesso.
+      const refFrames = new Set(fields.filter((f) => f.ref).map((f) => resolveTarget(undefined, f.ref, tab_id, frame_id).frame_id ?? 0));
+      if (refFrames.size > 1) throw new Error(`fill_form: the refs come from frames ${[...refFrames].join(', ')}; one call fills one frame`);
+      if (frame_id == null && refFrames.size === 1) { const [f0] = refFrames; if (f0) frame_id = f0; }
       const resolved = fields.map((f) => {
-        const selector = resolveTarget(f.ref ? undefined : f.selector, f.ref, tab_id);
+        const { selector } = resolveTarget(f.ref ? undefined : f.selector, f.ref, tab_id, frame_id);
         const value = f.value ?? (typeof f.checked === 'boolean' ? String(f.checked) : undefined);
         if (value === undefined) throw new Error(`fill_form: field ${f.ref ?? f.selector} needs value or checked`);
         return { selector, value };
       });
-      const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id) : submit_selector;
+      const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id, frame_id).selector : submit_selector;
       const before = await tabSnapshot(tab_id);
       const textBefore = submitSel ? await pageText(tab_id, frame_id) : null;
       const data = await send(MessageType.FILL_FORM, { fields: resolved, submit_selector: submitSel, tab_id, frame_id });
@@ -1602,7 +1620,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, tab_id, frame_id }) => {
-      const data = await send(MessageType.HOVER, { selector: resolveTarget(selector, ref, tab_id), tab_id, frame_id });
+      const t = resolveTarget(selector, ref, tab_id, frame_id);
+      const data = await send(MessageType.HOVER, { selector: t.selector, tab_id, frame_id: t.frame_id });
       return {
         content: [{
           type: 'text',
@@ -2454,8 +2473,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     },
     async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
       const data = await send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
-      // Ref stabili per selettore, memorizzati per click/type_text/hover
-      assignRefs(tab_id, data?.elements ?? []);
+      // Ref stabili per selettore e frame, memorizzati per click/type_text/hover
+      assignRefs(tab_id, data?.elements ?? [], frame_id);
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText(data) }] };
       }

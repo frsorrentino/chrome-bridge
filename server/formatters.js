@@ -12,7 +12,8 @@ export function consoleLines(tail, total) {
 
 /** Richieste di rete: "status<TAB>ms<TAB>method<TAB>url", errori come ERR(msg). */
 export function networkLines(tail, total) {
-  const lines = tail.map((r) => `${r.status ?? `ERR(${r.error})`}\t${r.duration}ms\t${r.method}\t${r.url}`);
+  // Sorgente browser: webRequest non dà la durata; «?» invece di «nullms».
+  const lines = tail.map((r) => `${r.status ?? `ERR(${r.error})`}\t${r.duration != null ? `${r.duration}ms` : '?'}\t${r.method}\t${r.url}`);
   return `network total=${total} shown=${tail.length}\n${lines.join('\n')}`;
 }
 
