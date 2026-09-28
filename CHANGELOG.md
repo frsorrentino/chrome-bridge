@@ -28,7 +28,7 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
-## 1.24.0 — not released
+## 1.24.0 — 2026-09-28
 
 The Chrome Web Store listing promises "console logs with source-mapped stacks";
 on 2026-09-28, while preparing the new listing screenshots, that held only when
