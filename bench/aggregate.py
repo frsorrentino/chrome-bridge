@@ -17,6 +17,8 @@ from statistics import mean, median
 EXPECT = {
     "form": ["Registrazione completata", "Mario Rossi", "mario.rossi@example.com", "Calabria", "newsletter: no"],
     "heavy": ["Prodotto 777", "Casa", "292", "1500"],
+    # Dal 29/09: pagina di checkout rotta (bench/debug). Tre cause da trovare.
+    "debug": ["cart.js:10", "404", "brand-primary"],
 }
 
 run_filter, arm_filter = "", {}
@@ -104,7 +106,8 @@ for (arm, task), rows in sorted(cells.items(), key=lambda kv: (kv[0][1], kv[0][0
                 ev = json.loads(line)
             except ValueError:
                 continue
-            content = (ev.get("message") or {}).get("content")
+            msg = ev.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
             if not isinstance(content, list):
                 continue
             for c in content:

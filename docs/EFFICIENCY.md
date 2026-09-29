@@ -2,34 +2,36 @@
 
 ## The benchmark
 
-Same model (Claude Sonnet 5), same task, same day and same `claude` version,
-**all runs included** — n=5 per arm and per task, 27/09/2026, Chrome Bridge
-1.23.2. Medians, range in brackets.
+Same model (Claude Sonnet 5), same tasks, same morning and same `claude`
+version, **all runs included** — n=5 per arm and per task, 29/09/2026, Chrome
+Bridge 1.25.0 in development (commit `a9ea298`). Medians, range in brackets.
 
 | Task | Chrome Bridge | Claude in Chrome | Ratio |
 | :--- | :--- | :--- | :--- |
-| **Form fill** | 6.0 turns (4-6) / $0.225 | 15.0 turns (10-16) / $0.432 | **2.50× turns, 1.92× cost** |
-| **1500-row table lookup** | 6.0 turns (4-6) / $0.217 | 7.0 turns (7-9) / $0.501 | **1.17× turns, 2.31× cost** |
+| **Form fill** | 3.0 turns (3) / $0.163 | 14.0 turns (14-15) / $0.428 | **4.67× turns, 2.63× cost** |
+| **1500-row table lookup** | 3.0 turns (3) / $0.156 | 7.0 turns (5-7) / $0.506 | **2.33× turns, 3.25× cost** |
+| **Debug a broken page** | 5.0 turns (3-5) / $0.198 | 28.0 turns (21-44) / $0.688 | **5.60× turns, 3.47× cost** |
 
-On the table lookup the gain is cost, not turns: Claude in Chrome reads the
-page text (40 KB into the context) and counts the rows in JavaScript, and it
-re-reads that text on every turn. Chrome Bridge answers with one
-`extract_table` call that returns 0.2 KB. Correct answers: 10/10 for Chrome
-Bridge, 9/10 for Claude in Chrome.
+Correct answers: 15/15 for Chrome Bridge, 12/15 for Claude in Chrome.
 
-The same day's runs on 1.23.0 found five defects that cost turns or answers;
-fixing them in 1.23.1 and 1.23.2 took Chrome Bridge from 8/10 to 10/10 correct
-answers. In 3 runs out of 5 per task the model loads the chrome-bridge skill
-first, which costs 2 turns: without it the runs take 4 turns.
+The debug task is a checkout page with three causes to find: a request that
+fails with 404, a JavaScript error to trace back to its source line through
+the source map, and a button made invisible by an undefined CSS variable.
+Chrome Bridge's `navigate` already reports the error (mapped to
+`src/cart.js:10` with the line of code) and the failed request, and
+`get_css_styles` flags the undefined variable: two calls. Claude in Chrome
+reaches the same findings with about 14 `javascript_tool` and 4
+`read_network_requests` calls per run.
 
-The inclusion rule, every raw run (the unfavourable ones included) and the
-harness limits are in [bench/RESULTS.md](../bench/RESULTS.md).
+On form and table Chrome Bridge is at the floor: two tool calls and the
+answer. The harness favours Claude in Chrome on one point: its arm may use
+`Bash` and `Read` (it read the source file from disk in the debug runs), the
+Chrome Bridge arm may not.
 
-**Honest caveat:** on the form, per *turn*, Chrome Bridge costs more than Claude
-in Chrome — about 45k vs 42k cache-read tokens, $0.037 vs $0.029 (27/09/2026).
-The win there is in the number of turns, not in the size of each one. On the
-table lookup it is the other way round: about the same turns, each one cheaper
-(45k vs 65k cache-read tokens).
+The inclusion rule, every raw run (the six replaced after a DNS outage
+included, with their cause) and the harness limits are in
+[bench/RESULTS.md](../bench/RESULTS.md). The previous set (27/09, 1.23.2:
+2.50× turns and 1.92× cost on the form) is kept there.
 
 ## Why it wins: fewer round trips, not smaller payloads
 

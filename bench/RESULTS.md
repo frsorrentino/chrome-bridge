@@ -21,7 +21,83 @@ non wall-clock.
 3. Si riportano **mediana, min-max e n**, non la sola media: con n=2 la media
    nasconde una varianza che nei nostri dati arriva a 7,4×.
 
-## Risultato pubblicabile — set appaiato del 2026-09-27
+## Risultato pubblicabile — set appaiato del 2026-09-29
+
+- **chrome-bridge 1.25.0 in sviluppo**, server ed estensione del commit
+  `a9ea298` (in `package.json` ancora 1.24.0: il numero si alza al rilascio),
+  `--launch --headless`, `--caps core` (43 tool), `alwaysLoad: true` come nel
+  plugin. Skill: modulo e pagina pesante con quella del commit `28d272f`, che
+  non è mai stata invocata in quelle 10 run; debug con quella di `97f48d1`
+  (ricette di debug nel nucleo). La serie debug con la skill precedente
+  (`v125c`, 6 turni di mediana) resta in `bench/results/`.
+- **Claude in Chrome**: estensione ufficiale nel Chrome del Chromebook, unico
+  browser collegato (deviceId `3865739a…`), finestra visibile.
+- Entrambi gli arm: `claude` 2.1.284, `claude-sonnet-5`, stessa mattina
+  (bridge 08:32-08:43, cic 08:42-09:57).
+- n=5 per arm e per task; tre task (form, heavy e il nuovo **debug**: la
+  pagina di checkout di `bench/debug/` con una richiesta che fallisce con 404,
+  un errore da riportare al sorgente e un pulsante invisibile per una
+  variabile CSS non definita).
+
+| task | arm | turni | out tok | cache read | $/run | risposta corretta |
+|---|---|---:|---:|---:|---:|---:|
+| **form** | **chrome-bridge** | **3,0** (3) | **484** (424-606) | **186k** (142-186k) | **0,163** (0,160-0,320) | 5/5 |
+| form | claude-in-chrome | 14,0 (14-15) | 2488 (2161-2768) | 566k (554-625k) | 0,428 (0,410-0,448) | 5/5 |
+| **heavy** | **chrome-bridge** | **3,0** (3) | **298** (286-330) | **185k** (184-185k) | **0,156** (0,153-0,158) | 5/5 |
+| heavy | claude-in-chrome | 7,0 (5-7) | 1630 (1475-2756) | 457k (225-460k) | 0,506 (0,309-0,511) | 3/5 |
+| **debug** | **chrome-bridge** | **5,0** (3-5) | **1317** (791-1476) | **261k** (186-269k) | **0,198** (0,172-0,216) | 5/5 |
+| debug | claude-in-chrome | 28,0 (21-44) | 9742 (5924-12705) | 1307k (1076-2146k) | 0,688 (0,585-0,899) | 4/5 |
+
+Rapporti cic/bridge sulle mediane (>1 = chrome-bridge ne usa meno):
+
+| task | turni | token output | cache read | costo |
+|---|---:|---:|---:|---:|
+| form | **4,67×** | 5,14× | 3,05× | **2,63×** |
+| heavy | **2,33×** | 5,47× | 2,47× | **3,25×** |
+| debug | **5,60×** | 7,40× | 5,01× | **3,47×** |
+
+Risposte corrette: chrome-bridge 15/15, Claude in Chrome 12/15.
+`python3 bench/aggregate.py bridge:v125c cic:v125b` (form, heavy) e
+`python3 bench/aggregate.py bridge:v125d cic:v125b` (debug) riproducono le
+tabelle.
+
+### Lettura onesta (29/09)
+
+- **Dove va il turno.** chrome-bridge chiude form e heavy con due chiamate
+  (`navigate` → `fill_form` oppure `navigate` → `extract_table`) più la
+  risposta: è il minimo. Claude in Chrome nel form compila un campo per volta
+  (`form_input` 5,0 per run) e guarda con `computer` (1,6 screenshot per run);
+  nel heavy legge 40 KB di testo con `get_page_text`.
+- **Debug.** chrome-bridge: `navigate` riporta già l'errore riportato al
+  sorgente, con la riga di codice, e la richiesta fallita; `get_css_styles`
+  segnala `--brand-primary` non definita. Claude in Chrome ci arriva con 14
+  chiamate a `javascript_tool` e 4 a `read_network_requests` per run.
+- **Asimmetria dell'harness, a favore di Claude in Chrome.** L'arm cic gira
+  con `--permission-mode bypassPermissions` e nel debug ha usato anche `Bash`
+  (1,0 per run) e `Read` (0,6) per leggere il sorgente sul disco. L'arm bridge
+  ha solo i tool di chrome-bridge: i suoi `Read` sono negati.
+- **Errori di Claude in Chrome.** heavy-1 termina con «Fatto, tab chiuso.»
+  senza i dati; heavy-4 riporta il prezzo 282.0 invece di 292.0; debug-2
+  indica la riga 9 invece della 10.
+- **Limiti.** Una macchina (Chromebook, Crostini), un modello, pagine locali,
+  n=5. Il costo è `total_cost_usd` di `claude -p`, a listino API.
+
+### Run escluse il 29/09, con causa
+
+Alle 09:04 la macchina ha perso la risoluzione DNS. Sei run di Claude in
+Chrome delle tornate 4 e 5 sono fallite; le due tornate sono state rifatte
+per intero alle 09:47-09:57, con la rete tornata. Le run sostituite sono in
+`bench/results/excluded-0929/`:
+
+- `cic-{form,heavy,debug}-v125b-5` e `cic-debug-v125b-4`: «API Error: Can't
+  reach the API server (EAI_AGAIN)», nessun tool chiamato;
+- `cic-heavy-v125b-4`: timeout a 360 s dopo 10 `api_retry` nel flusso;
+- `cic-form-v125b-4`: timeout a 360 s alle 09:04, a metà compilazione, senza
+  `api_retry` registrati. La causa probabile è la stessa interruzione, ma non
+  è dimostrata. Contata come fallita, Claude in Chrome farebbe 5 moduli giusti
+  su 6 tentativi.
+
+## Set appaiato del 2026-09-27 (1.23.2) — superato dal 29/09
 
 - **chrome-bridge 1.23.2** (server del commit `17e7f3d`, pubblicato il
   27/09/2026), `--launch --headless`, `--caps all`. L'estensione usata nelle

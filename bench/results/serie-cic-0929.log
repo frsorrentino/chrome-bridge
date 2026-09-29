@@ -1,0 +1,47 @@
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 1: browser non ammesso, riprovo fra 5 minuti (08:04)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 2: browser non ammesso, riprovo fra 5 minuti (08:09)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 3: browser non ammesso, riprovo fra 5 minuti (08:15)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 4: browser non ammesso, riprovo fra 5 minuti (08:20)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 5: browser non ammesso, riprovo fra 5 minuti (08:26)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 6: browser non ammesso, riprovo fra 5 minuti (08:31)
+STOP: la sonda non ha restituito list_connected_browsers
+tentativo 7: browser non ammesso, riprovo fra 5 minuti (08:36)
+list_connected_browsers: [{"deviceId": "3865739a-ac6d-457e-8c82-bc250629de7e", "name": "Browser 1", "connectedAt": 1790655136119, "isLocal": false, "inUse": true}]
+== 08:42:10 cic form v125b-1 load=3.77
+{"file": "cic-form-v125b-1.json", "turns": 14, "in": 20, "out": 2488, "cache_w": 77907, "cache_r": 556046, "cost": 0.4478, "result_head": "Form inviato. Messaggio conferma esatto:\n\n```\nRegistrazione completata\n\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, newsletter: no\n```\n\nNota: "}
+== 08:43:55 cic heavy v125b-1 load=4.69
+{"file": "cic-heavy-v125b-1.json", "turns": 5, "in": 10, "out": 1475, "cache_w": 62287, "cache_r": 225088, "cost": 0.3089, "result_head": "Fatto, tab chiuso."}
+== 08:44:29 cic debug v125b-1 load=3.44
+{"file": "cic-debug-v125b-1.json", "turns": 32, "in": 50, "out": 9742, "cache_w": 83145, "cache_r": 1688528, "cost": 0.7678, "result_head": "Due cause distinte, entrambe confermate dal vivo.\n\n**Carrello vuoto \u2014 errore JS**\n`TypeError: Cannot read properties of undefined (reading 'items')`\nSorgente or"}
+== 08:47:36 cic form v125b-2 load=0.96
+{"file": "cic-form-v125b-2.json", "turns": 15, "in": 22, "out": 2768, "cache_w": 71118, "cache_r": 624804, "cost": 0.4372, "result_head": "Form inviato. Messaggio conferma esatto:\n\n```\nRegistrazione completata\n\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, newsletter: no\n```"}
+== 08:49:06 cic heavy v125b-2 load=1.79
+{"file": "cic-heavy-v125b-2.json", "turns": 7, "in": 14, "out": 1997, "cache_w": 99830, "cache_r": 459695, "cost": 0.5113, "result_head": "Riga SKU-0777: Prodotto 777, categoria Casa, prezzo 292.0, stock 1.\n\nTabella: 1500 righe dati totali."}
+== 08:49:48 cic debug v125b-2 load=1.59
+{"file": "cic-debug-v125b-2.json", "turns": 28, "in": 38, "out": 11683, "cache_w": 81787, "cache_r": 1219478, "cost": 0.6879, "result_head": "Due cause trovate, indipendenti tra loro.\n\n**1. Carrello vuoto \u2014 errore JS**\n`Cannot read properties of undefined (reading 'items')` in `src/cart.js:9` (`for (c"}
+== 08:53:22 cic form v125b-3 load=1.06
+{"file": "cic-form-v125b-3.json", "turns": 14, "in": 20, "out": 2713, "cache_w": 71314, "cache_r": 565690, "cost": 0.4256, "result_head": "Messaggio conferma esatto:\n\n```\nRegistrazione completata\n\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, newsletter: no\n```"}
+== 08:54:57 cic heavy v125b-3 load=0.69
+{"file": "cic-heavy-v125b-3.json", "turns": 7, "in": 14, "out": 2756, "cache_w": 97845, "cache_r": 449793, "cost": 0.5089, "result_head": "SKU-0777: nome **Prodotto 777**, categoria **Casa**, prezzo **292.0**, stock **1**.\n\nTabella: **1500** righe dati totali."}
+== 08:56:04 cic debug v125b-3 load=0.58
+{"file": "cic-debug-v125b-3.json", "turns": 25, "in": 40, "out": 8827, "cache_w": 79993, "cache_r": 1306863, "cost": 0.6697, "result_head": "Due bug distinti, entrambi confermati.\n\n**1. Carrello vuoto \u2014 errore JS**\n`src/cart.js:10` (`for (const item of cart.items)` dentro `renderCart`), causato da `s"}
+== 08:58:37 cic form v125b-4 load=0.91
+TIMEOUT-OR-ERROR exit=124 — run marcata come fallita
+== 09:04:39 cic heavy v125b-4 load=0.65
+TIMEOUT-OR-ERROR exit=124 — run marcata come fallita
+== 09:10:41 cic debug v125b-4 load=0.90
+TIMEOUT-OR-ERROR exit=1 — run marcata come fallita
+== 09:16:03 cic form v125b-5 load=0.30
+TIMEOUT-OR-ERROR exit=1 — run marcata come fallita
+== 09:21:20 cic heavy v125b-5 load=0.58
+TIMEOUT-OR-ERROR exit=1 — run marcata come fallita
+== 09:26:25 cic debug v125b-5 load=1.58
+TIMEOUT-OR-ERROR exit=1 — run marcata come fallita
+== fine 09:31:41
+SERIE CIC FINITA rc=0 09:31
