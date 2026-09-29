@@ -93,7 +93,7 @@ export const MessageType = Object.freeze({
 });
 
 // Versione
-export const VERSION               = '1.25.1';
+export const VERSION               = '1.26.0';
 
 // Configurazione
 export const DEFAULT_PORT          = 8765;

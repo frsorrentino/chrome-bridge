@@ -28,7 +28,7 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
-## 1.26.0 — not released
+## 1.26.0 — 2026-09-29
 
 Extension change with a new permission: the Chrome Web Store review is
 stricter, and Chrome disables the extension for current users until they
@@ -47,8 +47,28 @@ accept the new permission once.
 
 ### Changed
 
-- **observe synced with claude-observe `49f39d3`:** the report can go out
-  through an anonymous service, besides the user's own GitHub.
+- **observe synced with claude-observe `1822704`:** the report can go out
+  through an anonymous service, besides the user's own GitHub
+  ([privacy note](https://github.com/frsorrentino/claude-observe/blob/main/PRIVACY.md)).
+- **The skill stays out of simple work.** Its description now also excludes
+  a single screenshot and debugging one page visually; the mockup
+  comparison recipe is named as such.
+
+### Fixed
+
+- **Claude in Chrome asked, chrome-bridge used.** When the user named Claude
+  in Chrome and it was not connected, the model switched to chrome-bridge on
+  its own (3 runs out of 3). The server instructions now say to tell the user
+  and ask: 0 out of 3.
+- **`settle` honours `max_ms`** when `quiet_ms` is longer (the first check
+  waited `quiet_ms`).
+
+### Tests
+
+- The plugin eval has a mocked chrome-bridge server (`evals/mocks/`): the
+  real schemas of 18 tools and one agent playing three pages, so the cases
+  run the tools instead of only planning. Three cases now expect the skill
+  not to load: one page to debug, one screenshot, one form.
 
 ## 1.25.1 — 2026-09-29
 
