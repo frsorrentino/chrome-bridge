@@ -24,7 +24,7 @@ const fp = (over = {}) => ({ url: 'https://a.it/', title: 'A', nodes: 100, text:
 test('click: page_changed riporta il delta DOM fra le impronte prima e dopo', async () => {
   let calls = 0;
   const { handlers, sent } = build((t) => {
-    if (t === MessageType.PAGE_FINGERPRINT) return (calls++ === 0) ? fp() : fp({ expanded: 1, nodes: 112, focus: 'ul#menu' });
+    if (t === MessageType.PAGE_FINGERPRINT) return (calls++ === 0) ? fp() : fp({ expanded: 1, nodes: 112, focus: 'ul#menu', settled_ms: 60 });
     if (t === MessageType.CLICK) return { clicked: true, tagName: 'BUTTON' };
     throw new Error(`unexpected ${t}`);
   });
@@ -92,7 +92,7 @@ test('le descrizioni dicono che l\'effetto viene riportato', () => {
 test('press_key: Enter che apre un dialog → page_changed e anteprima dei ref, come click', async () => {
   let calls = 0;
   const { handlers, sent } = build((t) => {
-    if (t === MessageType.PAGE_FINGERPRINT) return (calls++ === 0) ? fp() : fp({ dialogs: 1, nodes: 130 });
+    if (t === MessageType.PAGE_FINGERPRINT) return (calls++ === 0) ? fp() : fp({ dialogs: 1, nodes: 130, settled_ms: 60 });
     if (t === MessageType.PRESS_KEY) return { pressed: true, key: 'Enter' };
     if (t === MessageType.GET_INTERACTIVES) return { elements: [{ tag: 'button', text: 'OK', selector: '#ok' }] };
     throw new Error(`unexpected ${t}`);
@@ -109,4 +109,27 @@ test('press_key: pagina stabile → nessun page_changed, nessuna anteprima', asy
   const out = JSON.parse(textOf(await handlers.get('press_key').handler({ key: 'ArrowDown' })));
   assert.ok(!('page_changed' in out));
   assert.ok(!sent.some((s) => s.type === MessageType.GET_INTERACTIVES));
+});
+
+test('click: l\'impronta dopo chiede settle; con settled_ms nessuna pausa fissa né seconda lettura', async () => {
+  let calls = 0;
+  const { handlers, sent } = build((t) => {
+    if (t === MessageType.PAGE_FINGERPRINT) return calls++ === 0 ? fp() : fp({ settled_ms: 55 });
+    return { clicked: true };
+  });
+  const t0 = Date.now();
+  const out = JSON.parse(textOf(await handlers.get('click').handler({ selector: '#x', wait_after: 'none' })));
+  assert.ok(Date.now() - t0 < 120, 'niente 150 ms fissi');
+  const fps = sent.filter((s) => s.type === MessageType.PAGE_FINGERPRINT);
+  assert.equal(fps.length, 2);
+  assert.deepEqual(fps[1].params.settle, { quiet_ms: 50, max_ms: 250 });
+  assert.ok(!('page_changed' in out), 'settled_ms non è un cambiamento');
+});
+
+test('click: estensione vecchia senza settle → pausa fissa e seconda lettura', async () => {
+  const { handlers, sent } = build((t) => (t === MessageType.PAGE_FINGERPRINT ? fp() : { clicked: true }));
+  const t0 = Date.now();
+  await handlers.get('click').handler({ selector: '#x', wait_after: 'none' });
+  assert.ok(Date.now() - t0 >= 140);
+  assert.equal(sent.filter((s) => s.type === MessageType.PAGE_FINGERPRINT).length, 3);
 });

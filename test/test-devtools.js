@@ -663,10 +663,14 @@ async function testPageFingerprintClickEffect(tabId) {
     await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { const d = document.createElement('details'); d.id = '__cb_fp'; d.innerHTML = '<summary>toggle</summary><p>body</p>'; document.body.appendChild(d); return true; })()", tab_id: tabId });
     const before = await wsManager.sendCommand(MessageType.PAGE_FINGERPRINT, { tab_id: tabId });
     for (const k of ['nodes', 'text', 'open', 'expanded', 'checked', 'dialogs']) if (typeof before[k] !== 'number') throw new Error(`Missing ${k}: ${JSON.stringify(before)}`);
+    // Il click apre subito il details; un nodo arriva 40 ms dopo, come un
+    // framework che aggiorna fuori dal click. settle deve aspettarlo.
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: "(() => { document.querySelector('#__cb_fp summary').addEventListener('click', () => setTimeout(() => document.body.appendChild(document.createElement('aside')), 40)); return true; })()", tab_id: tabId });
     await wsManager.sendCommand(MessageType.CLICK, { selector: '#__cb_fp summary', tab_id: tabId });
-    await new Promise((r) => setTimeout(r, 150));
-    const after = await wsManager.sendCommand(MessageType.PAGE_FINGERPRINT, { tab_id: tabId });
+    const after = await wsManager.sendCommand(MessageType.PAGE_FINGERPRINT, { tab_id: tabId, settle: { quiet_ms: 50, max_ms: 250 } });
     if (after.open !== before.open + 1) throw new Error(`open ${before.open} -> ${after.open}`);
+    if (typeof after.settled_ms !== 'number' || after.settled_ms > 250) throw new Error(`settled_ms ${after.settled_ms}`);
+    if (!after.hidden && after.nodes < before.nodes + 1) throw new Error(`late node missed: nodes ${before.nodes} -> ${after.nodes}, settled_ms ${after.settled_ms}`);
     ok(name);
   } catch (e) { fail(name, e.message); }
 }

@@ -1053,12 +1053,12 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
 
 // Impronta per page_changed: pochi interi letti nell'ISOLATED world (nessuna
 // CSP di mezzo), prima e dopo un'azione. Vedi lib/page-fingerprint.js.
-async function cmdPageFingerprint({ tab_id, frame_id }) {
+async function cmdPageFingerprint({ tab_id, frame_id, settle }) {
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: pageFingerprint,
-    args: [null],
+    args: [null, settle ?? null],
   });
   return results?.[0]?.result ?? null;
 }

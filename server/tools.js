@@ -669,9 +669,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // pochi interi più url/title. Un'estensione vecchia o una pagina non
   // iniettabile (chrome://) tornano a url/title da get_tabs: nessun errore,
   // solo meno dettaglio.
-  async function tabSnapshot(tab_id) {
+  async function tabSnapshot(tab_id, settle) {
     try {
-      const fp = await send(MessageType.PAGE_FINGERPRINT, { tab_id });
+      const fp = await send(MessageType.PAGE_FINGERPRINT, { tab_id, ...(settle && { settle }) });
       if (fp && typeof fp === 'object') return fp;
     } catch { /* fallback sotto */ }
     try {
@@ -681,6 +681,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const tab = eff != null ? list.find((t) => t.id === eff) : list.find((t) => t.active);
       return tab ? { url: tab.url, title: tab.title } : null;
     } catch { return null; }
+  }
+
+  // Impronta «dopo» un'azione: l'estensione aspetta che il DOM si fermi
+  // (settled_ms), di solito ~50 ms. Un'estensione vecchia non conosce settle
+  // e risponde subito: allora la pausa fissa di prima e una seconda lettura.
+  const SETTLE = { quiet_ms: 50, max_ms: 250 };
+  async function settledSnapshot(tab_id) {
+    const fp = await tabSnapshot(tab_id, SETTLE);
+    if (fp && 'settled_ms' in fp) return fp;
+    await new Promise((r) => setTimeout(r, 150));
+    return tabSnapshot(tab_id);
   }
 
   // Testo della pagina (o del frame) per il confronto prima/dopo un invio.
@@ -1037,10 +1048,10 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id: frame, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id, before?.url);
-      // Senza wait_after un breve settle: i framework aggiornano il DOM dopo il
-      // click, non dentro; senza, l'impronta "dopo" vedrebbe quella "prima".
-      if (!data?.occluded && (wait_after ?? 'none') === 'none') await new Promise((r) => setTimeout(r, 150));
-      const changed = data?.occluded ? null : pageDelta(before, await tabSnapshot(tab_id));
+      // Senza wait_after l'impronta aspetta che il DOM si fermi: i framework
+      // aggiornano dopo il click, non dentro; senza, "dopo" vedrebbe "prima".
+      const settleAfter = (wait_after ?? 'none') === 'none';
+      const changed = data?.occluded ? null : pageDelta(before, await (settleAfter ? settledSnapshot(tab_id) : tabSnapshot(tab_id)));
       const out = { ...data, ...(waited && { wait_after: waited }), ...(changed && { page_changed: changed }) };
       return {
         content: [{
@@ -1756,8 +1767,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // delta e i ref nuovi evitano il giro di get_interactives dopo.
       const before = await tabSnapshot(tab_id);
       const data = await send(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
-      await new Promise((r) => setTimeout(r, 150));
-      const changed = pageDelta(before, await tabSnapshot(tab_id));
+      const changed = pageDelta(before, await settledSnapshot(tab_id));
       const out = { ...data, ...(changed && { page_changed: changed }) };
       return {
         content: [{

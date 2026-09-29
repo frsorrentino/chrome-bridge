@@ -68,6 +68,13 @@ Server and extension: this release goes to the Chrome Web Store too.
   ignored) and removed come back, or `no changes` in one line. A navigation,
   another scope or an unknown cursor fall back to the full list with a note.
 
+- **`click` and `press_key` wait for the page, not for a clock.** The fixed
+  150 ms pause before reading `page_changed` is gone: the fingerprint now waits
+  in the page until the DOM has been quiet for 50 ms (at most 250 ms), so it
+  also catches an update that lands after the click. Measured end-to-end: 74 ms
+  on a page that adds a node 40 ms after the click. An older extension falls
+  back to the fixed pause.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or

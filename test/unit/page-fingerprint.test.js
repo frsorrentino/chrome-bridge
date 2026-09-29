@@ -64,3 +64,34 @@ test('una pagina vuota dà zeri, non errori', () => {
   assert.equal(fp.open, 0); assert.equal(fp.expanded, 0); assert.equal(fp.checked, 0);
   assert.equal(fp.selected, 0); assert.equal(fp.dialogs, 0);
 });
+
+// settle: MutationObserver finto, perché node non ne ha uno. Le mutazioni si
+// simulano chiamando il callback registrato.
+function withFakeObserver(fn) {
+  const prev = globalThis.MutationObserver;
+  const observers = [];
+  globalThis.MutationObserver = class { constructor(cb) { this.cb = cb; observers.push(this); } observe() {} disconnect() { this.off = true; } };
+  return Promise.resolve(fn(observers)).finally(() => { globalThis.MutationObserver = prev; });
+}
+
+test('settle: DOM fermo → risponde dopo quiet_ms, non dopo max_ms', () => withFakeObserver(async () => {
+  const fp = await pageFingerprint(fakeDoc('<body><p>x</p></body>'), { quiet_ms: 30, max_ms: 1000 });
+  assert.ok(fp.settled_ms >= 30 && fp.settled_ms < 200, `settled_ms=${fp.settled_ms}`);
+  assert.equal(fp.title, 'T');
+}));
+
+test('settle: mutazioni continue → si ferma a max_ms', () => withFakeObserver(async (obs) => {
+  const pending = pageFingerprint(fakeDoc('<body><p>x</p></body>'), { quiet_ms: 30, max_ms: 120 });
+  const iv = setInterval(() => obs[0]?.cb([]), 5);
+  const fp = await pending;
+  clearInterval(iv);
+  assert.ok(fp.settled_ms >= 120 && fp.settled_ms < 300, `settled_ms=${fp.settled_ms}`);
+  assert.ok(obs[0].off, 'observer staccato');
+}));
+
+test('settle: pagina nascosta → subito, con hidden', () => withFakeObserver(() => {
+  const doc = { ...fakeDoc('<body><p>x</p></body>'), hidden: true };
+  const fp = pageFingerprint(doc, { quiet_ms: 30, max_ms: 120 });
+  assert.equal(fp.settled_ms, 0);
+  assert.equal(fp.hidden, true);
+}));
