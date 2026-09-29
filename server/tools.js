@@ -232,9 +232,12 @@ const MIME_BY_EXT = {
  * @param {number} [tab_id] - tab target
  * @returns {Promise<object|null>} risultato dell'attesa, o null se none
  */
-async function applyWaitAfter(send, wait_after, tab_id) {
+async function applyWaitAfter(send, wait_after, tab_id, since_url) {
   if (wait_after === 'navigation') {
-    return await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id });
+    // since_url: l'URL prima dell'azione. Una navigazione veloce può essere già
+    // finita quando l'attesa parte: senza, l'estensione aspettava 5 s un
+    // 'loading' che non arrivava più e rispondeva «No navigation started».
+    return await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id, ...(since_url && { since_url }) });
   }
   if (wait_after === 'networkidle') {
     return await send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
@@ -973,7 +976,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const before = await tabSnapshot(tab_id);
       const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id: frame, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
-      const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id);
+      const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id, before?.url);
       // Senza wait_after un breve settle: i framework aggiornano il DOM dopo il
       // click, non dentro; senza, l'impronta "dopo" vedrebbe quella "prima".
       if (!data?.occluded && (wait_after ?? 'none') === 'none') await new Promise((r) => setTimeout(r, 150));
@@ -1205,13 +1208,19 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, ...(note ? { note } : {}), messages: tail }) }] };
       }
+      let text = (note ? `note=${note}\n` : '') + consoleLines(tail, total);
+      // Con clear le voci restituite sono già cancellate in pagina: tagliare il
+      // fondo del testo le perdeva senza mostrarle. Si accorcia ogni voce,
+      // così compaiono tutte.
+      if (clear && text.length > DEFAULT_MAX_OUTPUT && tail.length) {
+        const per = Math.max(200, Math.floor(DEFAULT_MAX_OUTPUT / tail.length) - 40);
+        const short = tail.map((m) => ({ ...m, args: (m.args ?? []).map((a) => (String(a).length > per ? `${String(a).slice(0, per)}…[cut]` : a)) }));
+        text = (note ? `note=${note}\n` : '') + consoleLines(short, total);
+      }
       return {
         content: [{
           type: 'text',
-          text: truncateText(
-            (note ? `note=${note}\n` : '') + consoleLines(tail, total),
-            DEFAULT_MAX_OUTPUT,
-          ),
+          text: truncateText(text, DEFAULT_MAX_OUTPUT),
         }],
       };
     }
@@ -1431,7 +1440,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id, frame_id).selector : submit_selector;
       const [before, textBefore] = await Promise.all([tabSnapshot(tab_id), submitSel ? pageText(tab_id, frame_id) : null]);
       const data = await send(MessageType.FILL_FORM, { fields: resolved, submit_selector: submitSel, tab_id, frame_id });
-      const waited = await applyWaitAfter(send, wait_after, tab_id);
+      const waited = await applyWaitAfter(send, wait_after, tab_id, before?.url);
       const after = await tabSnapshot(tab_id);
       const changed = pageDelta(before, after);
       // Dopo un invio il modello vuole sapere com'è andata: prima spendeva 1-3

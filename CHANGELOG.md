@@ -50,6 +50,20 @@ Server and extension: this release goes to the Chrome Web Store too.
   https://…/logo.png`) instead of `Uncaught  at ?:0:0`.
 - **Refs carry their frame**, `extract_table` reports an incomplete scan,
   `monitor_network` prints `?` instead of `nullms` (see the commits).
+- **`fill_form` no longer reports what it did not do.** A disabled or
+  readonly field was `success: true`; the submit fired even after a failed
+  field, and a missing submit button passed in silence. Now the field fails,
+  nothing is submitted, and `NOT SUBMITTED: <reason>` heads the reply.
+- **`wait_after: navigation` after a fast navigation.** The wait started
+  after the click and, if the page had already loaded, waited 5 s for a
+  `loading` that never came, then said «No navigation started». It now gets
+  the URL before the action and returns at once when it changed.
+- **Concurrent screenshots.** Two captures read the same pacing slot and woke
+  together; and two captures in one window swapped its active tab. Slots are
+  now reserved before sleeping and captures are serialised per window.
+- **`read_console clear:true` no longer drops entries it deleted.** Entries
+  were cleared in the page, then cut from an oversized reply; now each entry
+  is shortened so every one of them appears.
 - **The first call of a session no longer waits for a 30 s retry.** The
   extension retried an absent server with backoff up to 30 s while the server
   waits 10 s for it: now at most 5 s, and a sleeping worker retries at once on

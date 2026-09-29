@@ -698,7 +698,27 @@ async function withDeadline(tabId, deadlineMs, run, onTimeout, isNegative) {
 // non che la finestra sia in primo piano. Al termine ripristina il tab che
 // era attivo prima e l'eventuale stato minimized della finestra.
 
+// Una cattura per finestra alla volta: due catture concorrenti nella stessa
+// finestra si scambiavano la scheda attiva e una poteva fotografare quella
+// dell'altra.
+const windowLocks = new Map();
 async function withTabVisible(tabId, fn) {
+  const { windowId } = await chrome.tabs.get(tabId);
+  const prev = windowLocks.get(windowId) ?? Promise.resolve();
+  let release;
+  const mine = new Promise((r) => { release = r; });
+  const chain = prev.then(() => mine);
+  windowLocks.set(windowId, chain);
+  await prev;
+  try {
+    return await withTabVisibleUnlocked(tabId, fn);
+  } finally {
+    release();
+    if (windowLocks.get(windowId) === chain) windowLocks.delete(windowId);
+  }
+}
+
+async function withTabVisibleUnlocked(tabId, fn) {
   const tab = await chrome.tabs.get(tabId);
   const win = await chrome.windows.get(tab.windowId);
   const [prevActive] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
@@ -3412,7 +3432,7 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id })
 
 // --- wait_for_navigation ---
 
-async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id }) {
+async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id, since_url }) {
   const tabId = await resolveTabId(tab_id);
   const start = Date.now();
 
@@ -3445,6 +3465,13 @@ async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id }) 
 
   // mode === 'load' : navigazione full-page (tab.status complete)
   const tab = await chrome.tabs.get(tabId);
+
+  // Navigazione già avvenuta fra l'azione e questa attesa: l'URL è cambiato.
+  if (since_url && tab.url && tab.url !== since_url) {
+    if (tab.status !== 'complete') await waitForComplete(tabId, timeout);
+    const now = await chrome.tabs.get(tabId);
+    return { navigated: true, mode: 'load', url: now.url, status: now.status, elapsed: Date.now() - start };
+  }
 
   if (tab.status === 'complete') {
     // Attendi che una navigazione parta (entro min(timeout, 5s))

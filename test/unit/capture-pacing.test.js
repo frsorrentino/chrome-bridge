@@ -56,3 +56,13 @@ test('l\'intervallo di default tiene sotto le 2 catture al secondo', () => {
   const pace = createPacer({ now: () => 0, sleep: async () => {} });
   assert.ok(pace.minIntervalMs > 500, `minIntervalMs=${pace.minIntervalMs}`);
 });
+
+test('due catture concorrenti prenotano slot diversi, non lo stesso', async () => {
+  let t = 1000;
+  const waits = [];
+  const pace = createPacer({ now: () => t, sleep: async (ms) => { waits.push(ms); } });
+  await pace();
+  const [a, b] = await Promise.all([pace(), pace()]);
+  assert.equal(a, 520);
+  assert.equal(b, 1040, 'la seconda aspetta dopo la prima');
+});

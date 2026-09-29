@@ -281,3 +281,11 @@ test('screenshot: stessi pixel della volta prima → nota invece dell\'immagine;
   const changed = await handlers.get('screenshot')({});
   assert.ok(changed.content.some((c) => c.type === 'image'));
 });
+
+test('read_console clear con output enorme: tutte le voci compaiono, accorciate, nessuna persa', async () => {
+  const messages = Array.from({ length: 30 }, (_, i) => ({ level: 'error', args: [`E${i} ` + 'x'.repeat(3000)], timestamp: i }));
+  const handlers = setup({ read_console: { messages, count: 30 } });
+  const text = textOf(await handlers.get('read_console')({ clear: true, limit: 50 }));
+  for (let i = 0; i < 30; i++) assert.ok(text.includes(`E${i} `), `manca E${i}`);
+  assert.doesNotMatch(text, /\[truncated/);
+});
