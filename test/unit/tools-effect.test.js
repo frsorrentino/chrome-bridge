@@ -88,3 +88,25 @@ test('le descrizioni dicono che l\'effetto viene riportato', () => {
   assert.match(handlers.get('type_text').desc, /mismatch/);
   assert.match(handlers.get('fill_form').desc, /mismatch/);
 });
+
+test('press_key: Enter che apre un dialog → page_changed e anteprima dei ref, come click', async () => {
+  let calls = 0;
+  const { handlers, sent } = build((t) => {
+    if (t === MessageType.PAGE_FINGERPRINT) return (calls++ === 0) ? fp() : fp({ dialogs: 1, nodes: 130 });
+    if (t === MessageType.PRESS_KEY) return { pressed: true, key: 'Enter' };
+    if (t === MessageType.GET_INTERACTIVES) return { elements: [{ tag: 'button', text: 'OK', selector: '#ok' }] };
+    throw new Error(`unexpected ${t}`);
+  });
+  const text = textOf(await handlers.get('press_key').handler({ key: 'Enter' }));
+  assert.match(text, /"pressed":\s*true/);
+  assert.match(text, /"dialogs":\s*"\+1"/);
+  assert.deepEqual(sent.map((s) => s.type), [MessageType.PAGE_FINGERPRINT, MessageType.PRESS_KEY, MessageType.PAGE_FINGERPRINT, MessageType.GET_INTERACTIVES]);
+  assert.match(text, /\bn\d+\b/, 'i ref dell\'anteprima seguono il JSON');
+});
+
+test('press_key: pagina stabile → nessun page_changed, nessuna anteprima', async () => {
+  const { handlers, sent } = build((t) => (t === MessageType.PAGE_FINGERPRINT ? fp() : { pressed: true }));
+  const out = JSON.parse(textOf(await handlers.get('press_key').handler({ key: 'ArrowDown' })));
+  assert.ok(!('page_changed' in out));
+  assert.ok(!sent.some((s) => s.type === MessageType.GET_INTERACTIVES));
+});

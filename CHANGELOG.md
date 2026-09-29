@@ -58,6 +58,11 @@ Server and extension: this release goes to the Chrome Web Store too.
   The cursor is tied to the document (page) or to the worker's boot (browser
   source), so a reload does not hide the new entries.
 
+- **`press_key` reports its effect like `click`.** `page_changed` with the
+  DOM delta, and the refs of the visible interactives when the key opened or
+  revealed something (Enter on a form, ArrowDown on a menu): no
+  `get_interactives` turn after it.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or

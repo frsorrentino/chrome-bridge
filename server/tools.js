@@ -1708,7 +1708,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'press_key',
     'Send a key to the focused element (or to selector, focusing it first) as a real keydown/keypress/keyup '
       + 'sequence, so framework handlers fire. For typing a value use type_text; this is for Enter, Tab, Escape, '
-      + 'arrows and shortcuts. Not idempotent: two calls send the key twice.',
+      + 'arrows and shortcuts. Not idempotent: two calls send the key twice. '
+      + 'Returns page_changed like click; when the key opens or reveals something, the refs of the visible interactives follow.',
     {
       key: z.string().describe('e.g. "Enter", "Escape", "Tab", "ArrowDown"'),
       selector: z.string().optional().describe('Target (default: activeElement)'),
@@ -1720,11 +1721,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ key, selector, ctrl, shift, alt, meta, tab_id, frame_id }) => {
+      // Come click: Enter invia, Escape chiude, ArrowDown apre un menu. Il
+      // delta e i ref nuovi evitano il giro di get_interactives dopo.
+      const before = await tabSnapshot(tab_id);
       const data = await send(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
+      await new Promise((r) => setTimeout(r, 150));
+      const changed = pageDelta(before, await tabSnapshot(tab_id));
+      const out = { ...data, ...(changed && { page_changed: changed }) };
       return {
         content: [{
           type: 'text',
-          text: jsonText(data),
+          text: await withPreview(jsonText(out), changed, tab_id),
         }],
       };
     }
