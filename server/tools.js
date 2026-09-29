@@ -718,6 +718,35 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     return preview ? `${text}\n${preview}` : text;
   };
 
+  // Problemi della pagina appena caricata, in poche righe e solo se ci sono:
+  // primo errore di console già riportato al sorgente, richieste fallite. Nel
+  // benchmark debug del 28/09 il modello spendeva due turni (read_console,
+  // monitor_network) per scoprirli. Best-effort: su errore, niente.
+  async function pageProblems(tab_id) {
+    // Letture interne: in un recording sarebbero rumore nel replay.
+    recordSuppressed += 1;
+    try {
+      await send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 100, timeout: 1500, tab_id }).catch(() => {});
+      const [con, net] = await Promise.all([
+        send(MessageType.READ_CONSOLE, { level: 'error', limit: 2, tab_id }).catch(() => null),
+        send(MessageType.MONITOR_NETWORK, { limit: 100, tab_id }).catch(() => null),
+      ]);
+      const errs = Array.isArray(con?.messages) ? con.messages : [];
+      const failed = (Array.isArray(net?.requests) ? net.requests : []).filter((r) => r && (r.error || r.status >= 400));
+      if (!errs.length && !failed.length) return null;
+      const cut = (t, n) => (t.length > n ? `${t.slice(0, n)}…` : t);
+      const lines = [`problems: ${con?.count ?? errs.length} console error(s), ${failed.length} failed request(s)`];
+      for (const [i, m] of errs.entries()) {
+        let text = (m.args ?? []).map(String).join(' ');
+        if (i === 0) text = await sourceMaps.resolve(text).catch(() => text);
+        lines.push(`  error: ${cut(text.replace(/\n\s*/g, ' | '), i === 0 ? 400 : 160)}`);
+      }
+      for (const r of failed.slice(0, 3)) lines.push(`  ${r.method ?? 'GET'} ${cut(String(r.url), 120)} → ${r.status ?? `ERR(${r.error})`}`);
+      lines.push('  (read_console / monitor_network for the rest)');
+      return lines.join('\n');
+    } catch { return null; } finally { recordSuppressed -= 1; }
+  }
+
   // --- get_status ---
   server.tool(
     'get_status',
@@ -828,11 +857,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // Il tab navigato diventa il default di sessione per i comandi successivi
       if (data?.tabId != null) sessionTabId = data.tabId;
       resetRefs(data?.tabId ?? tab_id);
-      const preview = await interactivesPreview(data?.tabId ?? tab_id);
+      const [preview, problems] = await Promise.all([interactivesPreview(data?.tabId ?? tab_id), pageProblems(data?.tabId ?? tab_id)]);
       return {
         content: [{
           type: 'text',
-          text: jsonText(data) + (preview ? `\n${preview}` : ''),
+          text: jsonText(data) + (problems ? `\n${problems}` : '') + (preview ? `\n${preview}` : ''),
         }],
       };
     }

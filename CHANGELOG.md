@@ -41,6 +41,17 @@ Server and extension: this release goes to the Chrome Web Store too.
   command, no model turn between them. `--file flow.js`, `--file -` (stdin)
   or `--code`. No new MCP tool: the count stays 60.
 
+- **Debugging in fewer turns** (the debug task of the 28/09 benchmark took 9
+  turns: console, network, CSS twice, then `http_request` to read the source):
+  - `navigate` reports the page's problems when there are any — first console
+    error already mapped to its source, failed requests with their status —
+    in a few lines under the result;
+  - a source-mapped frame carries its original line of code
+    (`→ src/cart.js:10:3 (renderCart) \`for (const item of cart.items) {\``),
+    from `sourcesContent` or the source file next to the map;
+  - `get_css_styles` says `undefined_vars: ["--brand-primary"]` when a
+    `var()` has no definition and no fallback.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or

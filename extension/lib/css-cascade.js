@@ -401,6 +401,16 @@
       }
     }
 
+    // var(--x) senza --x definita sull'elemento (né ereditata): la proprietà
+    // cade sul valore iniziale. Detto qui, il modello non spende una seconda
+    // chiamata a cercare dove --x sia definita (benchmark debug del 28/09).
+    for (const entry of Object.values(properties)) {
+      const names = [...String(entry.value ?? '').matchAll(/var\(\s*(--[\w-]+)\s*(,)?/g)]
+        .filter((m) => !m[2]).map((m) => m[1]);
+      const missing = [...new Set(names)].filter((n) => String(computedOf(n) ?? '').trim() === '');
+      if (missing.length) entry.undefined_vars = missing;
+    }
+
     const sorted = {};
     for (const k of Object.keys(properties).sort()) sorted[k] = properties[k];
     const out = { selector: opts.selector ?? null, element: describe(el), matched_rules: matched };

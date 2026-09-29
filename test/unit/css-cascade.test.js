@@ -267,4 +267,13 @@ test('var() in una proprietà abbreviata: il valore viene dall\'abbreviata, non 
   assert.equal(bg.value, 'var(--brand-primary)');
   assert.equal(bg.shorthand, 'background');
   assert.equal(bg.computed, 'rgba(0, 0, 0, 0)');
+  assert.deepEqual(bg.undefined_vars, ['--brand-primary'], 'la variabile non è definita da nessuna parte');
+});
+
+test('var() con fallback o con la variabile definita: niente undefined_vars', () => {
+  const rule = new CSSStyleRule('.a', [['color', 'var(--ok)'], ['border-color', 'var(--nope, red)']]);
+  const r = root(sheet([rule], { href: 'https://a.test/s.css' }));
+  const out = run(el({ tag: 'div', classes: ['a'], matches: ['.a'], root: r }), {}, env({ computed: { '--ok': ' #123', color: 'rgb(1, 2, 3)', 'border-color': 'red' } }));
+  assert.equal(out.properties.color.undefined_vars, undefined);
+  assert.equal(out.properties['border-color'].undefined_vars, undefined);
 });

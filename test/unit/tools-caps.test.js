@@ -289,3 +289,23 @@ test('read_console clear con output enorme: tutte le voci compaiono, accorciate,
   for (let i = 0; i < 30; i++) assert.ok(text.includes(`E${i} `), `manca E${i}`);
   assert.doesNotMatch(text, /\[truncated/);
 });
+
+test('navigate riporta i problemi della pagina solo se ci sono', async () => {
+  const withProblems = setup({
+    navigate: { url: 'https://shop.test/', title: 'Shop', tabId: 3 },
+    wait_for_network_idle: { idle: true },
+    read_console: { count: 1, messages: [{ level: 'error', args: ['Cart failed: TypeError: x'] }] },
+    monitor_network: { requests: [{ method: 'GET', url: 'https://shop.test/api/cart', status: 404 }, { method: 'GET', url: 'https://shop.test/a.js', status: 200 }] },
+  });
+  const text = textOf(await withProblems.get('navigate')({ url: 'https://shop.test/' }));
+  assert.match(text, /problems: 1 console error\(s\), 1 failed request\(s\)/);
+  assert.match(text, /GET https:\/\/shop\.test\/api\/cart → 404/);
+  assert.doesNotMatch(text, /a\.js/);
+  const clean = setup({
+    navigate: { url: 'https://ok.test/', title: 'OK', tabId: 4 },
+    wait_for_network_idle: { idle: true },
+    read_console: { count: 0, messages: [] },
+    monitor_network: { requests: [{ method: 'GET', url: 'https://ok.test/x', status: 200 }] },
+  });
+  assert.doesNotMatch(textOf(await clean.get('navigate')({ url: 'https://ok.test/' })), /problems/);
+});

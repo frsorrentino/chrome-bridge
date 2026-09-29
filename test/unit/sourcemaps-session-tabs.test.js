@@ -73,5 +73,19 @@ test('read_console sourcemap=true risolve i frame con i fetch del browser', asyn
   });
   const res = await handlers.get('read_console')({ level: 'error', limit: 50, format: 'lines', sourcemap: true });
   assert.match(res.content[0].text, /bundle\.js:1:11 → src\/cart\.ts:2:4 \(addItem\)/);
-  assert.equal(sent.filter((m) => m.type === MessageType.HTTP_REQUEST).length, 1);
+  // Il bundle (map inline) più il sorgente originale per la riga di codice.
+  assert.equal(sent.filter((m) => m.type === MessageType.HTTP_REQUEST).length, 2);
+});
+
+test('sourcemap: accanto al frame la riga di codice originale, dal sorgente accanto alla map', async () => {
+  const { createResolver } = await import('../../server/sourcemaps.js');
+  const files = {
+    'http://x.test/dist/app.min.js': 'function a(){}\n//# sourceMappingURL=app.min.js.map\n',
+    // Una sola riga generata; il segmento a colonna 0 mappa sulla riga 2 di src/cart.js.
+    'http://x.test/dist/app.min.js.map': JSON.stringify({ version: 3, sources: ['../src/cart.js'], names: [], mappings: 'AACA' }),
+    'http://x.test/src/cart.js': '// header\n  for (const item of cart.items) {\n}\n',
+  };
+  const resolver = createResolver(async (url) => { if (!(url in files)) throw new Error(`404 ${url}`); return files[url]; });
+  const out = await resolver.resolve('TypeError: x\n    at renderCart (http://x.test/dist/app.min.js:1:5)');
+  assert.match(out, /→ \.\.\/src\/cart\.js:2:\d+ `for \(const item of cart\.items\) \{`/);
 });
