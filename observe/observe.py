@@ -69,6 +69,7 @@ DEFAULTS = {"enabled": True, "dir": "", "max_records": 2000, "max_days": 90, "an
             # l'invio anonimo (25/09/2026): l'endpoint del nostro sito che apre la issue con l'account di servizio, senza il
             # nome dell'utente; vuoto = l'opzione non compare
             "endpoint": ""}
+PRIVACY = "https://github.com/frsorrentino/claude-observe/blob/main/PRIVACY.md"   # la nota dell'invio anonimo
 MSG = {
  "it": {
   "observe.summary": "OSSERVAZIONI {tool}: {new} nuove, {again} ricorrenti — `{cmd} list {tool}` (triage: `observe mark ID D|L|S|done`)",
@@ -88,7 +89,10 @@ MSG = {
   "observe.opt_own_desc": "Una issue a tuo nome su {repo}, con gh: puoi seguirla",
   "observe.opt_own_desc_nogh": "Apre nel browser un link GitHub già compilato: la issue esce a tuo nome, puoi seguirla",
   "observe.opt_anon": "Invia in forma anonima",
-  "observe.opt_anon_desc": "La issue la apre il nostro account di servizio, senza il tuo nome",
+  "observe.opt_anon_desc": "Il nostro servizio apre la issue senza il tuo nome e non conserva il tuo IP (privacy: {privacy})",
+  "observe.opt_anon_desc_security": "Il nostro servizio la manda in privato ai maintainer, senza il tuo nome e senza conservare il tuo IP (privacy: {privacy})",
+  "observe.anon_refused": "il servizio anonimo ha rifiutato la segnalazione (HTTP {code}): {error}. Niente è stato inviato",
+  "observe.anon_unreachable": "servizio anonimo non raggiungibile ({reason}), anche al secondo tentativo: niente è stato inviato. Riprova più tardi, o scegli «Invia dal mio GitHub»",
   "observe.opt_private": "Invia in privato dal mio GitHub",
   "observe.opt_private_desc": "Segnalazione privata di vulnerabilità su {repo}: la vedono solo i maintainer, mai una issue pubblica",
   "observe.opt_private_desc_nogh": "Apre la pagina «Report a vulnerability» di {repo} nel browser, con il testo da incollare: la vedono solo i maintainer",
@@ -142,7 +146,10 @@ MSG = {
   "observe.opt_own_desc": "An issue in your name on {repo}, through gh: you can follow it",
   "observe.opt_own_desc_nogh": "Opens a prefilled GitHub link in the browser: the issue goes out in your name, you can follow it",
   "observe.opt_anon": "Send anonymously",
-  "observe.opt_anon_desc": "Our service account opens the issue, without your name",
+  "observe.opt_anon_desc": "Our service opens the issue without your name and keeps no IP (privacy: {privacy})",
+  "observe.opt_anon_desc_security": "Our service sends it privately to the maintainers, without your name and keeping no IP (privacy: {privacy})",
+  "observe.anon_refused": "the anonymous service refused the report (HTTP {code}): {error}. Nothing was sent",
+  "observe.anon_unreachable": "the anonymous service is unreachable ({reason}), also at the second attempt: nothing was sent. Retry later, or choose «Send from my GitHub»",
   "observe.opt_private": "Send privately from my GitHub",
   "observe.opt_private_desc": "A private vulnerability report on {repo}: only the maintainers see it, never a public issue",
   "observe.opt_private_desc_nogh": "Opens the “Report a vulnerability” page of {repo} in the browser, with the text to paste: only the maintainers see it",
@@ -1118,7 +1125,8 @@ def options(tool, t, h, security, has_gh):
         out.append({"label": M("observe.opt_own"), "description": M("observe.opt_own_desc" if has_gh else "observe.opt_own_desc_nogh", repo=repo),
                     "command": f"{base} --send {h}"})
     if str(O.get("endpoint") or "").strip():
-        out.append({"label": M("observe.opt_anon"), "description": M("observe.opt_anon_desc"), "command": f"{base} --send {h} --anonymous"})
+        out.append({"label": M("observe.opt_anon"), "description": M("observe.opt_anon_desc_security" if security else "observe.opt_anon_desc", privacy=PRIVACY),
+                    "command": f"{base} --send {h} --anonymous"})
     if security:
         channel = str(t.get("security") or "").strip()
         if channel == "advisory":
@@ -1160,8 +1168,23 @@ def send_anonymous(tool, t, title, body, recs, security):
                "severity": "high" if any(r.get("severity") == "high" for r in recs) else None, "title": title, "body": body}
     req = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "claude-observe"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read().decode()
+    # un rifiuto del servizio (formato, limite, testo che sembra personale) si dice com'e'; un guasto di rete o di TLS
+    # (27/09: il CDN di SiteGround che rompe il TLS) si riprova una volta. In entrambi i casi niente e' stato inviato
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                raw = r.read().decode()
+            break
+        except urllib.error.HTTPError as e:
+            try:
+                err = str(json.loads(e.read().decode() or "{}").get("error") or e.reason)
+            except (ValueError, AttributeError, OSError):
+                err = str(e.reason)
+            raise ValueError(M("observe.anon_refused", code=e.code, error=err[:300]))
+        except OSError as e:   # URLError, TLS, connessione chiusa, timeout
+            if attempt == 2:
+                raise ValueError(M("observe.anon_unreachable", reason=str(getattr(e, "reason", "") or e)[:200]))
+            time.sleep(2)
     try:
         return str(json.loads(raw).get("url") or url)
     except (ValueError, AttributeError):
