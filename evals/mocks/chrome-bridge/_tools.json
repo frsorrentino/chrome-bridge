@@ -1,0 +1,766 @@
+{
+  "tools": [
+    {
+      "name": "get_tabs",
+      "description": "List every open tab with id, url, title, active flag and mine (created by this session). Read-only. Find a tab_id when the implicit target is not the one you mean. include_windows adds position, size, state and type of each window — needed before moving or tiling. Session tabs gone since the last call come back once in closed_session_tabs with the reason (closed, window_closed, replaced, closed_by_bridge).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "include_windows": {
+            "default": false,
+            "description": "Also return the windows with bounds, state, type and tab count",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "navigate",
+      "description": "Navigate a Chrome tab to a URL. Returns a preview of interactive elements with refs usable in click/type_text/hover.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute URL, or a path resolved against the current page"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "screenshot",
+      "description": "Screenshot of the visible viewport only (PNG), at the current scroll position, or one per viewport preset with presets. Read-only. Activates the tab in the background without stealing window focus, then restores the previous tab. Downscaled to ≤1568px: for fine print, element_screenshot with scale.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "save_to": {
+            "description": "Absolute path: write the PNG there and return the path instead of the content",
+            "type": "string"
+          },
+          "presets": {
+            "description": "Resizes the window per preset, then restores it; not phone emulation. A refused width is reported, not shot. save_to = directory",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mobile",
+                "tablet",
+                "desktop"
+              ]
+            }
+          },
+          "if_changed": {
+            "default": true,
+            "description": "Same pixels as the last screenshot of this tab: a note instead of the image. false = always send it",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "click",
+      "description": "Click an element by CSS selector or by a ref (n1, n2…) from get_interactives or navigate. A real pointer sequence: it can submit, open a dialog or navigate — use wait_after. Not idempotent; a native confirm() blocks the bridge: handle_dialogs first. Returns page_changed (url, title and DOM deltas: nodes, text, open, expanded, checked, dialogs, focus): the effect, without a screenshot; when the click opens or reveals something, the refs of the visible interactives follow, no get_interactives needed.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "CSS selector; \">>>\" pierces shadow DOM. Ignored when ref is given",
+            "type": "string"
+          },
+          "ref": {
+            "description": "From get_interactives, e.g. \"n3\"",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "description": "Click even if occluded",
+            "type": "boolean"
+          },
+          "button": {
+            "default": "left",
+            "description": "right opens the page context menu instead of activating the element",
+            "type": "string",
+            "enum": [
+              "left",
+              "right"
+            ]
+          },
+          "count": {
+            "default": 1,
+            "description": "2 emits dblclick after the two clicks, which is what selects a word or opens an editor",
+            "type": "number"
+          },
+          "trusted": {
+            "default": false,
+            "description": "Real browser input (isTrusted) via chrome.debugger, main frame only: for widgets that ignore synthetic clicks",
+            "type": "boolean"
+          },
+          "wait_after": {
+            "default": "none",
+            "description": "Settle before returning: navigation waits for a page load, networkidle for quiet traffic",
+            "type": "string",
+            "enum": [
+              "none",
+              "navigation",
+              "networkidle"
+            ]
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "type_text",
+      "description": "Put text into an input, textarea or contenteditable, by selector or ref. Replaces the whole value through the native setter (React/Vue controlled inputs register it) and fires input and change. mode=keys emits keydown/input/keyup per character for autocomplete and masked fields: slower, use it only when mode=set leaves the field empty. Returns value_after; mismatch=true means the field did not keep the value: retry with mode=keys.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "CSS selector; \">>>\" pierces shadow DOM. Ignored when ref is given",
+            "type": "string"
+          },
+          "ref": {
+            "description": "From get_interactives, e.g. \"n3\"",
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "Value to type; empty string clears the field"
+          },
+          "mode": {
+            "default": "set",
+            "description": "set = assign value; keys = per-char events (autocomplete/masked); trusted = real input via chrome.debugger, main frame",
+            "type": "string",
+            "enum": [
+              "set",
+              "keys",
+              "trusted"
+            ]
+          },
+          "wait_after": {
+            "default": "none",
+            "description": "Settle before returning: navigation waits for a page load, networkidle for quiet traffic",
+            "type": "string",
+            "enum": [
+              "none",
+              "navigation",
+              "networkidle"
+            ]
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "read_page",
+      "description": "Read the page as text (default), markdown, raw HTML, or accessibility tree. Read-only. markdown keeps headings, links and tables at a fraction of the HTML cost. Expensive on big pages: HTML on a large table costs tens of thousands of tokens for data you filter anyway — prefer extract_table/extract for repeated content, get_interactives for click targets.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "default": "text",
+            "description": "text strips markup; markdown keeps headings/links/tables far cheaper than html; accessibility = a11y tree",
+            "type": "string",
+            "enum": [
+              "text",
+              "markdown",
+              "html",
+              "accessibility"
+            ]
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          },
+          "max_length": {
+            "default": 50000,
+            "description": "Max output chars",
+            "type": "number"
+          },
+          "save_to": {
+            "description": "Absolute path: write the page there and return the path instead of the content",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_page_info",
+      "description": "Page metadata: title, url, visibility, doctype, charset, meta tags, scripts, stylesheets, links and forms. visibility=hidden means the window is minimized, covered or in the background: the page does not render (screenshots fail) and its timers slow down. dev.server names a dev server (vite, webpack-dev-server, next, nuxt) and dev.overlay carries the compiler message when an error overlay is open: read it before treating the page as valid.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "query_dom",
+      "description": "Query DOM elements by CSS selector, returning structure, attributes, bounding rect, and computed styles.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector; \">>>\" pierces shadow DOM. Matches all, not just the first"
+          },
+          "properties": {
+            "description": "Computed styles to include, e.g. [\"color\"]",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max elements returned, from the top of the match list",
+            "type": "number"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "get_css_styles",
+      "description": "Why an element looks the way it does: for each CSS property the winning declaration — selector, stylesheet, rule position, !important, @layer, @media — and the ones it overrides, like the Styles panel of DevTools; query_dom gives the computed value, this gives who set it. Read-only, from the CSSOM: stylesheets of another origin without CORS are opaque and listed by href; user-agent styles, @container and @scope rules are not evaluated. properties narrows the output.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "CSS selector; \">>>\" pierces shadow DOM. Only the first match is inspected"
+          },
+          "properties": {
+            "description": "Only these, e.g. [\"margin-top\",\"--brand\"]; margin covers its longhands. Omitted = every property a matching rule sets",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_inherited": {
+            "default": false,
+            "description": "Also inherited properties (color, font-*, custom properties) with the ancestor that sets them",
+            "type": "boolean"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "selector"
+        ]
+      }
+    },
+    {
+      "name": "read_console",
+      "description": "Read console messages captured since page load, incl. uncaught errors and unhandled rejections.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "clear": {
+            "default": false,
+            "description": "Clear buffer after read",
+            "type": "boolean"
+          },
+          "level": {
+            "default": "all",
+            "description": "all merges every level in one chronological list",
+            "type": "string",
+            "enum": [
+              "all",
+              "log",
+              "warn",
+              "error",
+              "info",
+              "debug"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "description": "Most recent; buffer 1000",
+            "type": "number"
+          },
+          "format": {
+            "default": "lines",
+            "description": "lines is compact; json keeps timestamps and stack traces",
+            "type": "string",
+            "enum": [
+              "lines",
+              "json"
+            ]
+          },
+          "sourcemap": {
+            "default": false,
+            "description": "Resolve bundle.js:line:col frames to source files through their source maps",
+            "type": "boolean"
+          },
+          "since": {
+            "description": "cursor from the previous read: only newer entries, nothing deleted",
+            "type": "string"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "monitor_network",
+      "description": "Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets; source=websocket: connections and messages. format=har exports HAR 1.2.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "clear": {
+            "default": false,
+            "description": "Clear buffer after read",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "page",
+            "description": "page: XHR/fetch only; browser: static assets too; websocket: connections and messages",
+            "type": "string",
+            "enum": [
+              "page",
+              "browser",
+              "websocket"
+            ]
+          },
+          "format": {
+            "default": "lines",
+            "description": "har exports HAR 1.2 for external tooling",
+            "type": "string",
+            "enum": [
+              "lines",
+              "json",
+              "har"
+            ]
+          },
+          "limit": {
+            "default": 100,
+            "description": "Most recent; buffer 1000",
+            "type": "number"
+          },
+          "since": {
+            "description": "cursor from the previous read: only newer entries, nothing deleted",
+            "type": "string"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "wait_for",
+      "description": "Block until a condition holds: element, text, function (JS expression; needs the \"Allow user scripts\" toggle), navigation (mode=spa for client-side routes), network_idle. Polls until timeout (10s element/function, 15s the rest) then **returns `found: false` with a reason instead of raising**: check it, or a failed wait reads as success. Read-only.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string",
+            "enum": [
+              "element",
+              "text",
+              "function",
+              "navigation",
+              "network_idle"
+            ],
+            "description": "element and text need selector or text; function needs expression"
+          },
+          "selector": {
+            "description": "condition=element; with condition=text it narrows the search to that subtree",
+            "type": "string"
+          },
+          "text": {
+            "description": "Literal text to wait for (condition=text), matched case-insensitively",
+            "type": "string"
+          },
+          "expression": {
+            "description": "JS expression (condition=function)",
+            "type": "string"
+          },
+          "visible": {
+            "default": false,
+            "description": "Element must also be visible",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "load",
+            "description": "spa = pushState/popstate/hashchange",
+            "type": "string",
+            "enum": [
+              "load",
+              "spa"
+            ]
+          },
+          "idle_ms": {
+            "default": 500,
+            "description": "Quiet period ms (network_idle)",
+            "type": "number"
+          },
+          "timeout": {
+            "description": "Max ms (default 10000; 15000 navigation/network_idle)",
+            "type": "number"
+          },
+          "interval": {
+            "description": "Poll ms, min 50",
+            "type": "number"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "condition"
+        ]
+      }
+    },
+    {
+      "name": "fill_form",
+      "description": "Batch fill form fields with React-compatible events. Handles input, select, checkbox, radio, and textarea. Fields and submit take a CSS selector or a ref (n1, n2…) from navigate/get_interactives. With submit_selector it also submits, so a repeated call submits twice — not safe to retry blindly; after a submit, after_submit carries url, title and the text the page gained (the confirmation or the errors). Each field reports value_after and mismatch; page_changed carries the DOM delta, and the refs of what appeared.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "selector": {
+                  "description": "CSS selector; ignored when ref is given",
+                  "type": "string"
+                },
+                "ref": {
+                  "description": "From navigate or get_interactives, e.g. \"n3\"",
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Text, option value or label; for checkbox/radio \"true\"/\"false\"",
+                  "type": "string"
+                },
+                "checked": {
+                  "description": "Checkbox/radio instead of value: true checks, false unchecks",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "{selector or ref, value or checked} per field"
+          },
+          "submit_selector": {
+            "description": "Submit button to click after filling",
+            "type": "string"
+          },
+          "submit_ref": {
+            "description": "Submit button as a ref, instead of submit_selector",
+            "type": "string"
+          },
+          "wait_after": {
+            "default": "none",
+            "description": "Settle before returning: navigation waits for a page load, networkidle for quiet traffic",
+            "type": "string",
+            "enum": [
+              "none",
+              "navigation",
+              "networkidle"
+            ]
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "element_screenshot",
+      "description": "Screenshot cropped to one element or to a viewport region (PNG), optionally enlarged. Read-only. The cheapest image in the set, because it carries only the box you asked for — and with scale the way to read fine print: crop the box, zoom it, verify.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "CSS selector; \">>>\" pierces shadow DOM. The element is scrolled into view first",
+            "type": "string"
+          },
+          "region": {
+            "description": "Box in viewport CSS px (the rect frame of get_interactives/query_dom), instead of selector",
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "width": {
+                "type": "number"
+              },
+              "height": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ]
+          },
+          "scale": {
+            "default": 1,
+            "description": "Enlargement of the crop, 1-4; output still capped at 1568px",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "press_key",
+      "description": "Send a key to the focused element (or to selector, focusing it first) as a real keydown/keypress/keyup sequence, so framework handlers fire. For typing a value use type_text; this is for Enter, Tab, Escape, arrows and shortcuts. Not idempotent: two calls send the key twice. Returns page_changed like click; when the key opens or reveals something, the refs of the visible interactives follow.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "e.g. \"Enter\", \"Escape\", \"Tab\", \"ArrowDown\""
+          },
+          "selector": {
+            "description": "Target (default: activeElement)",
+            "type": "string"
+          },
+          "ctrl": {
+            "default": false,
+            "description": "Hold Control",
+            "type": "boolean"
+          },
+          "shift": {
+            "default": false,
+            "description": "Hold Shift",
+            "type": "boolean"
+          },
+          "alt": {
+            "default": false,
+            "description": "Hold Alt",
+            "type": "boolean"
+          },
+          "meta": {
+            "default": false,
+            "description": "Hold Meta (Command/Windows)",
+            "type": "boolean"
+          },
+          "trusted": {
+            "default": false,
+            "description": "Real browser key (isTrusted) via chrome.debugger, main frame only",
+            "type": "boolean"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "dismiss_overlays",
+      "description": "Dismiss cookie banners/modal overlays: OneTrust, Cookiebot, Usercentrics, then generic heuristic. Idempotent.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_interactives",
+      "description": "List actionable elements (buttons, links, inputs, [role], [onclick]) with ready-to-use CSS selector, label, position, flags. Prefer this over dumping HTML to discover selectors.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "description": "Limit search (CSS selector)",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "description": "Max elements returned; raise it on a dense page",
+            "type": "number"
+          },
+          "visible_only": {
+            "default": true,
+            "description": "false also lists elements hidden or scrolled out of view",
+            "type": "boolean"
+          },
+          "format": {
+            "default": "lines",
+            "description": "lines is compact; json adds full attributes per element",
+            "type": "string",
+            "enum": [
+              "lines",
+              "json"
+            ]
+          },
+          "since": {
+            "description": "cursor from the previous list: only added (+), changed (~) and removed elements; same scope, frame and tab",
+            "type": "string"
+          },
+          "frame_id": {
+            "description": "Target iframe id from get_frames; omitted = main frame",
+            "type": "number"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "assert",
+      "description": "Assert a page condition, polling until timeout: element exists/visible (optionally with count or containing text), text on page, tab url/title. Patterns: substring, or \"/…/\" for regex. Recorded flows replay it as a test.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "selector": {
+            "description": "Element the assertion is about; \">>>\" pierces shadow DOM",
+            "type": "string"
+          },
+          "state": {
+            "default": "attached",
+            "description": "attached means present in the DOM, visible also requires a rendered box",
+            "type": "string",
+            "enum": [
+              "attached",
+              "visible"
+            ]
+          },
+          "text": {
+            "description": "In the element (with selector) or anywhere on the page",
+            "type": "string"
+          },
+          "count": {
+            "description": "Exact match count for selector",
+            "type": "number"
+          },
+          "url": {
+            "description": "Tab url pattern",
+            "type": "string"
+          },
+          "title": {
+            "description": "Tab title pattern",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 5000,
+            "description": "Max ms to wait for the condition before failing",
+            "type": "number"
+          },
+          "tab_id": {
+            "description": "Target tab; omitted = last tab navigated in this session, else the active one",
+            "type": "number"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -2,5 +2,7 @@
 type: llm
 ---
 
-PASS if the reply sets out to take the screenshot in the user's own Chrome (the tab they already have, or a tab it opens there) using a chrome-bridge tool or the chrome-bridge CLI, and says how it will judge the overlap (element_screenshot / query_dom / measure_spacing, or a pixel comparison) rather than asking the user to describe the page.
-FAIL if the reply proposes a headless browser, Playwright, Puppeteer, Selenium or a generic "I cannot see your screen" answer, or asks the user to paste the HTML.
+The browser is mocked: on the page, the fixed `aside.sidebar` spans x=0..280 and `table#orders` starts at x=240, so the sidebar covers the first 40 px of the table (the «Order #» column).
+
+PASS if the reply, after taking the screenshot in the user's own Chrome with a chrome-bridge tool, answers that yes, the sidebar overlaps the orders table (about 40 px, or the first column cut).
+FAIL if the reply says there is no overlap, proposes a headless browser, Playwright, Puppeteer or Selenium, gives a generic "I cannot see your screen" answer, or asks the user to paste the HTML.
