@@ -4,14 +4,14 @@
 
 Same model (Claude Sonnet 5), same tasks, same morning and same `claude`
 version, **all runs included** — n=5 per arm and per task, 29/09/2026, Chrome
-Bridge 1.25.0 (commit `50bf457`, the release) with its default 43 tools.
+Bridge 1.25.1 (commit `32b230c`) with its default 43 tools.
 Medians, range in brackets.
 
 | Task | Chrome Bridge | Claude in Chrome | Ratio |
 | :--- | :--- | :--- | :--- |
-| **Form fill** | 3.0 turns (3) / $0.154 | 14.0 turns (14-15) / $0.428 | **4.67× turns, 2.77× cost** |
-| **1500-row table lookup** | 3.0 turns (3) / $0.149 | 7.0 turns (5-7) / $0.506 | **2.33× turns, 3.40× cost** |
-| **Debug a broken page** | 6.0 turns (4-8) / $0.219 | 28.0 turns (21-44) / $0.688 | **4.67× turns, 3.15× cost** |
+| **Form fill** | 3.0 turns (3) / $0.155 | 14.0 turns (14-15) / $0.428 | **4.67× turns, 2.76× cost** |
+| **1500-row table lookup** | 3.0 turns (3-4) / $0.149 | 7.0 turns (5-7) / $0.506 | **2.33× turns, 3.39× cost** |
+| **Debug a broken page** | 3.0 turns (3-4) / $0.162 | 28.0 turns (21-44) / $0.688 | **9.33× turns, 4.25× cost** |
 
 Correct answers: 15/15 for Chrome Bridge, 12/15 for Claude in Chrome.
 
@@ -20,9 +20,11 @@ fails with 404, a JavaScript error to trace back to its source line through
 the source map, and a button made invisible by an undefined CSS variable.
 Chrome Bridge's `navigate` already reports the error (mapped to
 `src/cart.js:10` with the line of code) and the failed request, and
-`get_css_styles` flags the undefined variable: two calls at best; in 3 runs
-out of 5 the model also loaded the skill, in 4 it read the source with
-`http_request`. Claude in Chrome
+`get_css_styles` flags the undefined variable: two calls, and in one run out
+of five a third to read the source with `http_request`. In 1.25.0 the skill's
+description also matched debugging requests and the model loaded it first in
+about a third of the runs, two turns each time: 1.25.1 scopes the skill and
+puts the debug rule in the server instructions. Claude in Chrome
 reaches the same findings with about 14 `javascript_tool` and 4
 `read_network_requests` calls per run.
 

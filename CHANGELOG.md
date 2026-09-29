@@ -28,6 +28,23 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.25.1 — not released
+
+Server and skill only: the extension stays 1.25.0, nothing new for the Chrome
+Web Store.
+
+### Fixed
+
+- **Debugging a page no longer loads the skill first.** Its description said
+  «use whenever the user wants to test, debug…», so a debugging request loaded
+  it before the first tool call: in 7 of 20 debug runs on 29/09, about two
+  turns more each time. The description now scopes the skill to multi-step
+  recipes and says it is not needed to debug one page; the rule that matters
+  (`navigate` reports the source-mapped error and the failed requests,
+  `get_css_styles` names the rule) moved into the MCP server instructions,
+  already in context. Measured, n=5: the debug task from 6 turns to 3, the
+  skill loaded in 0 runs, form and table unchanged.
+
 ## 1.25.0 — 2026-09-29
 
 Server and extension: this release goes to the Chrome Web Store too.

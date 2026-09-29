@@ -21,7 +21,44 @@ non wall-clock.
 3. Si riportano **mediana, min-max e n**, non la sola media: con n=2 la media
    nasconde una varianza che nei nostri dati arriva a 7,4×.
 
-## Risultato pubblicabile — 1.25.0, set appaiato del 2026-09-29
+## Risultato pubblicabile — 1.25.1, set appaiato del 2026-09-29
+
+- **chrome-bridge 1.25.1 in rilascio**, server del commit `32b230c`
+  (estensione identica alla 1.25.0), `--launch --headless`, `--caps core` (43
+  tool), `alwaysLoad: true`. Cambia solo il testo: descrizione della skill,
+  che non si attiva più per il debug di una pagina, e una riga sul debug nelle
+  istruzioni del server MCP. Run `v1251a`, 15:09-15:19.
+- **Claude in Chrome**: le stesse run `v125b` della mattina (regola 1).
+- n=5 per arm e per task, tutte le run incluse.
+
+| task | arm | turni | out tok | cache read | $/run | risposta corretta |
+|---|---|---:|---:|---:|---:|---:|
+| **form** | **chrome-bridge** | **3,0** (3) | **462** (432-554) | **183k** (183-183k) | **0,155** (0,153-0,156) | 5/5 |
+| form | claude-in-chrome | 14,0 (14-15) | 2488 (2161-2768) | 566k (554-625k) | 0,428 (0,410-0,448) | 5/5 |
+| **heavy** | **chrome-bridge** | **3,0** (3-4) | **319** (302-341) | **182k** (182-182k) | **0,149** (0,149-0,150) | 5/5 |
+| heavy | claude-in-chrome | 7,0 (5-7) | 1630 (1475-2756) | 457k (225-460k) | 0,506 (0,309-0,511) | 3/5 |
+| **debug** | **chrome-bridge** | **3,0** (3-4) | **822** (759-997) | **182k** (181-252k) | **0,162** (0,161-0,175) | 5/5 |
+| debug | claude-in-chrome | 28,0 (21-44) | 9742 (5924-12705) | 1307k (1076-2146k) | 0,688 (0,585-0,899) | 4/5 |
+
+Rapporti cic/bridge sulle mediane:
+
+| task | turni | token output | cache read | costo |
+|---|---:|---:|---:|---:|
+| form | **4,67×** | 5,39× | 3,09× | **2,76×** |
+| heavy | **2,33×** | 5,11× | 2,51× | **3,39×** |
+| debug | **9,33×** | 11,85× | 7,19× | **4,25×** |
+
+Risposte corrette: 15/15 contro 12/15. `python3 bench/aggregate.py
+bridge:v1251a cic:v125b` riproduce le tabelle.
+
+- **Perché il debug passa da 6 a 3 turni.** Nelle 20 run debug precedenti
+  della giornata la skill si caricava in 7 (6,6 turni medi con la skill, 4,6
+  senza); qui in 0 su 5. Tutte e 5 le run fanno `navigate` e
+  `get_css_styles`, una legge anche il sorgente con `http_request`.
+- Form e heavy non cambiano rispetto alla 1.25.0 (3 turni, costo entro
+  l'1%): la skill non si caricava già prima.
+
+## Set della release 1.25.0 (commit `50bf457`) — superato dalla 1.25.1
 
 - **chrome-bridge 1.25.0**, server ed estensione del commit `50bf457`, quello
   della release (versione 1.25.0 nei sette file), `--launch --headless`,
