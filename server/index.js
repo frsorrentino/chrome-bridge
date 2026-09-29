@@ -60,6 +60,9 @@ async function main() {
     // non N (un ciclo di list_changed costava CPU a Claude Code, 2.1.271).
     debouncedNotificationMethods: ['notifications/tools/list_changed'],
     instructions: [
+      // Eval del 29/09: con Claude in Chrome richiesto e assente, il modello
+      // ripiegava su chrome-bridge senza chiedere (2 casi su 2).
+      'If the user names another browser tool (e.g. Claude in Chrome) and it is not available, say so and ask; do not switch to chrome-bridge on your own.',
       'Selectors on DOM tools pierce shadow DOM with ">>>" ("my-app >>> button.save").',
       'tab_id omitted = the tab last navigated/created in this session, else the active tab. frame_id omitted = main frame (list frames with get_frames).',
       'To find targets use get_interactives, not read_page(html); its refs (n1, n2…) are the ref param of click/type_text/hover and of fill_form fields, and navigate already returns them.',
