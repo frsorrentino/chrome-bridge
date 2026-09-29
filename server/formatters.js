@@ -18,13 +18,15 @@ export function networkLines(tail, total) {
 }
 
 /** Elementi interattivi: flag (disabled/hidden/occluded) solo quando anomali. Ref n1..nN in testa se presente. */
+export function interactiveLine(e, { rect = true } = {}) {
+  const flags = [!e.enabled && 'disabled', !e.visible && 'hidden', e.occluded && 'occluded'].filter(Boolean).join(',');
+  const pos = rect && e.rect ? `@${e.rect.x},${e.rect.y} ${e.rect.width}x${e.rect.height}` : '';
+  return [...(e.ref ? [e.ref] : []), `${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), pos].join('\t');
+}
+
 export function interactivesLines(data) {
   const els = data?.elements ?? [];
-  const lines = els.map((e) => {
-    const flags = [!e.enabled && 'disabled', !e.visible && 'hidden', e.occluded && 'occluded'].filter(Boolean).join(',');
-    const rect = e.rect ? `@${e.rect.x},${e.rect.y} ${e.rect.width}x${e.rect.height}` : '';
-    return [...(e.ref ? [e.ref] : []), `${e.selector}`, `${e.tag}${e.type ? `:${e.type}` : ''}`, e.text ?? '', ...(flags ? [flags] : []), rect].join('\t');
-  });
+  const lines = els.map((e) => interactiveLine(e));
   const note = data?.note ? ` note=${data.note}` : '';
   return `interactives count=${data?.count ?? els.length}${note}\n${lines.join('\n')}`;
 }

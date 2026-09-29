@@ -24,7 +24,7 @@ import { createResolver } from './sourcemaps.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { windowLayout } from './layouts.js';
 import { fingerprintDelta } from './effect.js';
-import { consoleLines, networkLines, interactivesLines, linksLines } from './formatters.js';
+import { consoleLines, networkLines, interactivesLines, interactiveLine, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
 // Sovrascrivibile nei test: i layout sono un file solo, non una directory.
@@ -599,6 +599,37 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       reg.bySel.delete(selKey(old.frame, old.selector));
     }
     return reg.byRef.size;
+  }
+
+  // Liste di get_interactives ricordate per il diff con since: per ogni
+  // cursore la chiave della richiesta, il floor dei ref (una navigazione lo
+  // alza) e la firma di ogni elemento senza la posizione, così uno scroll non
+  // segna tutto come cambiato. Poche liste: il diff serve al giro successivo.
+  const interactivesSnaps = new Map();
+  const SNAPS_MAX = 20;
+  let snapSeq = 0;
+
+  function interactivesDiff(since, { tab_id, frame_id, scope, visible_only }, elements) {
+    const reg = refRegistry(tab_id);
+    const key = [refsKey(tab_id), frame_id ?? 0, scope ?? '', visible_only ?? true].join('\u0000');
+    const sigs = new Map(elements.filter((e) => e.ref).map((e) => [e.ref, interactiveLine(e, { rect: false })]));
+    const cursor = `i${++snapSeq}`;
+    interactivesSnaps.set(cursor, { key, floor: reg.floor, sigs });
+    while (interactivesSnaps.size > SNAPS_MAX) interactivesSnaps.delete(interactivesSnaps.keys().next().value);
+    if (!since) return { cursor };
+    const prev = interactivesSnaps.get(since);
+    if (!prev) return { cursor, note: `cursor ${since} unknown or expired: full list` };
+    if (prev.key !== key) return { cursor, note: `cursor ${since} is for another tab, frame, scope or visible_only: full list` };
+    if (prev.floor !== reg.floor) return { cursor, note: 'the page navigated since the cursor: full list, new refs' };
+    const added = []; const changed = [];
+    for (const e of elements) {
+      if (!e.ref) continue;
+      const old = prev.sigs.get(e.ref);
+      if (old == null) added.push(e);
+      else if (old !== sigs.get(e.ref)) changed.push(e);
+    }
+    const removed = [...prev.sigs.keys()].filter((r) => !sigs.has(r));
+    return { cursor, diff: { added, changed, removed } };
   }
 
   // Una navigazione cambia pagina: i selettori vecchi potrebbero trovare altro.
@@ -2555,20 +2586,38 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       visible_only: z.boolean().optional().default(true)
         .describe('false also lists elements hidden or scrolled out of view'),
       format: z.enum(['lines', 'json']).optional().default('lines').describe('lines is compact; json adds full attributes per element'),
+      since: z.string().optional().describe('cursor from the previous list: only added (+), changed (~) and removed elements; same scope, frame and tab'),
       frame_id: frameId,
       tab_id: tabId,
     },
-    async ({ scope, limit, visible_only, format, frame_id, tab_id }) => {
+    async ({ scope, limit, visible_only, format, since, frame_id, tab_id }) => {
       const data = await send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
+      const elements = data?.elements ?? [];
       // Ref stabili per selettore e frame, memorizzati per click/type_text/hover
-      assignRefs(tab_id, data?.elements ?? [], frame_id);
+      assignRefs(tab_id, elements, frame_id);
+      const { cursor, diff, note } = interactivesDiff(since, { tab_id, frame_id, scope, visible_only }, elements);
       if ((format ?? 'lines') === 'json') {
-        return { content: [{ type: 'text', text: jsonText(data) }] };
+        const body = diff
+          ? { count: data?.count ?? elements.length, since, added: diff.added, changed: diff.changed, removed: diff.removed }
+          : { ...data, ...(note && { since_note: note }) };
+        return { content: [{ type: 'text', text: jsonText({ ...body, cursor }) }] };
+      }
+      const cursorLine = `\ncursor=${cursor} (pass as since to get only what changed)`;
+      if (diff) {
+        const { added, changed, removed } = diff;
+        const head = `interactives count=${data?.count ?? elements.length} since=${since}`;
+        const text = !added.length && !changed.length && !removed.length
+          ? `${head}: no changes`
+          : [`${head}: +${added.length} ~${changed.length} -${removed.length}`,
+            ...added.map((e) => `+ ${interactiveLine(e)}`),
+            ...changed.map((e) => `~ ${interactiveLine(e)}`),
+            ...(removed.length ? [`removed: ${removed.join(' ')}`] : [])].join('\n');
+        return { content: [{ type: 'text', text: truncateText(text, DEFAULT_MAX_OUTPUT) + cursorLine }] };
       }
       return {
         content: [{
           type: 'text',
-          text: truncateText(interactivesLines(data), DEFAULT_MAX_OUTPUT),
+          text: truncateText(interactivesLines(data) + (note ? `\nnote: ${note}` : ''), DEFAULT_MAX_OUTPUT) + cursorLine,
         }],
       };
     }

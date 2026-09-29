@@ -63,6 +63,11 @@ Server and extension: this release goes to the Chrome Web Store too.
   revealed something (Enter on a form, ArrowDown on a menu): no
   `get_interactives` turn after it.
 
+- **`get_interactives` with `since`.** The list ends with `cursor=…`; passed
+  back as `since`, only the elements added (`+`), changed (`~`, position
+  ignored) and removed come back, or `no changes` in one line. A navigation,
+  another scope or an unknown cursor fall back to the full list with a note.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or
