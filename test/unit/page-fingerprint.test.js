@@ -81,7 +81,9 @@ test('settle: DOM fermo → risponde dopo quiet_ms, non dopo max_ms', () => with
 }));
 
 test('settle: mutazioni continue → si ferma a max_ms', () => withFakeObserver(async (obs) => {
-  const pending = pageFingerprint(fakeDoc('<body><p>x</p></body>'), { quiet_ms: 30, max_ms: 120 });
+  // quiet_ms più lungo di max_ms: la quiete non può arrivare prima, sotto
+  // qualunque carico; si misura solo che il tetto tenga.
+  const pending = pageFingerprint(fakeDoc('<body><p>x</p></body>'), { quiet_ms: 5000, max_ms: 120 });
   const iv = setInterval(() => obs[0]?.cb([]), 5);
   const fp = await pending;
   clearInterval(iv);

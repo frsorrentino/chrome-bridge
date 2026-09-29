@@ -29,7 +29,7 @@ export function pageFingerprint(doc, settle) {
           resolve({ ...pageFingerprint(d), settled_ms: Math.round(now - t0) });
         } else setTimeout(tick, 10);
       };
-      setTimeout(tick, quiet);
+      setTimeout(tick, Math.min(quiet, max));
     });
   }
   const count = (sel) => { try { return d.querySelectorAll(sel).length; } catch { return 0; } };
