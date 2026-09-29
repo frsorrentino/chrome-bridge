@@ -21,7 +21,57 @@ non wall-clock.
 3. Si riportano **mediana, min-max e n**, non la sola media: con n=2 la media
    nasconde una varianza che nei nostri dati arriva a 7,4×.
 
-## Risultato pubblicabile — set appaiato del 2026-09-29
+## Risultato pubblicabile — 1.25.0, set appaiato del 2026-09-29
+
+- **chrome-bridge 1.25.0**, server ed estensione del commit `50bf457`, quello
+  della release (versione 1.25.0 nei sette file), `--launch --headless`,
+  `--caps core` (43 tool, il default distribuito), `alwaysLoad: true` come nel
+  plugin. Skill: quella del repo allo stesso commit (`.claude/skills/chrome-bridge`),
+  cioè quella del mattino più la riga su `get_interactives since`. Run `v125f`,
+  14:21-14:34.
+- **Claude in Chrome**: le run `v125b` della mattina (sotto). Il loro arm non
+  usa chrome-bridge, quindi il cambio di versione non le tocca (regola 1):
+  stessa data, stesso `claude` 2.1.284, stesso `claude-sonnet-5`.
+- n=5 per arm e per task, tutte le run incluse.
+
+| task | arm | turni | out tok | cache read | $/run | risposta corretta |
+|---|---|---:|---:|---:|---:|---:|
+| **form** | **chrome-bridge** | **3,0** (3) | **479** (441-555) | **183k** (140-183k) | **0,154** (0,154-0,317) | 5/5 |
+| form | claude-in-chrome | 14,0 (14-15) | 2488 (2161-2768) | 566k (554-625k) | 0,428 (0,410-0,448) | 5/5 |
+| **heavy** | **chrome-bridge** | **3,0** (3) | **292** (272-356) | **182k** (182-182k) | **0,149** (0,148-0,149) | 5/5 |
+| heavy | claude-in-chrome | 7,0 (5-7) | 1630 (1475-2756) | 457k (225-460k) | 0,506 (0,309-0,511) | 3/5 |
+| **debug** | **chrome-bridge** | **6,0** (4-8) | **1426** (1015-2282) | **339k** (183-492k) | **0,219** (0,166-0,262) | 5/5 |
+| debug | claude-in-chrome | 28,0 (21-44) | 9742 (5924-12705) | 1307k (1076-2146k) | 0,688 (0,585-0,899) | 4/5 |
+
+Rapporti cic/bridge sulle mediane (>1 = chrome-bridge ne usa meno):
+
+| task | turni | token output | cache read | costo |
+|---|---:|---:|---:|---:|
+| form | **4,67×** | 5,19× | 3,10× | **2,77×** |
+| heavy | **2,33×** | 5,58× | 2,51× | **3,40×** |
+| debug | **4,67×** | 6,83× | 3,85× | **3,15×** |
+
+Risposte corrette: 15/15 contro 12/15. `python3 bench/aggregate.py
+bridge:v125f cic:v125b` riproduce le tabelle.
+
+- **Debug, un turno in più della mattina** (6 contro 5 di `v125d`): in 3 run su 5 il modello carica la skill (`Skill` 0,6 per run)
+  e in 4 su 5 legge il sorgente con `http_request` (0,8). Le due serie si
+  sovrappongono (4-8 contro 3-5): è varianza del modello, non un cambio del
+  server, che nel debug non tocca `click` né `press_key`.
+- **Stesso commit con tutti i 60 tool** (`--caps all`, run `v125e`,
+  12:18-14:19): turni 3 / 3 / 5, costo 2,70× / 3,33× / 3,65×, 15/15.
+  Lanciata per errore senza `CHROME_BRIDGE_CAPS=core`; la si tiene come
+  controllo: 17 tool in più nello schema non cambiano il quadro.
+- **Due tentativi di heavy-5 in `v125e` esclusi, con causa**
+  (`bench/results/excluded-0929/bridge-heavy-v125e-5*`): il Chrome headless
+  lanciato dal server non si è collegato entro i 30 s dell'attesa, mentre un
+  render video di un'altra sessione teneva il carico a 11-17. Misurato subito
+  dopo sullo stesso Chromebook: 59 s e oltre 60 s sotto carico, 9-27 s a
+  carico 8. Sul PC Windows, per escludere una regressione, 1.24.0 e 1.25.0 si
+  collegano in 1,1-1,3 s (6 prove ciascuna). La run è stata rifatta a carico
+  3,3.
+
+## Set del mattino del 2026-09-29 (1.25.0 in sviluppo) — superato dalla release
 
 - **chrome-bridge 1.25.0 in sviluppo**, server ed estensione del commit
   `a9ea298` (in `package.json` ancora 1.24.0: il numero si alza al rilascio),

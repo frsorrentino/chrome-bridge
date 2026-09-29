@@ -4,13 +4,14 @@
 
 Same model (Claude Sonnet 5), same tasks, same morning and same `claude`
 version, **all runs included** — n=5 per arm and per task, 29/09/2026, Chrome
-Bridge 1.25.0 in development (commit `a9ea298`). Medians, range in brackets.
+Bridge 1.25.0 (commit `50bf457`, the release) with its default 43 tools.
+Medians, range in brackets.
 
 | Task | Chrome Bridge | Claude in Chrome | Ratio |
 | :--- | :--- | :--- | :--- |
-| **Form fill** | 3.0 turns (3) / $0.163 | 14.0 turns (14-15) / $0.428 | **4.67× turns, 2.63× cost** |
-| **1500-row table lookup** | 3.0 turns (3) / $0.156 | 7.0 turns (5-7) / $0.506 | **2.33× turns, 3.25× cost** |
-| **Debug a broken page** | 5.0 turns (3-5) / $0.198 | 28.0 turns (21-44) / $0.688 | **5.60× turns, 3.47× cost** |
+| **Form fill** | 3.0 turns (3) / $0.154 | 14.0 turns (14-15) / $0.428 | **4.67× turns, 2.77× cost** |
+| **1500-row table lookup** | 3.0 turns (3) / $0.149 | 7.0 turns (5-7) / $0.506 | **2.33× turns, 3.40× cost** |
+| **Debug a broken page** | 6.0 turns (4-8) / $0.219 | 28.0 turns (21-44) / $0.688 | **4.67× turns, 3.15× cost** |
 
 Correct answers: 15/15 for Chrome Bridge, 12/15 for Claude in Chrome.
 
@@ -19,7 +20,9 @@ fails with 404, a JavaScript error to trace back to its source line through
 the source map, and a button made invisible by an undefined CSS variable.
 Chrome Bridge's `navigate` already reports the error (mapped to
 `src/cart.js:10` with the line of code) and the failed request, and
-`get_css_styles` flags the undefined variable: two calls. Claude in Chrome
+`get_css_styles` flags the undefined variable: two calls at best; in 3 runs
+out of 5 the model also loaded the skill, in 4 it read the source with
+`http_request`. Claude in Chrome
 reaches the same findings with about 14 `javascript_tool` and 4
 `read_network_requests` calls per run.
 
@@ -28,8 +31,8 @@ answer. The harness favours Claude in Chrome on one point: its arm may use
 `Bash` and `Read` (it read the source file from disk in the debug runs), the
 Chrome Bridge arm may not.
 
-The inclusion rule, every raw run (the six replaced after a DNS outage
-included, with their cause) and the harness limits are in
+The inclusion rule, every raw run (the six replaced after a DNS outage and
+the two failed Chrome launches under machine load included, with their cause) and the harness limits are in
 [bench/RESULTS.md](../bench/RESULTS.md). The previous set (27/09, 1.23.2:
 2.50× turns and 1.92× cost on the form) is kept there.
 
