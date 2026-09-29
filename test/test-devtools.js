@@ -836,6 +836,32 @@ async function testToolsNoMatch(tabId) {
   }
 }
 
+// Input fidato via chrome.debugger: la pagina vede isTrusted=true, e Enter su
+// un campo invia il form (effetto di default che un evento sintetico non ha).
+async function testTrustedInput(tabId) {
+  const name = 'trusted click, type and key: isTrusted events, Enter submits';
+  try {
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: `(() => {
+      const f = document.createElement('form'); f.id = '__cb_tf'; f.action = 'javascript:void 0';
+      f.innerHTML = '<input id="__cb_ti"><button id="__cb_tb" type="button">b</button>';
+      document.body.appendChild(f);
+      window.__cbT = { click: null, key: null, submitted: false };
+      f.querySelector('#__cb_tb').addEventListener('click', (e) => { window.__cbT.click = e.isTrusted; });
+      f.querySelector('#__cb_ti').addEventListener('keydown', (e) => { window.__cbT.key = e.isTrusted; });
+      f.addEventListener('submit', (e) => { e.preventDefault(); window.__cbT.submitted = true; });
+      return true; })()`, tab_id: tabId });
+    const c = await wsManager.sendCommand(MessageType.CLICK, { selector: '#__cb_tb', trusted: true, tab_id: tabId });
+    if (!c.trusted || !c.clicked) throw new Error(`click: ${JSON.stringify(c)}`);
+    const t = await wsManager.sendCommand(MessageType.TYPE_TEXT, { selector: '#__cb_ti', text: 'ciao fidato', mode: 'trusted', tab_id: tabId });
+    if (t.value_after !== 'ciao fidato' || t.mismatch) throw new Error(`type: ${JSON.stringify(t)}`);
+    await wsManager.sendCommand(MessageType.PRESS_KEY, { key: 'Enter', selector: '#__cb_ti', trusted: true, tab_id: tabId });
+    const r = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: 'JSON.stringify(window.__cbT)', tab_id: tabId });
+    const st = JSON.parse(r.result);
+    if (st.click !== true || st.key !== true || st.submitted !== true) throw new Error(`page saw ${r.result}`);
+    ok(name);
+  } catch (e) { fail(name, e.message); }
+}
+
 async function closedPort() {
   const srv = createServer();
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
@@ -993,6 +1019,9 @@ async function main() {
     // 1.23.4
     await testElementCommandsNoMatch(testTabId);
     await testToolsNoMatch(testTabId);
+
+    // 1.26.0
+    await testTrustedInput(testTabId);
     await testNavigateConnectionRefused(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);

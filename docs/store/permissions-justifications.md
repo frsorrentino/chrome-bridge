@@ -54,6 +54,10 @@ Powers the manage_downloads tool (list, wait for completion) and save_page, so a
 
 Powers the save_page tool, which captures the current page as MHTML to the user's own disk for offline inspection.
 
+## debugger
+
+Powers the opt-in trusted input of the click, type_text and press_key tools (trusted: true, or mode: "trusted"): some web components ignore synthetic events and only react to real browser input. The extension attaches the debugger to the one tab the user is automating only for the duration of that single action, dispatches the mouse or keyboard input through the Input domain, and detaches immediately; it is never attached otherwise, and no page data is read through it.
+
 ## Host permission: <all_urls>
 
 The extension is a general-purpose web-development automation bridge: the user points it at whatever site they are developing or testing (localhost apps, staging servers, production sites). The target is unknowable in advance, so access to all URLs is required. The extension acts only on explicit user commands received from localhost and performs no autonomous browsing.

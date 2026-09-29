@@ -19,7 +19,8 @@
     "clipboardWrite",
     "downloads",
     "pageCapture",
-    "webRequestAuthProvider"
+    "webRequestAuthProvider",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

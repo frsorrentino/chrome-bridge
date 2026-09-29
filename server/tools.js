@@ -1038,14 +1038,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       force:    z.boolean().optional().default(false).describe('Click even if occluded'),
       button:   z.enum(['left', 'right']).optional().default('left').describe('right opens the page context menu instead of activating the element'),
       count:    z.number().optional().default(1).describe('2 emits dblclick after the two clicks, which is what selects a word or opens an editor'),
+      trusted:  z.boolean().optional().default(false).describe('Real browser input (isTrusted) via chrome.debugger, main frame only: for widgets that ignore synthetic clicks'),
       wait_after: waitAfter,
       tab_id:   tabId,
       frame_id: frameId,
     },
-    async ({ selector, ref, force, button, count, wait_after, tab_id, frame_id }) => {
+    async ({ selector, ref, force, button, count, trusted, wait_after, tab_id, frame_id }) => {
       const { selector: target, frame_id: frame } = resolveTarget(selector, ref, tab_id, frame_id);
       const before = await tabSnapshot(tab_id);
-      const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, frame_id: frame, tab_id });
+      const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, ...(trusted && { trusted: true }), frame_id: frame, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
       const waited = data?.occluded ? null : await applyWaitAfter(send, wait_after, tab_id, before?.url);
       // Senza wait_after l'impronta aspetta che il DOM si fermi: i framework
@@ -1073,7 +1074,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Ignored when ref is given'),
       ref:      z.string().optional().describe('From get_interactives, e.g. "n3"'),
       text:     z.string().describe('Value to type; empty string clears the field'),
-      mode:     z.enum(['set', 'keys']).optional().default('set').describe('set = assign value; keys = per-char events (autocomplete/masked)'),
+      mode:     z.enum(['set', 'keys', 'trusted']).optional().default('set').describe('set = assign value; keys = per-char events (autocomplete/masked); trusted = real input via chrome.debugger, main frame'),
       wait_after: waitAfter,
       tab_id:   tabId,
       frame_id: frameId,
@@ -1759,14 +1760,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       shift: z.boolean().optional().default(false).describe('Hold Shift'),
       alt: z.boolean().optional().default(false).describe('Hold Alt'),
       meta: z.boolean().optional().default(false).describe('Hold Meta (Command/Windows)'),
+      trusted: z.boolean().optional().default(false).describe('Real browser key (isTrusted) via chrome.debugger, main frame only'),
       tab_id: tabId,
       frame_id: frameId,
     },
-    async ({ key, selector, ctrl, shift, alt, meta, tab_id, frame_id }) => {
+    async ({ key, selector, ctrl, shift, alt, meta, trusted, tab_id, frame_id }) => {
       // Come click: Enter invia, Escape chiude, ArrowDown apre un menu. Il
       // delta e i ref nuovi evitano il giro di get_interactives dopo.
       const before = await tabSnapshot(tab_id);
-      const data = await send(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, tab_id, frame_id });
+      const data = await send(MessageType.PRESS_KEY, { key, selector, ctrl, shift, alt, meta, ...(trusted && { trusted: true }), tab_id, frame_id });
       const changed = pageDelta(before, await settledSnapshot(tab_id));
       const out = { ...data, ...(changed && { page_changed: changed }) };
       return {

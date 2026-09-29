@@ -13,6 +13,7 @@ import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 import { findTextInPage } from './lib/find-text.js';
 import { elementOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
+import { withDebugger, keyEvents, mouseClickEvents } from './lib/trusted-input.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -914,9 +915,88 @@ async function cmdExecuteJs({ code, tab_id, frame_id }) {
   }
 }
 
-async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'left', count = 1 }) {
+// --- Input fidato (chrome.debugger), solo su richiesta ---
+// La pagina prepara il bersaglio (punto da cliccare, fuoco e selezione del
+// campo); gli eventi li genera il browser, con isTrusted=true. Solo il frame
+// principale: le coordinate di Input.* sono quelle del viewport della scheda.
+async function trustedTarget(tabId, frame_id, selector, what) {
+  if (frame_id) throw new Error('trusted input works in the main frame only: omit frame_id, or retry without trusted');
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, kind) => {
+      function deepQuery(s) {
+        if (!s.includes('>>>')) return document.querySelector(s);
+        const parts = s.split('>>>').map((x) => x.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = sel ? deepQuery(sel) : (document.activeElement || document.body);
+      if (!el) return { missing: true };
+      if (kind === 'point') {
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+        const top = document.elementFromPoint(x, y);
+        const occluded = top && top !== el && !el.contains(top) && !top.contains(el);
+        return { x, y, tagName: el.tagName, text: (el.textContent || '').substring(0, 100), occluded: Boolean(occluded),
+          occluder: occluded ? (top.id ? `#${top.id}` : top.tagName.toLowerCase()) : null };
+      }
+      if (kind === 'none') return { tagName: el.tagName.toLowerCase() };
+      el.focus();
+      if (kind === 'focus') return { tagName: el.tagName.toLowerCase() };
+      // select: fuoco e contenuto selezionato, così insertText lo sostituisce
+      if (typeof el.select === 'function') el.select();
+      else if (el.isContentEditable) { const range = document.createRange(); range.selectNodeContents(el); const sl = getSelection(); sl.removeAllRanges(); sl.addRange(range); }
+      return { tagName: el.tagName.toLowerCase() };
+    },
+    args: [selector ?? null, what],
+    world: 'MAIN',
+  });
+  const out = results?.[0]?.result;
+  if (!out || out.missing) throw new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
+  return out;
+}
+
+async function trustedClick(tabId, { selector, frame_id, force, button, count }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'point');
+  if (t.occluded && !force) return { clicked: false, occluded: true, occluder: { selector: t.occluder } };
+  await withDebugger(tabId, async (send) => {
+    for (const ev of mouseClickEvents(t.x, t.y, { button, count })) await send('Input.dispatchMouseEvent', ev);
+  });
+  return { clicked: true, trusted: true, button, count, tagName: t.tagName, text: t.text };
+}
+
+async function trustedType(tabId, { selector, text, frame_id }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'select');
+  await withDebugger(tabId, (send) => send('Input.insertText', { text }));
+  const back = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { const a = document.activeElement; return a ? String(a.isContentEditable ? a.textContent : (a.value ?? '')) : ''; },
+    world: 'MAIN',
+  });
+  const after = back?.[0]?.result ?? '';
+  return { typed: true, trusted: true, tagName: t.tagName, value_after: after, mismatch: after !== text };
+}
+
+async function trustedKey(tabId, { key, selector, frame_id, ...mods }) {
+  const t = await trustedTarget(tabId, frame_id, selector, selector ? 'focus' : 'none');
+  await withDebugger(tabId, async (send) => {
+    for (const ev of keyEvents(key, mods)) await send('Input.dispatchKeyEvent', ev);
+  });
+  return { key, trusted: true, target: String(t.tagName || '').toLowerCase(), modifiers: Object.entries(mods).filter(([, v]) => v).map(([m]) => m) };
+}
+
+async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'left', count = 1, trusted = false }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedClick(tabId, { selector, frame_id, force, button, count });
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
@@ -980,6 +1060,7 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   if (text === undefined) throw new Error('Missing required parameter: text');
   const tabId = await resolveTabId(tab_id);
+  if (mode === 'trusted') return trustedType(tabId, { selector, text, frame_id });
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
@@ -3345,9 +3426,10 @@ async function cmdHover({ selector, tab_id, frame_id }) {
 
 // --- press_key ---
 
-async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = false, meta = false, tab_id, frame_id }) {
+async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = false, meta = false, trusted = false, tab_id, frame_id }) {
   if (!key) throw new Error('Missing required parameter: key');
   const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedKey(tabId, { key, selector, frame_id, ctrl, shift, alt, meta });
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),

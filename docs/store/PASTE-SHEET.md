@@ -157,6 +157,12 @@ Power the clipboard tool, which lets the user read/write the clipboard as part o
 Powers the manage_downloads tool (list, wait for completion) and save_page, so automation can verify file-download flows.
 ```
 
+**debugger:**
+
+```
+Powers the opt-in trusted input of the click, type_text and press_key tools (trusted: true, or mode: "trusted"): some web components ignore synthetic events and only react to real browser input. The extension attaches the debugger to the one tab the user is automating only for the duration of that single action, dispatches the mouse or keyboard input through the Input domain, and detaches immediately; it is never attached otherwise, and no page data is read through it.
+```
+
 **pageCapture:**
 
 ```

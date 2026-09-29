@@ -28,6 +28,28 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.26.0 — not released
+
+Extension change with a new permission: the Chrome Web Store review is
+stricter, and Chrome disables the extension for current users until they
+accept the new permission once.
+
+### Added
+
+- **Trusted input, on request.** `click({trusted:true})`,
+  `type_text({mode:'trusted'})` and `press_key({trusted:true})` send real
+  browser input through `chrome.debugger` (`Input.dispatchMouseEvent`,
+  `Input.insertText`, `Input.dispatchKeyEvent`): the page sees
+  `isTrusted: true`, and default actions happen (Enter submits the form).
+  For widgets that ignore synthetic events. The debugger attaches to the tab
+  only for that action and detaches at once; main frame only. Without
+  `trusted` nothing changes. New permission: `debugger`.
+
+### Changed
+
+- **observe synced with claude-observe `49f39d3`:** the report can go out
+  through an anonymous service, besides the user's own GitHub.
+
 ## 1.25.1 — 2026-09-29
 
 Server and skill only: the extension stays 1.25.0, nothing new for the Chrome
