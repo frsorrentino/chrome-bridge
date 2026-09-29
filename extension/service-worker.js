@@ -1985,8 +1985,10 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
           const readOnly = el.readOnly;
           let chosen = null;
 
+          // Un campo disabilitato o in sola lettura non si compila: prima era
+          // success:true con un avviso, e il modello lo dava per fatto.
           if (disabled || readOnly) {
-            report.push({ selector, success: true, tagName: tag, type, warning: disabled ? 'disabled' : 'readonly' });
+            report.push({ selector, success: false, tagName: tag, type, error: `field is ${disabled ? 'disabled' : 'readonly'}: value not set` });
             continue;
           }
 
@@ -2038,17 +2040,26 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
         }
       }
 
+      // Niente invio se un campo è fallito (si invierebbe un modulo diverso da
+      // quello chiesto), e un pulsante che non c'è si dice.
+      let submit = null;
       if (submitSel) {
+        const failed = report.filter((r) => !r.success).length;
         const btn = document.querySelector(submitSel);
-        if (btn) btn.click();
+        if (failed) submit = { submitted: false, reason: `${failed} field(s) failed: not submitted` };
+        else if (!btn) submit = { submitted: false, reason: `submit button not found: ${submitSel}` };
+        else { btn.click(); submit = { submitted: true }; }
       }
 
-      return report;
+      return { report, submit };
     },
     args: [fields, submit_selector || null],
     world: 'MAIN',
   });
-  return { fields: results?.[0]?.result ?? [] };
+  const out = results?.[0]?.result ?? {};
+  // Compatibilità: una pagina vecchia che restituisce l'array nudo.
+  if (Array.isArray(out)) return { fields: out };
+  return { fields: out.report ?? [], ...(out.submit ?? {}) };
 }
 
 // --- viewport_resize ---

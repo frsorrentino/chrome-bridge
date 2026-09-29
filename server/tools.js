@@ -1436,7 +1436,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const changed = pageDelta(before, after);
       // Dopo un invio il modello vuole sapere com'è andata: prima spendeva 1-3
       // turni fra find_text, extract e read_page per leggere la conferma.
-      const afterSubmit = submitSel && textBefore != null
+      // submitted:false (campo fallito o pulsante assente): niente attesa di 2 s
+      // per una conferma che non arriverà.
+      const afterSubmit = submitSel && textBefore != null && data?.submitted !== false
         ? await submitOutcome(tab_id, frame_id, textBefore, after)
         : null;
       const out = {
@@ -1448,7 +1450,12 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // I campi che non hanno tenuto il valore in testa, in chiaro: sono la
       // riga che il modello deve leggere prima del JSON.
       const mism = (data?.fields ?? []).filter((f) => f && f.mismatch);
-      const head = mism.length ? mism.map((f) => `mismatch: ${f.selector} (${'checked_after' in f ? `checked_after=${f.checked_after}` : `value_after=${JSON.stringify(f.value_after ?? null)}`})`).join('\n') + '\n' : '';
+      const failedFields = (data?.fields ?? []).filter((f) => f && f.success === false);
+      const head = [
+        ...(submitSel && data?.submitted === false ? [`NOT SUBMITTED: ${data.reason ?? 'unknown reason'}`] : []),
+        ...failedFields.map((f) => `failed: ${f.selector} (${f.error})`),
+        ...mism.map((f) => `mismatch: ${f.selector} (${'checked_after' in f ? `checked_after=${f.checked_after}` : `value_after=${JSON.stringify(f.value_after ?? null)}`})`),
+      ].map((l) => l + '\n').join('');
       return {
         content: [{
           type: 'text',

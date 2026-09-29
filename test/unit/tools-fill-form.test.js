@@ -115,3 +115,14 @@ test('un campo senza value né checked dà un errore che lo nomina e non invia n
   await assert.rejects(handlers.get('fill_form')({ fields: [{ selector: '#privacy' }] }), /field #privacy needs value or checked/);
   assert.equal(sent.filter((s) => s.type === 'fill_form').length, 0);
 });
+
+test('fill_form: campo fallito o pulsante assente → NOT SUBMITTED in testa, niente attesa della conferma', async () => {
+  const { handlers, sent } = setup({
+    ...formPage(),
+    fill_form: () => ({ fields: [{ selector: '#nome', success: false, error: 'field is disabled: value not set' }], submitted: false, reason: '1 field(s) failed: not submitted' }),
+  });
+  const text = textOf(await handlers.get('fill_form')({ fields: [{ selector: '#nome', value: 'x' }], submit_selector: '#go' }));
+  assert.match(text, /^NOT SUBMITTED: 1 field\(s\) failed/);
+  assert.match(text, /failed: #nome \(field is disabled/);
+  assert.equal(JSON.parse(text.split('\n').filter((l) => l.startsWith('{')).join('')).after_submit, undefined);
+});
