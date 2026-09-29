@@ -74,5 +74,7 @@ test("l'indice delle ricette nel nucleo e i file in recipes/ coincidono", () => 
   const listed = [...CORE.matchAll(/`recipes\/([a-z0-9-]+\.md)`/g)].map((m) => m[1]).sort();
   const files = readdirSync(new URL('recipes/', SKILL_DIR)).filter((f) => f.endsWith('.md')).sort();
   assert.deepEqual(listed, files);
-  assert.ok(CORE.length < 12000, `il nucleo della skill resta corto: ${CORE.length} byte`);
+  // Il nucleo tiene anche le ricette di debug (lette in 2 run debug su 5 del
+  // 29/09, e un Read negato costava turni): resta comunque sotto i 23,4 KB di prima.
+  assert.ok(CORE.length < 14000, `il nucleo della skill resta corto: ${CORE.length} byte`);
 });
