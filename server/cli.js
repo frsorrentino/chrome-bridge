@@ -37,7 +37,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'window_layout', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence']);
+const VIRTUAL_COMMANDS = new Set(['status', 'window_layout', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence', 'run']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -244,9 +244,50 @@ async function replay(client, params) {
   return out.join('\n');
 }
 
+// ─── run: code mode ──────────────────────────────────────────────
+// Uno script JS che chiama i tool MCP veri (stessi handler del server: ref,
+// after_submit di fill_form, where di extract_table), con cicli e condizioni,
+// in un solo comando: il modello non sta in mezzo fra un passo e l'altro.
+// Gira nel Node dell'utente come qualunque script che l'agente lancia da shell.
+export async function runScript(client, code, { port = DEFAULT_PORT } = {}) {
+  const { registerTools } = await import('./tools.js');
+  const { z } = await import('zod');
+  const tools = new Map();
+  registerTools(
+    { tool: (name, _desc, shape, ...rest) => tools.set(name, { shape, handler: rest[rest.length - 1] }) },
+    { isConnected: () => true, mode: 'relay', host: '127.0.0.1', port, sendCommand: (t, p) => client.sendCommand(t, p) },
+    'all',
+    {},
+  );
+  const toValue = (res) => {
+    const text = (res?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    const images = (res?.content ?? []).filter((c) => c.type === 'image').length;
+    try { return JSON.parse(text); } catch { /* testo con righe, non JSON puro */ }
+    return images ? { text, images_omitted: images } : text;
+  };
+  const cb = new Proxy({}, {
+    get: (_, name) => {
+      if (typeof name !== 'string' || name === 'then') return undefined;
+      const t = tools.get(name);
+      if (!t) throw new Error(`run: unknown tool ${name}`);
+      return async (args = {}) => toValue(await t.handler(z.object(t.shape).parse(args), {}));
+    },
+  });
+  const log = [];
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+  const fn = new AsyncFunction('cb', 'log', code);
+  const result = await fn(cb, (...a) => log.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')));
+  return { result: result ?? null, ...(log.length && { log }) };
+}
+
 // ─── Dispatch ────────────────────────────────────────────────────
 
 async function run(client, command, params, opts) {
+  if (command === 'run') {
+    const code = params.code ?? (params.file === '-' ? await readStdin() : params.file ? await readFile(params.file, 'utf8') : null);
+    if (!code) throw new Error('run requires --file script.js (or - for stdin) or --code "..."');
+    return runScript(client, code, { port: parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10) });
+  }
   if (command === 'replay') {
     return replay(client, params);
   }
@@ -458,6 +499,7 @@ Commands:
   ${commands}
 
 Examples:
+  chrome-bridge run --file flow.js          # code mode: JS with cb.<tool>(args), loops, one command
   chrome-bridge tabs
   chrome-bridge navigate --url https://example.com
   chrome-bridge read_console --tab-id 42 --level error | head -20
@@ -473,6 +515,12 @@ Examples:
   chrome-bridge watch --wait deploy --timeout 3600 && notify-send 'deploy done'   # after watch action=add name=deploy
   chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 async function main() {

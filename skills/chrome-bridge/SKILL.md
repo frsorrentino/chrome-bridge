@@ -92,6 +92,18 @@ The `chrome-bridge` binary runs the same commands through the running bridge;
 output can be piped. The model never sees these unless this section tells it:
 propose them for batches, logs and anything repetitive.
 
+Several steps you already know (click through 20 rows, fill, check, loop until
+a condition) → one `chrome-bridge run`: a JS body where `cb.<tool>(args)` calls
+the same tools you have (refs, `fill_form`, `extract_table` filters included),
+with loops and ifs; only its `return` value comes back. One command instead of
+a turn per step:
+
+```
+chrome-bridge run --code 'await cb.navigate({url:"https://crm.test/list"});
+const out = []; for (const id of ["A1","B2"]) { await cb.fill_form({fields:[{selector:"#q",value:id}], submit_selector:"#go"});
+out.push((await cb.extract_table({where:{id}})).rows[0]); } return out;'
+```
+
 | Say | Run |
 |---|---|
 | "check every link" | `chrome-bridge check_links --scope same-origin` |

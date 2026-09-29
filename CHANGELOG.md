@@ -32,6 +32,15 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
 Server and extension: this release goes to the Chrome Web Store too.
 
+### Added
+
+- **Code mode in the CLI: `chrome-bridge run`.** A JS body where
+  `cb.<tool>(args)` calls the same handlers as the MCP tools (refs,
+  `fill_form` with `after_submit`, `extract_table` filters), with loops and
+  conditions; only the `return` value comes back. Several known steps in one
+  command, no model turn between them. `--file flow.js`, `--file -` (stdin)
+  or `--code`. No new MCP tool: the count stays 60.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or
