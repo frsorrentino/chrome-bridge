@@ -9,15 +9,16 @@ with your extensions and your cookies — works in it, and hands it back. What
 only a person can do (a login, a 2FA code, a CAPTCHA, a choice) comes back to
 you through `handoff`: a banner in the page, you act, the agent continues.**
 
-Measured against the official browser extension (paired runs, 27/09/2026, n=5
-per task, same model): filling a form, 2.5× fewer turns and 1.9× lower cost;
-finding one row in a 1,500-row table, 2.3× lower cost in about the same number
-of turns. ~3× the toolset and no paid plan. 60
+Measured against the official browser extension (paired runs, 29/09/2026, n=5
+per task, same model): filling a form, 4.7× fewer turns and 2.6× lower cost;
+finding one row in a 1,500-row table, 2.3× fewer turns and 3.2× lower cost;
+debugging a broken page, 5.6× fewer turns and 3.5× lower cost. 15 correct
+answers out of 15, against 12 ([bench/RESULTS.md](bench/RESULTS.md)). ~3× the toolset and no paid plan. 60
 web-development tools (navigation, DOM inspection, visual regression, audits,
 network mocking) over a local WebSocket bridge, plus a headless instance for
 CI. Self-hosted, local-only. Works on ChromeOS.
 
-![The same form filled in 6 turns instead of 15 — 2.5× fewer turns on the form, about half the cost on the form and on a 1,500-row table (paired runs, 27/09/2026, n=5)](assets/readme/card1-race.png)
+![The same form filled in 3 turns instead of 14 — 4.7× fewer turns on the form, 2.6-3.5× lower cost on form, 1,500-row table and debugging (paired runs, 29/09/2026, n=5)](assets/readme/card1-race.png)
 
 ## Quickstart
 
