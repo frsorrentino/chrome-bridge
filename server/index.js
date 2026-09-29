@@ -68,6 +68,9 @@ async function main() {
       // qui e valgono più di qualunque ottimizzazione di schema.
       'Several fields: one fill_form (submit_selector submits in the same call), not repeated type_text: one turn instead of N.',
       'Tables: extract_table (where/columns filtered server-side) or extract, never read_page: a big table through read_page costs tens of thousands of tokens.',
+      // Debug del 29/09: in 7 run su 20 il modello caricava la skill prima di
+      // agire e pagava ~2 turni. La regola che serve sta qui, già in contesto.
+      'Debugging a page: navigate already reports the first console error mapped to its source line and the failed requests with status; get_css_styles names the rule behind a style and flags undefined_vars. Start there; no skill or recipe needed.',
       'Detail in a screenshot: element_screenshot (selector or region, scale), not another full one. To check an outcome: assert or wait_for poll for you, no screenshot.',
       // Il blocco più frequente sul campo (Meta Ads Manager, 23/09/2026): tre
       // attese scadute e due screenshot falliti prima di capire che la
