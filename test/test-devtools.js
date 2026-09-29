@@ -209,6 +209,32 @@ async function testReadConsole(tabId) {
 // 1.25.0: una scheda aperta dall'agente registra la rete fin dal caricamento.
 // Prima la prima monitor_network tornava vuota e la richiesta fallita
 // all'avvio (il caso tipico da debuggare) non si vedeva.
+// 1.25.0: il cursore di read_console restituisce solo le voci nuove, senza cancellare.
+async function testConsoleCursor(tabId) {
+  const name = 'read_console: since cursor returns only newer entries';
+  const log = (msg) => wsManager.sendCommand(MessageType.EXECUTE_JS, {
+    code: `(() => { const s = document.createElement('script'); s.textContent = "console.log('${msg}')"; document.head.appendChild(s); s.remove(); })()`,
+    tab_id: tabId,
+  });
+  try {
+    await log('__cb_cursor_a__');
+    await new Promise((r) => setTimeout(r, 200));
+    const first = await wsManager.sendCommand(MessageType.READ_CONSOLE, { tab_id: tabId });
+    if (!first.cursor || !String(first.cursor).includes(':')) throw new Error(`no cursor: ${JSON.stringify(first.cursor)}`);
+    await log('__cb_cursor_b__');
+    await new Promise((r) => setTimeout(r, 200));
+    const next = await wsManager.sendCommand(MessageType.READ_CONSOLE, { since: first.cursor, tab_id: tabId });
+    const texts = next.messages.map((m) => (m.args ?? []).join(' '));
+    if (!texts.some((t) => t.includes('__cb_cursor_b__'))) throw new Error('new entry missing');
+    if (texts.some((t) => t.includes('__cb_cursor_a__'))) throw new Error(`old entry repeated: ${JSON.stringify(texts)}`);
+    const again = await wsManager.sendCommand(MessageType.READ_CONSOLE, { tab_id: tabId });
+    if (!again.messages.some((m) => (m.args ?? []).join(' ').includes('__cb_cursor_a__'))) throw new Error('since deleted entries');
+    ok(name);
+  } catch (e) {
+    fail(name, e.message);
+  }
+}
+
 async function testNetworkFromLoad() {
   const name = 'monitor_network: requests made during page load are captured';
   const http = createHttpServer((req, res) => {
@@ -873,6 +899,7 @@ async function main() {
     await testReadConsole(testTabId);
     await testMonitorNetwork(testTabId);
     await testNetworkFromLoad();
+    await testConsoleCursor(testTabId);
 
     // New 12 tests
     await testWaitForElement(testTabId);

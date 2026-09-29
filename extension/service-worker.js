@@ -1734,7 +1734,7 @@ async function cmdInjectCss({ css, tab_id }) {
 // limit = 0 quando il server non lo manda: un server più VECCHIO di questa
 // estensione (caso normale, la CWS ha latenza di review) fa lo slice da sé, e un
 // default in pagina gli consegnerebbe meno voci di quelle che ha chiesto.
-async function cmdReadConsole({ clear = false, level = 'all', limit = 0, tab_id }) {
+async function cmdReadConsole({ clear = false, level = 'all', limit = 0, since = '', tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   const results = await chrome.scripting.executeScript({
@@ -1743,18 +1743,25 @@ async function cmdReadConsole({ clear = false, level = 'all', limit = 0, tab_id 
     // il modello non vedrà. E `clear` rimuove solo le voci effettivamente
     // restituite (e solo del level richiesto): cancellare l'intero buffer
     // distruggeva messaggi che nessuno aveva letto.
-    func: (shouldClear, filterLevel, lim) => {
+    func: (shouldClear, filterLevel, lim, since) => {
       const hooked = !!window.__chromeBridge_consoleHooked;
       const logs = window.__chromeBridge_consoleLogs || [];
-      const filtered = filterLevel === 'all' ? logs : logs.filter((l) => l.level === filterLevel);
+      // Cursore "documento:seq": dopo una ricarica il seq riparte da 1, e un
+      // cursore del documento precedente non deve nascondere le voci nuove.
+      const doc = String(Math.round(performance.timeOrigin));
+      const [sDoc, sSeq] = String(since || '').split(':');
+      const after = sDoc === doc ? Number(sSeq) || 0 : 0;
+      const cursor = `${doc}:${logs.length ? (logs[logs.length - 1].seq ?? 0) : after}`;
+      const fresh = after > 0 ? logs.filter((l) => (l.seq ?? 0) > after) : logs;
+      const filtered = filterLevel === 'all' ? fresh : fresh.filter((l) => l.level === filterLevel);
       const shown = lim > 0 ? filtered.slice(-lim) : filtered;
       if (shouldClear && shown.length) {
         const drop = new Set(shown);
         window.__chromeBridge_consoleLogs = logs.filter((l) => !drop.has(l));
       }
-      return { hooked, total: filtered.length, messages: shown };
+      return { hooked, total: filtered.length, messages: shown, cursor };
     },
-    args: [clear, level, limit],
+    args: [clear, level, limit, since],
     world: 'MAIN',
   });
 
@@ -1766,7 +1773,7 @@ async function cmdReadConsole({ clear = false, level = 'all', limit = 0, tab_id 
   const note = out.hooked === false
     ? 'Instrumentation not loaded (page opened before the extension, "Capture console & metrics" off, or a non-injectable page) — no console messages are being captured.'
     : undefined;
-  return { count: out.total ?? messages.length, messages, hooked: out.hooked !== false, ...(note ? { note } : {}) };
+  return { count: out.total ?? messages.length, messages, hooked: out.hooked !== false, cursor: out.cursor ?? since, ...(note ? { note } : {}) };
 }
 
 // --- DevTools: monitor_network (stateful) ---
@@ -1784,14 +1791,20 @@ async function ensureNetworkHook(tabId) {
   });
 }
 
-async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, tab_id }) {
+async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, since = '', tab_id }) {
   const tabId = await resolveTabId(tab_id);
 
   if (source === 'browser') {
-    const all = browserNetLog.get(tabId) ?? [];
+    // Cursore "avvio del worker:seq": un worker rianimato ha il log vuoto e
+    // il seq da capo, quindi un cursore vecchio vale come "dall'inizio".
+    const whole = browserNetLog.get(tabId) ?? [];
+    const [sBoot, sSeq] = String(since || '').split(':');
+    const after = sBoot === String(swBootedAt) ? Number(sSeq) || 0 : 0;
+    const cursor = `${swBootedAt}:${whole.length ? whole[whole.length - 1].seq : after}`;
+    const all = after > 0 ? whole.filter((r) => r.seq > after) : whole;
     const shown = limit > 0 ? all.slice(-limit) : [...all];
-    if (clear) browserNetLog.set(tabId, all.slice(0, Math.max(0, all.length - shown.length)));
-    return { count: all.length, requests: shown, log_since: swBootedAt };
+    if (clear) { const drop = new Set(shown); browserNetLog.set(tabId, whole.filter((r) => !drop.has(r))); }
+    return { count: all.length, requests: shown, log_since: swBootedAt, cursor };
   }
 
   await ensureNetworkHook(tabId);
@@ -1800,17 +1813,22 @@ async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, ta
   // per consegnarne 100, e clear non distrugge ciò che nessuno ha letto.
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (shouldClear, lim) => {
+    func: (shouldClear, lim, since) => {
       const hooked = !!window.__chromeBridge_networkHooked;
-      const requests = window.__chromeBridge_networkRequests || [];
+      const whole = window.__chromeBridge_networkRequests || [];
+      const doc = String(Math.round(performance.timeOrigin));
+      const [sDoc, sSeq] = String(since || '').split(':');
+      const after = sDoc === doc ? Number(sSeq) || 0 : 0;
+      const cursor = `${doc}:${whole.length ? (whole[whole.length - 1].seq ?? 0) : after}`;
+      const requests = after > 0 ? whole.filter((r) => (r.seq ?? 0) > after) : whole;
       const shown = lim > 0 ? requests.slice(-lim) : requests.slice();
       if (shouldClear && shown.length) {
         const drop = new Set(shown);
-        window.__chromeBridge_networkRequests = requests.filter((r) => !drop.has(r));
+        window.__chromeBridge_networkRequests = whole.filter((r) => !drop.has(r));
       }
-      return { hooked, total: requests.length, requests: shown };
+      return { hooked, total: requests.length, requests: shown, cursor };
     },
-    args: [clear, limit],
+    args: [clear, limit, since],
     world: 'MAIN',
   });
 
@@ -1819,7 +1837,7 @@ async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, ta
   const note = out.hooked === false
     ? 'Network hook not installed on this document — no page requests are being captured.'
     : undefined;
-  return { count: out.total ?? requests.length, requests, ...(note ? { note } : {}) };
+  return { count: out.total ?? requests.length, requests, cursor: out.cursor ?? since, ...(note ? { note } : {}) };
 }
 
 // --- wait_for_element ---
@@ -4576,7 +4594,9 @@ async function cmdSetZoom({ factor, reset = false, tab_id }) {
 // --- Browser-level network log (webRequest) ---
 const browserNetLog = new Map(); // tabId → array
 
+let browserNetSeq = 0;
 function pushNetEntry(tabId, entry) {
+  entry.seq = ++browserNetSeq;
   if (tabId < 0) return;
   let arr = browserNetLog.get(tabId);
   if (!arr) { arr = []; browserNetLog.set(tabId, arr); }

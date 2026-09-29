@@ -11,6 +11,7 @@
       if (window.__chromeBridge_networkHooked) return;
       window.__chromeBridge_networkHooked = true;
       window.__chromeBridge_networkRequests = [];
+      window.__chromeBridge_netSeq = 0;
       window.__chromeBridge_inflight = 0;
       window.__chromeBridge_lastNetActivity = Date.now();
       const MAX = 1000;
@@ -31,7 +32,7 @@
           // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
           // faceva consegnare al modello le richieste dei primi secondi di vita
           // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
+          entry.seq = ++window.__chromeBridge_netSeq; window.__chromeBridge_networkRequests.push(entry);
           if (window.__chromeBridge_networkRequests.length > MAX) {
             window.__chromeBridge_networkRequests.shift();
           }
@@ -44,7 +45,7 @@
           // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
           // faceva consegnare al modello le richieste dei primi secondi di vita
           // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
+          entry.seq = ++window.__chromeBridge_netSeq; window.__chromeBridge_networkRequests.push(entry);
           if (window.__chromeBridge_networkRequests.length > MAX) {
             window.__chromeBridge_networkRequests.shift();
           }
@@ -71,7 +72,7 @@
           // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
           // faceva consegnare al modello le richieste dei primi secondi di vita
           // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
+          entry.seq = ++window.__chromeBridge_netSeq; window.__chromeBridge_networkRequests.push(entry);
           if (window.__chromeBridge_networkRequests.length > MAX) {
             window.__chromeBridge_networkRequests.shift();
           }
@@ -82,7 +83,7 @@
           // Ring buffer: scarta le più VECCHIE, non le nuove. Scartare le nuove
           // faceva consegnare al modello le richieste dei primi secondi di vita
           // della pagina etichettate come "most recent".
-          window.__chromeBridge_networkRequests.push(entry);
+          entry.seq = ++window.__chromeBridge_netSeq; window.__chromeBridge_networkRequests.push(entry);
           if (window.__chromeBridge_networkRequests.length > MAX) {
             window.__chromeBridge_networkRequests.shift();
           }

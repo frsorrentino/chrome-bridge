@@ -52,6 +52,12 @@ Server and extension: this release goes to the Chrome Web Store too.
   - `get_css_styles` says `undefined_vars: ["--brand-primary"]` when a
     `var()` has no definition and no fallback.
 
+- **Console and network read by cursor.** `read_console` and
+  `monitor_network` end with `cursor=…`; passing it back as `since` returns
+  only the newer entries and deletes nothing (`clear` stays for who wants it).
+  The cursor is tied to the document (page) or to the worker's boot (browser
+  source), so a reload does not hide the new entries.
+
 ### Fixed
 
 - **Screenshots of a hidden page are refused, not stale.** On a covered or

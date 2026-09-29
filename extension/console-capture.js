@@ -12,7 +12,11 @@
   window.__chromeBridge_consoleHooked = true;
   window.__chromeBridge_consoleLogs = [];
   const MAX = 1000;
+  // seq: cursore per read_console({since}), che restituisce solo le voci nuove
+  // senza cancellare niente.
+  let seq = 0;
   const push = (entry) => {
+    entry.seq = ++seq;
     const buf = window.__chromeBridge_consoleLogs;
     if (buf.length >= MAX) buf.shift(); // ring buffer: tieni i più recenti, non i primi 1000
     buf.push(entry);

@@ -1222,20 +1222,22 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       limit: z.number().optional().default(50).describe('Most recent; buffer 1000'),
       format: z.enum(['lines', 'json']).optional().default('lines').describe('lines is compact; json keeps timestamps and stack traces'),
       sourcemap: z.boolean().optional().default(false).describe('Resolve bundle.js:line:col frames to source files through their source maps'),
+      since: z.string().optional().describe('cursor from the previous read: only newer entries, nothing deleted'),
       tab_id: tabId,
     },
-    async ({ clear, level, limit, format, tab_id, sourcemap }) => {
+    async ({ clear, level, limit, format, tab_id, sourcemap, since }) => {
       // limit va all'estensione: taglia in pagina e cancella (con clear) solo
       // ciò che ha restituito. Lo slice qui resta come fallback per estensioni
       // più vecchie che ignorano il parametro.
-      const data = await send(MessageType.READ_CONSOLE, { clear, level, limit, tab_id });
+      const data = await send(MessageType.READ_CONSOLE, { clear, level, limit, tab_id, ...(since && { since }) });
+      const cursorLine = data?.cursor ? `\ncursor=${data.cursor} (pass as since to get only newer entries)` : '';
       const all = data?.messages ?? [];
       if (sourcemap) for (const msg of all) msg.args = await Promise.all((msg.args ?? []).map((a) => sourceMaps.resolve(String(a))));
       const tail = all.slice(-(limit ?? 50));
       const total = data?.count ?? all.length;
       const note = data?.note;
       if ((format ?? 'lines') === 'json') {
-        return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, ...(note ? { note } : {}), messages: tail }) }] };
+        return { content: [{ type: 'text', text: jsonText({ total, shown: tail.length, ...(data?.cursor && { cursor: data.cursor }), ...(note ? { note } : {}), messages: tail }) }] };
       }
       let text = (note ? `note=${note}\n` : '') + consoleLines(tail, total);
       // Con clear le voci restituite sono già cancellate in pagina: tagliare il
@@ -1249,7 +1251,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return {
         content: [{
           type: 'text',
-          text: truncateText(text, DEFAULT_MAX_OUTPUT),
+          text: truncateText(text, DEFAULT_MAX_OUTPUT) + cursorLine,
         }],
       };
     }
@@ -1264,16 +1266,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       source: z.enum(['page', 'browser', 'websocket']).optional().default('page').describe('page: XHR/fetch only; browser: static assets too; websocket: connections and messages'),
       format: z.enum(['lines', 'json', 'har']).optional().default('lines').describe('har exports HAR 1.2 for external tooling'),
       limit: z.number().optional().default(100).describe('Most recent; buffer 1000'),
+      since: z.string().optional().describe('cursor from the previous read: only newer entries, nothing deleted'),
       tab_id: tabId,
     },
-    async ({ clear, source, format, limit, tab_id }) => {
+    async ({ clear, source, format, limit, tab_id, since }) => {
       // limit va all'estensione (taglia in pagina, clear solo del restituito);
       // lo slice qui resta come fallback per estensioni non ancora aggiornate.
       if (source === 'websocket') {
         const ws = await send(MessageType.MONITOR_WEBSOCKET, { clear, tab_id });
         return { content: [{ type: 'text', text: jsonText(ws) }] };
       }
-      const data = await send(MessageType.MONITOR_NETWORK, { clear, source, limit, tab_id });
+      const data = await send(MessageType.MONITOR_NETWORK, { clear, source, limit, tab_id, ...(since && { since }) });
       const { requests, count, note, ...rest } = data ?? {};
       const all = requests ?? [];
       const tail = all.slice(-(limit ?? 100));
@@ -1291,7 +1294,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           text: truncateText(
             (note ? `note=${note}\n` : '') + networkLines(tail, total),
             DEFAULT_MAX_OUTPUT,
-          ),
+          ) + (data?.cursor ? `\ncursor=${data.cursor} (pass as since to get only newer requests)` : ''),
         }],
       };
     }
