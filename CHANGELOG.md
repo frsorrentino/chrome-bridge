@@ -77,6 +77,14 @@ Server and extension: this release goes to the Chrome Web Store too.
 
 ### Fixed
 
+- **Five tools no longer answer a missing element with a success.** The error
+  thrown in the page was lost and `{}` came back: `modify_dom` said
+  `success: true`, `get_css_styles`, `scroll` and `measure_spacing` returned an
+  empty object, `watch_dom` silently watched `body`, `upload_file` said
+  `uploaded: false` without a reason. Now each says `Element not found: …`. A
+  new end-to-end suite passes a selector with no match to every tool that takes
+  one (20 cases) and fails on any reported success.
+
 - **Screenshots of a hidden page are refused, not stale.** On a covered or
   background window `captureVisibleTab` returned the last painted frame: a
   form already filled showed empty. `screenshot`, `full_page_screenshot`,
@@ -85,7 +93,8 @@ Server and extension: this release goes to the Chrome Web Store too.
 - **`monitor_network` sees the requests made while the page loads.** The
   fetch/XHR hook (`extension/network-hook.js`) now loads at `document_start`
   with the console capture; before, it was installed by the first call and the
-  failing request at startup, the one worth debugging, was missing.
+  failing request at startup, the one worth debugging, was missing. Its cost
+  on ordinary browsing, measured: ~1.8 µs per request and ~80 µs per page.
 - **`get_css_styles` with `var()` inside a shorthand.** For
   `background: var(--x)` the CSSOM leaves every longhand empty; the value now
   comes from the shorthand, with `shorthand: "background"`.

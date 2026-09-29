@@ -1665,7 +1665,7 @@ async function cmdGetCssStyles({ selector, properties, include_inherited = false
     args: [selector, properties ?? null, Boolean(include_inherited)],
     world: 'ISOLATED',
   });
-  return results?.[0]?.result ?? {};
+  return elementOutcome(results, selector);
 }
 
 // --- DevTools: modify_dom ---
@@ -1681,38 +1681,38 @@ async function cmdModifyDom({ selector, action, name, value, className, tab_id, 
       if (!el) throw new Error(`Element not found: ${sel}`);
       switch (act) {
         case 'setAttribute':
-          if (!attrName) throw new Error('Missing parameter: name');
+          if (!attrName) return { success: false, error: 'Missing parameter: name' };
           el.setAttribute(attrName, attrValue || '');
           break;
         case 'removeAttribute':
-          if (!attrName) throw new Error('Missing parameter: name');
+          if (!attrName) return { success: false, error: 'Missing parameter: name' };
           el.removeAttribute(attrName);
           break;
         case 'addClass':
-          if (!cls) throw new Error('Missing parameter: className');
+          if (!cls) return { success: false, error: 'Missing parameter: className' };
           el.classList.add(cls);
           break;
         case 'removeClass':
-          if (!cls) throw new Error('Missing parameter: className');
+          if (!cls) return { success: false, error: 'Missing parameter: className' };
           el.classList.remove(cls);
           break;
         case 'setStyle':
-          if (attrValue === undefined) throw new Error('Missing parameter: value');
+          if (attrValue == null) return { success: false, error: 'Missing parameter: value' };
           el.style.cssText = attrValue;
           break;
         case 'setTextContent':
-          if (attrValue === undefined) throw new Error('Missing parameter: value');
+          if (attrValue == null) return { success: false, error: 'Missing parameter: value' };
           el.textContent = attrValue;
           break;
         default:
-          throw new Error(`Unknown action: ${act}`);
+          return { success: false, error: `Unknown action: ${act}` };
       }
       return { success: true, tagName: el.tagName.toLowerCase(), action: act };
     },
     args: [selector, action, name || null, value || null, className || null],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { success: true };
+  return elementOutcome(results, selector);
 }
 
 // --- DevTools: inject_css ---
@@ -1935,7 +1935,7 @@ async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, ta
     args: [selector || null, x ?? null, y ?? null, behavior, offset_y],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? {};
+  return selector ? elementOutcome(results, selector) : (results?.[0]?.result ?? {});
 }
 
 // --- set_storage ---
@@ -3091,7 +3091,7 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
     args: [selector1, selector2],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? {};
+  return elementOutcome(results, `${selector1} or ${selector2}`);
 }
 
 // --- watch_dom (stateful) ---
@@ -3116,9 +3116,11 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
   }
 
   // Always inject: idempotent via in-page guard; handles selector change by re-observing.
-  await chrome.scripting.executeScript({
+  // Un selettore senza corrispondenza osservava body in silenzio: ora è un errore.
+  const install = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, opts) => {
+      if (!document.querySelector(sel)) return { missing: true };
       if (window.__chromeBridge_domWatcherHooked && window.__chromeBridge_domWatchSelector !== sel) {
         if (window.__chromeBridge_domObserver) window.__chromeBridge_domObserver.disconnect();
         window.__chromeBridge_domWatcherHooked = false;
@@ -3129,7 +3131,7 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
       window.__chromeBridge_domWatchSelector = sel;
       window.__chromeBridge_domMutations = [];
       const MAX = 1000;
-      const target = document.querySelector(sel) || document.body;
+      const target = document.querySelector(sel);
       const observer = new MutationObserver((mutationList) => {
         for (const m of mutationList) {
           // Ring buffer: dopo un'azione interessano le mutation RECENTI, quindi
@@ -3156,6 +3158,7 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
     args: [selector, { attributes, childList, characterData, subtree }],
     world: 'MAIN',
   });
+  if (install?.[0]?.result?.missing) throw new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
 
   // Read mutations
   const results = await chrome.scripting.executeScript({
@@ -3432,7 +3435,8 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id })
     func: (sel, fname, mime, b64) => {
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
-      if (!(el instanceof HTMLInputElement) || el.type !== 'file') throw new Error('Element is not an input[type=file]');
+      // Un throw qui si perderebbe (elementOutcome lo leggerebbe come «not found»): esito esplicito.
+      if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { uploaded: false, error: 'Element is not an input[type=file]' };
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const file = new File([bytes], fname, { type: mime });
       const dt = new DataTransfer();
@@ -3445,7 +3449,7 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id })
     args: [selector, name, mime_type, content_b64],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { uploaded: false };
+  return elementOutcome(results, selector);
 }
 
 // --- wait_for_navigation ---

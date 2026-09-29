@@ -14,6 +14,8 @@
 import { WSManager } from '../server/ws-manager.js';
 import { MessageType } from '../server/protocol.js';
 import { launchBrowser } from '../server/launcher.js';
+import { registerTools } from '../server/tools.js';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 
@@ -795,6 +797,45 @@ async function testElementCommandsNoMatch(tabId) {
   await expectElementNotFound('press_key on a selector with no match fails, does not report pressed', MessageType.PRESS_KEY, { key: 'Enter', selector: sel }, tabId);
 }
 
+// Suite negativa a livello di tool MCP (analisi 28/09 §3 A.1): ogni tool che
+// prende un selettore, con un selettore che non trova niente, deve dirlo —
+// errore o esito esplicito — e mai riportare un successo.
+const NO_MATCH = /"count":\s*0|total=0|"tables_found":\s*0|"dragged":\s*false|not found|no match|no element|matched 0|count[=:]\s*0|\b0 (elements|matches|items|records)|"(found|passed|met|success|submitted)":\s*false|timed? ?out|NOT SUBMITTED|\bFAIL/i;
+async function testToolsNoMatch(tabId) {
+  const handlers = new Map();
+  registerTools({ tool: (n, _d, _s, ...rest) => handlers.set(n, rest[rest.length - 1]) }, wsManager, 'all');
+  const sel = '#__cb_nothing_here';
+  const cases = [
+    ['click', { selector: sel }], ['type_text', { selector: sel, text: 'x' }], ['hover', { selector: sel }],
+    ['press_key', { key: 'Enter', selector: sel }], ['query_dom', { selector: sel }], ['get_css_styles', { selector: sel }],
+    ['modify_dom', { selector: sel, action: 'setTextContent', value: 'x' }], ['wait_for', { condition: 'element', selector: sel, timeout: 300 }],
+    ['scroll', { action: 'to', selector: sel }], ['watch_dom', { selector: sel }], ['element_screenshot', { selector: sel }], ['measure_spacing', { selector1: sel, selector2: 'body' }],
+    ['read_form', { selector: sel }], ['extract_table', { selector: sel }], ['extract', { item_selector: sel, fields: { t: {} } }],
+    ['assert', { selector: sel }], ['upload_file', { selector: sel, path: fileURLToPath(import.meta.url) }],
+    ['drag_and_drop', { source_selector: sel, target_selector: 'body' }],
+    ['fill_form', { fields: [{ selector: sel, value: 'x' }] }],
+    ['fill_form', { fields: [], submit_selector: sel }],
+  ];
+  for (const [tool, args] of cases) {
+    const name = `tool ${tool} with no match: says so, no success (${Object.keys(args).join(',')})`;
+    const h = handlers.get(tool);
+    if (!h) { fail(name, 'tool not registered'); continue; }
+    try {
+      let text;
+      try {
+        const res = await h({ ...args, tab_id: tabId });
+        text = (res?.content ?? []).map((c) => c.text ?? `[${c.type}]`).join('\n');
+        if (process.env.PROBE) console.log(`PROBE ${tool}: ${res?.isError ? '(isError) ' : ''}${text.slice(0, 300).replace(/\n/g, ' | ')}`);
+        if (res?.isError || NO_MATCH.test(text)) { ok(name); continue; }
+      } catch (e) {
+        if (process.env.PROBE) console.log(`PROBE ${tool}: throws ${e.message.slice(0, 200)}`);
+        ok(name); continue;
+      }
+      throw new Error(`reported as success: ${text.slice(0, 200)}`);
+    } catch (e) { fail(name, e.message); }
+  }
+}
+
 async function closedPort() {
   const srv = createServer();
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
@@ -951,6 +992,7 @@ async function main() {
 
     // 1.23.4
     await testElementCommandsNoMatch(testTabId);
+    await testToolsNoMatch(testTabId);
     await testNavigateConnectionRefused(testTabId);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
