@@ -27,6 +27,12 @@ test('una risposta senza uploadState non viene scambiata per un successo', () =>
   assert.equal(r.state, 'UNKNOWN');
 });
 
+test('un rifiuto di publish porta il suo motivo, non un dettaglio vuoto', () => {
+  const r = interpretPublish({ error: { code: 400, message: 'Publish condition not met: … Privacy practices tab.' } });
+  assert.equal(r.ok, false);
+  assert.match(r.detail.join(' '), /Privacy practices/);
+});
+
 test('publish accetta OK e il caso con avvertimento, non altro', () => {
   assert.equal(interpretPublish({ status: ['OK'] }).ok, true);
   assert.equal(interpretPublish({ status: ['PUBLISHED_WITH_FRICTION_WARNING'] }).ok, true);

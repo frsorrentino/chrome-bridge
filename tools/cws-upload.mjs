@@ -108,7 +108,10 @@ export function classifyFailure(reasons = []) {
 export function interpretPublish(body) {
   const status = body?.status || [];
   const ok = status.includes('OK') || status.includes('PUBLISHED_WITH_FRICTION_WARNING');
-  return { ok, status, detail: body?.statusDetail || [] };
+  // Un rifiuto arriva come {error:{message}}, non in statusDetail: senza questo
+  // il log diceva «publish: FALLITO» e basta (29/09, privacy mancante).
+  const detail = body?.statusDetail?.length ? body.statusDetail : (body?.error?.message ? [body.error.message] : []);
+  return { ok, status, detail };
 }
 
 async function exchange(cfg, code, redirectUri) {
@@ -192,7 +195,11 @@ async function main() {
     });
     const body = await res.json();
     console.log(JSON.stringify({ http: res.status, ...body }, null, 2));
-    return;
+    // Stessi codici del caricamento: 0 inviata, 2 attesa (già in revisione),
+    // 1 serve una persona (es. Privacy practices da compilare).
+    const pubRes = interpretPublish(body);
+    if (pubRes.ok) return;
+    process.exit(classifyFailure(pubRes.detail) === 'locked' ? 2 : 1);
   }
 
   if (argv.includes('--status')) {
@@ -244,7 +251,7 @@ async function main() {
   });
   const pubRes = interpretPublish(await pub.json());
   console.log(`publish: ${pubRes.ok ? 'OK' : 'FALLITO'} ${pubRes.status.join(',')} ${pubRes.detail.join(' | ')}`);
-  if (!pubRes.ok) process.exit(1);
+  if (!pubRes.ok) process.exit(classifyFailure(pubRes.detail) === 'locked' ? 2 : 1);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

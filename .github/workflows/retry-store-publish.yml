@@ -58,8 +58,20 @@ jobs:
           echo "$STATUS"
           CRX="$(echo "$STATUS" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).crxVersion || ''")"
           if [ "$CRX" = "${{ steps.tag.outputs.version }}" ]; then
-            echo "lo store ha già ${{ steps.tag.outputs.version }}: niente da fare"
+            # crxVersion è la BOZZA, non la vetrina: la versione può essere
+            # caricata e mai pubblicata (29/09: 1.26.0 in bozza, publish
+            # rifiutato per la privacy da compilare). Si chiede la pubblicazione:
+            # 0 inviata, 2 già in revisione o già pubblicata, 1 serve una persona.
             echo "done=true" >> "$GITHUB_OUTPUT"
+            set +e
+            node tools/cws-upload.mjs --publish-only
+            CODE=$?
+            set -e
+            case "$CODE" in
+              0) echo "::notice::${{ steps.tag.outputs.version }} era in bozza: inviata in revisione" ;;
+              2) echo "::notice::${{ steps.tag.outputs.version }} già in revisione o pubblicata: niente da fare" ;;
+              *) echo "::error::${{ steps.tag.outputs.version }} è in bozza ma lo store rifiuta la pubblicazione: serve intervento (motivo sopra)"; exit 1 ;;
+            esac
           else
             echo "store a '$CRX', tag a '${{ steps.tag.outputs.version }}': si tenta"
             echo "done=false" >> "$GITHUB_OUTPUT"
