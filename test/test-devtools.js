@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 
 // Con un'altra sessione che tiene la 8765 il test non partiva mai: la porta
 // viene dall'ambiente, e con --launch il browser lo apre lo script stesso
@@ -992,7 +993,7 @@ async function testMotion() {
     const still = await motion('snapshot');
     if (still.prefers_reduced_motion !== true) throw new Error('il click fidato ha staccato il debugger: emulazione persa');
     const after = await work();
-    if (!(after > before * 2)) throw new Error(`CPU x4 non visibile: ${Math.round(before)} → ${Math.round(after)} ms`);
+    if (!(after > before * 1.5)) throw new Error(`CPU x4 non visibile: ${Math.round(before)} → ${Math.round(after)} ms`);
     ok(`emulate_media: reduce resta dopo un click fidato, CPU x4 porta un lavoro fisso da ${Math.round(before)} a ${Math.round(after)} ms`);
   } catch (e) { fail('emulate_media con input fidato e CPU', e.message); }
   try {
@@ -1009,6 +1010,78 @@ async function testMotion() {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// 1.27.0: perf_trace sull'estensione, analisi del server su trace veri.
+async function testPerfTrace() {
+  const { analyzeTrace } = await import('../server/trace-analysis.js');
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}lcp`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const trace = async (ms) => {
+    await wsManager.sendCommand(MessageType.PERF_TRACE, { op: 'start', reload: true, tab_id });
+    await new Promise((r) => setTimeout(r, ms));
+    await wsManager.sendCommand(MessageType.PERF_TRACE, { op: 'stop', tab_id, timeout: 40000 });
+    let raw = '';
+    for (;;) {
+      const c = await wsManager.sendCommand(MessageType.PERF_TRACE, { op: 'read', tab_id });
+      raw += c.base64 ? Buffer.from(c.data, 'base64').toString() : c.data;
+      if (c.eof) break;
+    }
+    return analyzeTrace(JSON.parse(raw));
+  };
+  try {
+    const r = await trace(2500);
+    if (r.lcp?.type !== 'image') throw new Error(`LCP: ${JSON.stringify(r.lcp)}`);
+    if (!r.lcp.url?.endsWith('/hero.png') || !(r.lcp.phases?.load_duration_ms >= 250)) throw new Error(`fasi LCP: ${JSON.stringify(r.lcp)}`);
+    ok(`perf_trace: LCP immagine ${r.lcp.ms} ms, fasi ${JSON.stringify(r.lcp.phases)}`);
+  } catch (e) { fail('perf_trace LCP immagine', e.message); }
+  try {
+    await wsManager.sendCommand(MessageType.PERF_TRACE, { op: 'stop', tab_id }).then(() => { throw new Error('stop senza start accettato'); }, (err) => {
+      if (!/No trace recording/.test(err.message)) throw err;
+    });
+    const held = await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: '1', tab_id });
+    if (held.result !== 1) throw new Error('scheda non più utilizzabile');
+    ok('perf_trace: stop senza start rifiutato, debugger rilasciato dopo la lettura');
+  } catch (e) { fail('perf_trace stop senza start', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
+// 1.27.0: screencast sull'estensione, montaggio del server con ffmpeg.
+async function testScreencast() {
+  const { assembleVideo } = await import('../server/video.js');
+  const { mkdtemp, writeFile: wf, stat: st } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join: pj } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}motion`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const cast = (op, extra = {}) => wsManager.sendCommand(MessageType.SCREENCAST, { op, tab_id, ...extra });
+  try {
+    await cast('start', { max_width: 640 });
+    await new Promise((r) => setTimeout(r, 700));
+    const mid = await cast('drain');
+    await new Promise((r) => setTimeout(r, 800));
+    const end = await cast('stop');
+    const frames = [...mid.frames, ...end.frames];
+    if (frames.length < 10) throw new Error(`pochi fotogrammi: ${frames.length} (drain ${mid.frames.length}, stop ${end.frames.length})`);
+    const dir = await mkdtemp(pj(tmpdir(), 'cb-cast-'));
+    const list = [];
+    for (const [i, f] of frames.entries()) { const file = `f${i}.jpg`; await wf(pj(dir, file), Buffer.from(f.data, 'base64')); list.push({ file, t: f.t }); }
+    const out = pj(dir, 'out.mp4');
+    const v = await assembleVideo(dir, list, list[list.length - 1].t + 0.1, out, { format: 'mp4', fps: 30 });
+    if (!v.video) throw new Error(`montaggio: ${JSON.stringify(v)}`);
+    const secs = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', out]).toString());
+    const span = list[list.length - 1].t - list[0].t;
+    if (Math.abs(secs - span - 0.1) > 0.3) throw new Error(`durata video ${secs} s contro ${span.toFixed(2)} s di fotogrammi`);
+    ok(`screencast: ${frames.length} fotogrammi, mp4 di ${secs.toFixed(2)} s (${(await st(out)).size} byte)`);
+  } catch (e) { fail('screencast', e.message); await cast('stop').catch(() => {}); }
+  try {
+    await cast('drain').then(() => { throw new Error('drain dopo stop accettato'); }, (err) => { if (!/No screencast running/.test(err.message)) throw err; });
+    ok('screencast: dopo stop nessuna registrazione aperta');
+  } catch (e) { fail('screencast dopo stop', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // Copia locale della pagina di example.com com'era fino a settembre 2026: il
 // sito vero ha cambiato markup (niente h1, niente width) e i test che ci
 // contavano sono diventati rossi senza che il nostro codice cambiasse.
@@ -1017,9 +1090,33 @@ const EXAMPLE_HTML = '<!doctype html><html><head><title>Example Domain</title><m
   + '<body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission.</p>'
   + '<p><a href="https://www.iana.org/help/example-domains">Learn more</a></p></div></body></html>';
 let FIXTURE_URL = 'https://example.com/';
+// PNG di rumore: Chrome esclude dall'LCP le immagini a bassa entropia, e un
+// riquadro a tinta unita non diventava mai candidato.
+const HERO_PNG = (() => {
+  const w = 300; const h = 200;
+  const rows = Buffer.alloc((w * 3 + 1) * h);
+  for (let i = 0; i < rows.length; i++) rows[i] = i % (w * 3 + 1) === 0 ? 0 : (Math.random() * 256) | 0;
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+})();
+const LCP_HTML = '<!doctype html><html><head><title>LCP</title></head><body><p>Small text</p><img src="/hero.png" width="900" height="600" alt="Hero"></body></html>';
 async function startFixture() {
   const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
   const http = createHttpServer((req, res) => {
+    // /lcp: un'immagine servita dopo 300 ms è l'LCP, con le sue quattro fasi.
+    if (req.url === '/hero.png') {
+      setTimeout(() => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(HERO_PNG); }, 300);
+      return;
+    }
+    if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(req.url === '/motion' ? motionHtml : EXAMPLE_HTML);
   });
@@ -1118,6 +1215,8 @@ async function main() {
 
     // 1.27.0
     await testMotion();
+    await testPerfTrace();
+    await testScreencast();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { appendFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
@@ -24,6 +24,8 @@ import { createResolver } from './sourcemaps.js';
 import { evaluateSecurityHeaders } from './security-headers.js';
 import { windowLayout } from './layouts.js';
 import { fingerprintDelta } from './effect.js';
+import { analyzeTrace, traceEventsOf } from './trace-analysis.js';
+import { assembleVideo } from './video.js';
 import { consoleLines, networkLines, interactivesLines, interactiveLine, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
@@ -40,7 +42,10 @@ const RECORD_EXCLUDE = new Set([MessageType.GET_TABS, MessageType.PAGE_FINGERPRI
 const JS_TOOLS = new Set(['execute_js', 'modify_dom']);
 // Sotto CHROME_BRIDGE_WRITE_ROOT lo stato del server resta scrivibile: non è un
 // percorso scelto dal modello.
-const STATE_DIRS = [join(homedir(), '.config', 'chrome-bridge'), SESSIONS_DIR, RECORDINGS_DIR, FIXTURES_DIR];
+// Trace, video e report di perf_trace, screencast e lighthouse quando il
+// chiamante non dà save_to.
+const CAPTURES_DIR = process.env.CHROME_BRIDGE_CAPTURES_DIR || join(homedir(), '.config', 'chrome-bridge', 'captures');
+const STATE_DIRS = [join(homedir(), '.config', 'chrome-bridge'), SESSIONS_DIR, RECORDINGS_DIR, FIXTURES_DIR, CAPTURES_DIR];
 // upload_file mette un file del disco in un form della pagina: una pagina ostile
 // con prompt injection può chiedere ~/.ssh/id_ed25519 o un .env. Senza
 // CHROME_BRIDGE_READ_ROOT questi percorsi sono rifiutati; con la radice
@@ -259,7 +264,7 @@ export const TOOL_CAPS = {
   visual: ['inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
   // Misure di movimento e prestazioni (01/10/2026): per chi verifica le
   // animazioni di un sito, non per la navigazione di tutti i giorni.
-  perf: ['animations', 'frames'],
+  perf: ['animations', 'frames', 'perf_trace', 'screencast'],
   network: ['http_auth', 'set_geolocation', 'track_events'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
@@ -341,6 +346,8 @@ export const TOOL_ANNOTATIONS = {
   measure_spacing: ro(),
   animations: rw(),   // con action clicca, passa sopra, scorre o preme un tasto
   frames: rw(),
+  perf_trace: rw({ destructive: true }),  // ricarica la pagina, sovrascrive save_to
+  screencast: rw({ destructive: true }),  // sovrascrive save_to
   monitor_network: ro(true),
   query_dom: ro(),
   get_css_styles: ro(),
@@ -1842,6 +1849,199 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const rec = await motionWindow({ duration_ms, action, limit, threshold_ms, tab_id, frame_id });
       const { animations, ...rest } = rec;
       const data = { ...rest, animations: animations.summary };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- perf_trace (gruppo perf) ---
+  const captureStamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  // Insight del pannello Performance, solo se chi installa ha aggiunto
+  // @paulirish/trace_engine (peer opzionale: npm non lo installa da solo,
+  // l'API è dichiarata instabile). Senza, restano le metriche di
+  // trace-analysis.js.
+  async function engineInsights(events) {
+    let TE;
+    try { TE = await import('@paulirish/trace_engine'); } catch { return null; }
+    try {
+      globalThis.DOMRect ??= class DOMRect { constructor(x = 0, y = 0, width = 0, height = 0) { Object.assign(this, { x, y, width, height, top: y, left: x, right: x + width, bottom: y + height }); } };
+      const model = TE.TraceModel.Model.createWithAllHandlers();
+      await model.parse(events);
+      // 0.0.65: parsedTrace(i).insights è una Map per navigazione; ogni
+      // insight ha state pass/fail/informative e un titolo localizzato.
+      const insights = model.parsedTrace(0)?.insights;
+      const out = [];
+      for (const set of insights?.values?.() ?? []) {
+        for (const [name, ins] of Object.entries(set.model ?? {})) {
+          if (!ins?.state || ins.state === 'pass') continue;
+          const title = ins.strings?.title ?? ins.title;
+          const savings = ins.metricSavings && Object.fromEntries(Object.entries(ins.metricSavings).filter(([, v]) => v).map(([k, v]) => [k, Math.round(v)]));
+          out.push({ name, state: ins.state, ...(title && { title: String(title) }), ...(savings && Object.keys(savings).length && { savings_ms: savings }) });
+        }
+      }
+      return out;
+    } catch (err) {
+      return [{ name: 'engine_error', state: 'error', title: err.message }];
+    }
+  }
+
+  async function finishTrace(tab_id, save_to) {
+    const path = guardWrite(save_to ?? join(CAPTURES_DIR, `trace-${captureStamp()}.json`));
+    await send(MessageType.PERF_TRACE, { op: 'stop', tab_id, timeout: 40000 });
+    const chunks = [];
+    for (;;) {
+      const c = await send(MessageType.PERF_TRACE, { op: 'read', tab_id });
+      chunks.push(Buffer.from(c.data ?? '', c.base64 ? 'base64' : 'utf8'));
+      if (c.eof) break;
+    }
+    const raw = Buffer.concat(chunks);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, raw);
+    const json = JSON.parse(raw.toString('utf8'));
+    const analysis = analyzeTrace(json);
+    const insights = await engineInsights(traceEventsOf(json));
+    return { saved: path, bytes: raw.length, ...analysis, ...(insights && { insights }) };
+  }
+
+  server.tool(
+    'perf_trace',
+    'Record a DevTools performance trace and return its conclusions, never the trace: LCP with its phases (TTFB, resource load delay and '
+      + 'duration, render delay), FCP, CLS (session windows), INP, the document request, render-blocking resources, long tasks with the '
+      + 'function responsible, long animation frames. The raw trace goes to a JSON file (path and size in the result) that DevTools > '
+      + 'Performance can load. action record (default) = start, reload unless reload: false, optional action, wait duration_ms, stop. '
+      + 'start/stop bracket anything else done meanwhile. Uses chrome.debugger: Chrome shows its debugging bar while tracing; in launch '
+      + 'mode nobody sees it. Refuses on a hidden page.',
+    {
+      action: z.enum(['record', 'start', 'stop']).optional().default('record').describe('record does start → wait → stop in one call'),
+      reload: z.boolean().optional().describe('Reload the page right after tracing starts (default true for record, false for start)'),
+      duration_ms: z.number().optional().default(5000).describe('record: how long to trace, max 60000'),
+      interaction: motionAction,
+      save_to: saveToField('the trace JSON'),
+      tab_id: tabId,
+    },
+    async ({ action, reload, duration_ms, interaction, save_to, tab_id }) => {
+      if (action === 'stop') {
+        return { content: [{ type: 'text', text: jsonText(await finishTrace(tab_id, save_to)) }] };
+      }
+      const doReload = reload ?? action === 'record';
+      await send(MessageType.PERF_TRACE, { op: 'start', reload: doReload, tab_id });
+      if (action === 'start') {
+        return { content: [{ type: 'text', text: jsonText({ tracing: true, reloaded: doReload, next: 'perf_trace action: "stop"' }) }] };
+      }
+      const t0 = Date.now();
+      let interactionError = null;
+      try {
+        if (interaction) {
+          // Dopo un reload l'elemento esiste solo a pagina caricata.
+          if (doReload) await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id }).catch(() => {});
+          await runMotionAction(interaction, tab_id);
+        }
+        await new Promise((r) => setTimeout(r, Math.max(0, Math.min(duration_ms, 60000) - (Date.now() - t0))));
+      } catch (err) {
+        interactionError = err.message;
+      }
+      try {
+        const data = await finishTrace(tab_id, save_to);
+        if (interactionError) data.interaction_error = interactionError;
+        return { content: [{ type: 'text', text: jsonText(data) }] };
+      } catch (err) {
+        await send(MessageType.PERF_TRACE, { op: 'abort', tab_id }).catch(() => {});
+        throw err;
+      }
+    }
+  );
+
+  // --- screencast (gruppo perf) ---
+  // I fotogrammi passano dall'estensione al disco ogni 400 ms: in memoria
+  // resta poco, e una registrazione lunga non pesa sul service worker.
+  const casts = new Map();
+  const CAST_DRAIN_MS = 400;
+  const CAST_MAX_MS = 120000;
+
+  async function castWrite(cast, frames) {
+    for (const f of frames) {
+      const file = `frame-${String(cast.frames.length + 1).padStart(5, '0')}.jpg`;
+      await writeFile(join(cast.dir, file), Buffer.from(f.data, 'base64'));
+      cast.frames.push({ file, t: f.t });
+    }
+  }
+
+  async function castStart(tab_id, { quality, max_width }) {
+    const key = refsKey(tab_id);
+    if (casts.has(key)) throw new Error('A screencast is already running here: screencast action stop first');
+    const dir = join(CAPTURES_DIR, `screencast-${captureStamp()}`);
+    await mkdir(dir, { recursive: true });
+    try {
+      await send(MessageType.SCREENCAST, { op: 'start', quality, max_width, tab_id });
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true });
+      throw err;
+    }
+    const cast = { dir, frames: [], tab_id, started: Date.now(), busy: Promise.resolve() };
+    cast.timer = setInterval(() => {
+      cast.busy = cast.busy.then(async () => {
+        const d = await send(MessageType.SCREENCAST, { op: 'drain', tab_id }).catch(() => null);
+        if (d?.frames?.length) await castWrite(cast, d.frames);
+        if (Date.now() - cast.started > CAST_MAX_MS) clearInterval(cast.timer);
+      });
+    }, CAST_DRAIN_MS);
+    casts.set(key, cast);
+  }
+
+  async function castStop(tab_id, { format, fps, save_to }) {
+    const key = refsKey(tab_id);
+    const cast = casts.get(key);
+    if (!cast) throw new Error('No screencast running here: screencast action start first');
+    casts.delete(key);
+    clearInterval(cast.timer);
+    await cast.busy;
+    const out = guardWrite(save_to ?? join(CAPTURES_DIR, `${basename(cast.dir)}.${format}`));
+    const last = await send(MessageType.SCREENCAST, { op: 'stop', tab_id });
+    await castWrite(cast, last.frames ?? []);
+    const base = { frames: cast.frames.length, ...(last.dropped && { dropped: last.dropped }), duration_s: Math.round((Date.now() - cast.started) / 100) / 10 };
+    if (!cast.frames.length) {
+      await rm(cast.dir, { recursive: true, force: true });
+      return { ...base, video: null, note: 'No frames: the page did not change, or the tab was not visible' };
+    }
+    await mkdir(dirname(out), { recursive: true });
+    const v = await assembleVideo(cast.dir, cast.frames, Date.now() / 1000, out, { format, fps });
+    if (!v.video) return { ...base, ...v };
+    await rm(cast.dir, { recursive: true, force: true });
+    return { ...base, video: out, bytes: (await stat(out)).size };
+  }
+
+  server.tool(
+    'screencast',
+    'Record the tab as a video (.mp4 or .webm) to watch an animation or interaction frame by frame; returns the file path and size, never '
+      + 'the frames. action record (default) = start, optional interaction, wait duration_ms, stop. start/stop bracket anything else done '
+      + 'meanwhile (max 120 s). Chrome sends a frame only when the page changes; the video keeps the real timing. Needs the tab active and '
+      + 'its window visible, and ffmpeg on the server machine (without it: the JPEG folder and the ffmpeg command). Uses chrome.debugger: '
+      + 'Chrome shows its debugging bar while recording; in launch mode nobody sees it.',
+    {
+      action: z.enum(['record', 'start', 'stop']).optional().default('record').describe('record does start → wait → stop in one call'),
+      duration_ms: z.number().optional().default(5000).describe('record: how long to record, max 120000'),
+      interaction: motionAction,
+      format: z.enum(['mp4', 'webm']).optional().default('mp4').describe('Video container'),
+      fps: z.number().optional().default(30).describe('Frame rate of the output video'),
+      quality: z.number().optional().default(70).describe('JPEG quality of the captured frames, 0-100'),
+      max_width: z.number().optional().default(1280).describe('Scale frames down to this width in px'),
+      save_to: saveToField('the video'),
+      tab_id: tabId,
+    },
+    async ({ action, duration_ms, interaction, format, fps, quality, max_width, save_to, tab_id }) => {
+      if (action === 'stop') return { content: [{ type: 'text', text: jsonText(await castStop(tab_id, { format, fps, save_to })) }] };
+      await castStart(tab_id, { quality, max_width });
+      if (action === 'start') return { content: [{ type: 'text', text: jsonText({ recording: true, next: 'screencast action: "stop"' }) }] };
+      const t0 = Date.now();
+      let interactionError = null;
+      try {
+        if (interaction) await runMotionAction(interaction, tab_id);
+      } catch (err) {
+        interactionError = err.message;
+      }
+      await new Promise((r) => setTimeout(r, Math.max(0, Math.min(duration_ms, CAST_MAX_MS) - (Date.now() - t0))));
+      const data = await castStop(tab_id, { format, fps, save_to });
+      if (interactionError) data.interaction_error = interactionError;
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );

@@ -57,5 +57,13 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "node-html-parser": "^9.0.0",
     "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "@paulirish/trace_engine": ">=0.0.65"
+  },
+  "peerDependenciesMeta": {
+    "@paulirish/trace_engine": {
+      "optional": true
+    }
   }
 }

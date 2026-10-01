@@ -452,6 +452,10 @@ async function executeCommand(msg) {
       return await cmdWebVitals(params);
     case 'motion':
       return await cmdMotion(params);
+    case 'perf_trace':
+      return await cmdPerfTrace(params);
+    case 'screencast':
+      return await cmdScreencast(params);
     case 'list_event_listeners':
       return await cmdListEventListeners(params);
     case 'monitor_websocket':
@@ -4057,6 +4061,128 @@ async function cmdMotion({ op, scope = null, limit, threshold_ms, tab_id, frame_
   const out = results?.[0]?.result;
   if (out?.error) throw new Error(out.error);
   return out;
+}
+
+// --- perf_trace ---
+
+// Categorie del pannello Performance di DevTools (come chrome-devtools-mcp),
+// senza gli screenshot che gonfiano il file. Il trace torna come stream: il
+// server lo legge a pezzi (op read) e lo scrive su disco, così nel service
+// worker non resta mai tutto in memoria.
+const TRACE_CATEGORIES = [
+  '-*', 'blink.console', 'blink.user_timing', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
+  'disabled-by-default-devtools.timeline.frame', 'disabled-by-default-devtools.timeline.stack',
+  'disabled-by-default-devtools.timeline.invalidationTracking', 'disabled-by-default-v8.cpu_profiler',
+  'latencyInfo', 'loading', 'disabled-by-default-lighthouse', 'v8.execute', 'v8',
+];
+const traces = new Map();  // tabId → { complete: Promise<handle>, stream }
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === 'Tracing.tracingComplete') {
+    const t = traces.get(source.tabId);
+    if (t) t.resolveComplete(params.stream);
+  } else if (method === 'Page.screencastFrame') {
+    const c = casts.get(source.tabId);
+    // L'ack va mandato sempre, o Chrome smette di inviare fotogrammi.
+    chrome.debugger.sendCommand({ tabId: source.tabId }, 'Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+    if (!c) return;
+    c.frames.push({ data: params.data, t: params.metadata?.timestamp ?? Date.now() / 1000 });
+    c.total += 1;
+    // Il server drena ogni 400 ms: se smette (server caduto), il buffer non
+    // cresce senza limite.
+    if (c.frames.length > CAST_BUFFER_MAX) { c.frames.shift(); c.dropped += 1; }
+  }
+});
+
+// --- screencast ---
+
+// I fotogrammi arrivano solo se la scheda è attiva e visibile (prova del
+// 01/10: zero in secondo piano), e solo quando la pagina cambia.
+const casts = new Map();  // tabId → { frames, total, dropped }
+const CAST_BUFFER_MAX = 600;
+
+async function cmdScreencast({ op, quality = 70, max_width, max_height, every_nth = 1, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (op === 'start') {
+    if (casts.has(tabId)) throw new Error('A screencast is already running on this tab: screencast stop first');
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active) throw new Error('Screencast needs the tab active in its window: Chrome sends no frames for a background tab. Use tab_action activate first.');
+    if (await pageHidden(tabId)) throw new Error(`Not recording: ${HIDDEN_HINT}`);
+    const send = await holdDebugger(tabId, 'screencast', 'screencast');
+    casts.set(tabId, { frames: [], total: 0, dropped: 0 });
+    try {
+      await send('Page.startScreencast', { format: 'jpeg', quality, everyNthFrame: every_nth, ...(max_width && { maxWidth: max_width }), ...(max_height && { maxHeight: max_height }) });
+    } catch (e) {
+      casts.delete(tabId);
+      await releaseDebugger(tabId, 'screencast');
+      throw e;
+    }
+    return { recording: true };
+  }
+  const c = casts.get(tabId);
+  if (!c) throw new Error('No screencast running on this tab: screencast start first');
+  if (op === 'drain') {
+    const frames = c.frames.splice(0);
+    return { frames, total: c.total, dropped: c.dropped, held: debuggerHeld(tabId).held };
+  }
+  if (op === 'stop') {
+    await chrome.debugger.sendCommand({ tabId }, 'Page.stopScreencast', {}).catch(() => {});
+    casts.delete(tabId);
+    await releaseDebugger(tabId, 'screencast');
+    return { frames: c.frames.splice(0), total: c.total, dropped: c.dropped };
+  }
+  throw new Error(`Unknown screencast op ${op}`);
+}
+
+async function cmdPerfTrace({ op, reload = false, screenshots = false, size = 4 * 1024 * 1024, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const send = (m, p) => chrome.debugger.sendCommand({ tabId }, m, p);
+  if (op === 'start') {
+    if (traces.has(tabId)) throw new Error('A trace is already recording on this tab: perf_trace stop first');
+    if (await pageHidden(tabId)) throw new Error(`Not tracing: ${HIDDEN_HINT}`);
+    await holdDebugger(tabId, 'trace', 'perf_trace');
+    let resolveComplete;
+    const complete = new Promise((r) => { resolveComplete = r; });
+    traces.set(tabId, { complete, resolveComplete });
+    try {
+      await send('Tracing.start', {
+        transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'none',
+        traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: [...TRACE_CATEGORIES, ...(screenshots ? ['disabled-by-default-devtools.screenshot'] : [])] },
+      });
+    } catch (e) {
+      traces.delete(tabId);
+      await releaseDebugger(tabId, 'trace');
+      throw e;
+    }
+    if (reload) await chrome.tabs.reload(tabId, { bypassCache: false });
+    return { tracing: true, debugger_bar: true };
+  }
+  if (op === 'stop') {
+    const t = traces.get(tabId);
+    if (!t) throw new Error('No trace recording on this tab: perf_trace start first');
+    if (!debuggerHeld(tabId).held) { traces.delete(tabId); throw new Error('The debugger was detached (bar cancelled or tab closed): the trace is lost'); }
+    await send('Tracing.end', {});
+    const stream = await Promise.race([t.complete, new Promise((_, rej) => setTimeout(() => rej(new Error('Trace did not complete within 30 s')), 30000))]);
+    t.stream = stream;
+    return { stream };
+  }
+  if (op === 'read') {
+    const t = traces.get(tabId);
+    if (!t?.stream) throw new Error('No finished trace to read: perf_trace stop first');
+    const chunk = await send('IO.read', { handle: t.stream, size });
+    if (chunk.eof) {
+      await send('IO.close', { handle: t.stream }).catch(() => {});
+      traces.delete(tabId);
+      await releaseDebugger(tabId, 'trace');
+    }
+    return { data: chunk.data, base64: Boolean(chunk.base64Encoded), eof: Boolean(chunk.eof) };
+  }
+  if (op === 'abort') {
+    traces.delete(tabId);
+    await send('Tracing.end', {}).catch(() => {});
+    return { aborted: await releaseDebugger(tabId, 'trace') };
+  }
+  throw new Error(`Unknown perf_trace op ${op}`);
 }
 
 // --- list_event_listeners ---

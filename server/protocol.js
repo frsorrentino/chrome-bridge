@@ -79,6 +79,8 @@ export const MessageType = Object.freeze({
   LIST_ASSETS:           'list_assets',
   RESOURCE_TIMING:       'resource_timing',
   MOTION:                'motion',
+  PERF_TRACE:            'perf_trace',
+  SCREENCAST:            'screencast',
 
   // Risposte (extension → server)
   RESULT: 'result',
