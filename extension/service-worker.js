@@ -456,6 +456,8 @@ async function executeCommand(msg) {
       return await cmdPerfTrace(params);
     case 'screencast':
       return await cmdScreencast(params);
+    case 'cdp_target':
+      return await cmdCdpTarget(params);
     case 'list_event_listeners':
       return await cmdListEventListeners(params);
     case 'monitor_websocket':
@@ -4183,6 +4185,17 @@ async function cmdPerfTrace({ op, reload = false, screenshots = false, size = 4 
     return { aborted: await releaseDebugger(tabId, 'trace') };
   }
   throw new Error(`Unknown perf_trace op ${op}`);
+}
+
+// --- cdp_target ---
+
+// Id CDP della scheda, per i tool che in modalità launch parlano con la porta
+// di debug (heap_snapshot): l'id della scheda di chrome.tabs non vale lì.
+async function cmdCdpTarget({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const target = (await chrome.debugger.getTargets()).find((t) => t.tabId === tabId);
+  if (!target) throw new Error(`No debugger target for tab ${tabId}`);
+  return { target_id: target.id, url: target.url };
 }
 
 // --- list_event_listeners ---

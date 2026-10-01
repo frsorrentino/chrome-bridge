@@ -128,7 +128,7 @@ async function main() {
   // Errori dei tool annotati in locale (formato claude-observe) quando nessun
   // hook del plugin li vede: vedi server/observe.js.
   const observe = createObserver({ version: VERSION });
-  session.tools = registerTools(mcpServer, wsManager, parseCaps(), { ...parseSecurity(), observe });
+  session.tools = registerTools(mcpServer, wsManager, parseCaps(), { ...parseSecurity(), observe, cdpPort: browser ? browser.cdpPort : null });
 
   // 4. Avvia il trasporto stdio MCP
   const transport = new StdioServerTransport();

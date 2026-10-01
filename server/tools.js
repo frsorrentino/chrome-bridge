@@ -26,6 +26,8 @@ import { windowLayout } from './layouts.js';
 import { fingerprintDelta } from './effect.js';
 import { analyzeTrace, traceEventsOf } from './trace-analysis.js';
 import { assembleVideo } from './video.js';
+import { cdpConnect, targetWsUrl, takeHeapSnapshot, summarizeHeap, diffHeap } from './heap.js';
+import { lighthouseArgs, runLighthouse, summarizeLighthouse } from './lighthouse.js';
 import { consoleLines, networkLines, interactivesLines, interactiveLine, linksLines } from './formatters.js';
 
 const SESSIONS_DIR = join(homedir(), '.config', 'chrome-bridge', 'sessions');
@@ -264,7 +266,7 @@ export const TOOL_CAPS = {
   visual: ['inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
   // Misure di movimento e prestazioni (01/10/2026): per chi verifica le
   // animazioni di un sito, non per la navigazione di tutti i giorni.
-  perf: ['animations', 'frames', 'perf_trace', 'screencast'],
+  perf: ['animations', 'frames', 'perf_trace', 'screencast', 'lighthouse', 'heap_snapshot'],
   network: ['http_auth', 'set_geolocation', 'track_events'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
@@ -348,6 +350,8 @@ export const TOOL_ANNOTATIONS = {
   frames: rw(),
   perf_trace: rw({ destructive: true }),  // ricarica la pagina, sovrascrive save_to
   screencast: rw({ destructive: true }),  // sovrascrive save_to
+  lighthouse: rw({ destructive: true, open: true }),  // apre e carica l'URL in una scheda nuova, sovrascrive save_to
+  heap_snapshot: rw({ destructive: true }),  // forza un garbage collection, sovrascrive save_to
   monitor_network: ro(true),
   query_dom: ro(),
   get_css_styles: ro(),
@@ -2042,6 +2046,71 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       await new Promise((r) => setTimeout(r, Math.max(0, Math.min(duration_ms, CAST_MAX_MS) - (Date.now() - t0))));
       const data = await castStop(tab_id, { format, fps, save_to });
       if (interactionError) data.interaction_error = interactionError;
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- lighthouse, heap_snapshot (gruppo perf, solo modalità launch) ---
+  const LAUNCH_ONLY = 'only in launch mode (chrome-bridge --launch [--headless]): it needs the DevTools port of the dedicated browser, '
+    + 'which the extension in your own Chrome cannot provide';
+  const cdpPortOrThrow = async (tool) => {
+    if (!options.cdpPort) throw new Error(`${tool} works ${LAUNCH_ONLY}.`);
+    return options.cdpPort();
+  };
+
+  server.tool(
+    'lighthouse',
+    'Run a full Lighthouse audit (performance included, unlike chrome-devtools-mcp, plus accessibility, best practices, SEO) and return '
+      + 'scores, the five lab metrics and the failing audits that weigh most; the full report goes to .report.json and .report.html files. '
+      + `Works ${LAUNCH_ONLY}. Loads the URL in a new tab of that browser; takes 20-60 s; the first call downloads Lighthouse through npx.`,
+    {
+      url: z.string().optional().describe('Page to audit; omitted = the URL of the target tab'),
+      categories: z.array(z.enum(['performance', 'accessibility', 'best-practices', 'seo'])).optional().describe('Subset of categories; omitted = all four'),
+      form_factor: z.enum(['mobile', 'desktop']).optional().default('mobile').describe('mobile emulates a mid-range phone with slow 4G, as PageSpeed Insights does'),
+      save_to: z.string().optional().describe('Absolute path without extension: the report is written to <path>.report.json and <path>.report.html'),
+      tab_id: tabId,
+    },
+    async ({ url, categories, form_factor, save_to, tab_id }) => {
+      const port = await cdpPortOrThrow('lighthouse');
+      const target = url ?? (await send(MessageType.CDP_TARGET, { tab_id })).url;
+      if (!/^https?:/i.test(target ?? '')) throw new Error(`Lighthouse needs an http(s) URL, got ${target}`);
+      const base = guardWrite(save_to ?? join(CAPTURES_DIR, `lighthouse-${captureStamp()}`));
+      await mkdir(dirname(base), { recursive: true });
+      await runLighthouse(lighthouseArgs(target, port, base, { categories, formFactor: form_factor }));
+      const lhr = JSON.parse(await readFile(`${base}.report.json`, 'utf8'));
+      const data = { ...summarizeLighthouse(lhr), report: `${base}.report.html`, json: `${base}.report.json` };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  server.tool(
+    'heap_snapshot',
+    'Take a JS heap snapshot of the tab (after a garbage collection) and summarize it: object count, total size, detached DOM nodes, the '
+      + 'classes that take most memory. With compare_to (an earlier snapshot file): which classes grew, to find a leak — snapshot, repeat the '
+      + 'suspect action a few times, snapshot again. The .heapsnapshot file opens in DevTools > Memory. '
+      + `Works ${LAUNCH_ONLY}: Chrome refuses the HeapProfiler domain to extensions.`,
+    {
+      compare_to: z.string().optional().describe('Absolute path of an earlier .heapsnapshot to diff against'),
+      top: z.number().optional().default(15).describe('Classes listed'),
+      save_to: saveToField('the .heapsnapshot'),
+      tab_id: tabId,
+    },
+    async ({ compare_to, top, save_to, tab_id }) => {
+      const port = await cdpPortOrThrow('heap_snapshot');
+      const before = compare_to ? summarizeHeap(JSON.parse(await readFile(await guardRead(compare_to), 'utf8')), { top }) : null;
+      const { target_id } = await send(MessageType.CDP_TARGET, { tab_id });
+      const path = guardWrite(save_to ?? join(CAPTURES_DIR, `heap-${captureStamp()}.heapsnapshot`));
+      await mkdir(dirname(path), { recursive: true });
+      const cdp = await cdpConnect(await targetWsUrl(port, target_id));
+      let bytes;
+      try {
+        bytes = await takeHeapSnapshot(cdp, path);
+      } finally {
+        cdp.close();
+      }
+      const now = summarizeHeap(JSON.parse(await readFile(path, 'utf8')), { top });
+      const { _all, ...summary } = now;
+      const data = { saved: path, bytes, ...summary, ...(before && { compared_to: compare_to, diff: diffHeap(before, now, { top }) }) };
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );

@@ -81,6 +81,7 @@ export const MessageType = Object.freeze({
   MOTION:                'motion',
   PERF_TRACE:            'perf_trace',
   SCREENCAST:            'screencast',
+  CDP_TARGET:            'cdp_target',
 
   // Risposte (extension → server)
   RESULT: 'result',

@@ -984,9 +984,12 @@ async function testMotion() {
     ok('emulate_media via debugger: la regola reduce del sito toglie spin, grow resta');
   } catch (e) { fail('emulate_media via debugger reduce', e.message); }
   try {
-    const work = async () => (await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+    // Minimo di tre esecuzioni: la prima paga la compilazione del JIT, e un
+    // picco di carico della macchina non deve passare per rallentamento.
+    const once = async () => (await wsManager.sendCommand(MessageType.EXECUTE_JS, {
       code: '(() => { const t = performance.now(); let x = 0; for (let i = 0; i < 2e7; i++) x += i % 7; return performance.now() - t; })()', tab_id,
     })).result;
+    const work = async () => Math.min(await once(), await once(), await once());
     const before = await work();
     await emulate({ cpu_throttle: 4 });
     await windowWith('#busy', 300, true);
@@ -1079,6 +1082,43 @@ async function testScreencast() {
     await cast('drain').then(() => { throw new Error('drain dopo stop accettato'); }, (err) => { if (!/No screencast running/.test(err.message)) throw err; });
     ok('screencast: dopo stop nessuna registrazione aperta');
   } catch (e) { fail('screencast dopo stop', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
+// 1.27.0: lighthouse e heap_snapshot, solo in launch (porta CDP del browser).
+async function testLaunchOnlyTools(browser) {
+  if (!browser) { log('lighthouse/heap_snapshot: saltati, servono --launch'); return; }
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join: pj } = await import('node:path');
+  const dir = await mkdtemp(pj(tmpdir(), 'cb-launch-'));
+  const handlers = new Map();
+  registerTools({ tool: (n, _d, _s, ...rest) => handlers.set(n, rest[rest.length - 1]) }, wsManager, 'all', { cdpPort: browser.cdpPort });
+  const call = async (name, args) => JSON.parse((await handlers.get(name)(args)).content[0].text);
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}motion`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  try {
+    const a = await call('heap_snapshot', { top: 10, save_to: pj(dir, 'a.heapsnapshot'), tab_id });
+    await wsManager.sendCommand(MessageType.EXECUTE_JS, { code: 'window.__leak = Array.from({ length: 20000 }, (_, i) => ({ i, s: "x" + i })); 1', tab_id });
+    const b = await call('heap_snapshot', { top: 10, compare_to: a.saved, save_to: pj(dir, 'b.heapsnapshot'), tab_id });
+    if (!(a.nodes > 1000) || !(b.diff?.total_size_delta > 500000)) throw new Error(`heap: nodi ${a.nodes}, delta ${b.diff?.total_size_delta}`);
+    const grown = b.diff.grown.map((g) => g.name);
+    if (!grown.includes('Object')) throw new Error(`classi cresciute: ${grown}`);
+    ok(`heap_snapshot: ${a.nodes} nodi, +${Math.round(b.diff.total_size_delta / 1024)} KB dopo 20 000 oggetti, prime classi ${grown.slice(0, 3)}`);
+  } catch (e) { fail('heap_snapshot', e.message); }
+  try {
+    const t0 = Date.now();
+    const lh = await call('lighthouse', { url: `${FIXTURE_URL}lcp`, categories: ['performance', 'seo'], form_factor: 'desktop', save_to: pj(dir, 'lh'), tab_id });
+    if (lh.categories.performance == null || !lh.metrics['largest-contentful-paint']) throw new Error(JSON.stringify(lh).slice(0, 400));
+    ok(`lighthouse ${lh.lighthouse}: performance ${lh.categories.performance}, seo ${lh.categories.seo}, LCP ${lh.metrics['largest-contentful-paint'].value}, ${lh.failing.length} voci non superate, ${Math.round((Date.now() - t0) / 1000)} s`);
+  } catch (e) { fail('lighthouse', e.message); }
+  try {
+    const off = new Map();
+    registerTools({ tool: (n, _d, _s, ...rest) => off.set(n, rest[rest.length - 1]) }, wsManager, 'all');
+    await off.get('heap_snapshot')({ top: 5, tab_id }).then(() => { throw new Error('accettato senza porta CDP'); }, (err) => { if (!/only in launch mode/.test(err.message)) throw err; });
+    ok('heap_snapshot senza launch: rifiutato con il motivo');
+  } catch (e) { fail('heap_snapshot senza launch', e.message); }
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
@@ -1217,6 +1257,7 @@ async function main() {
     await testMotion();
     await testPerfTrace();
     await testScreencast();
+    await testLaunchOnlyTools(browser);
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

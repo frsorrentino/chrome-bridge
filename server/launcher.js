@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 } from 'node:path';
@@ -105,6 +105,11 @@ export async function launchBrowser({ port, headless = false }) {
     '--hide-crash-restore-bubble',
     '--disable-gpu',
     '--window-size=1280,800',
+    // Porta CDP su 127.0.0.1 per lighthouse e heap_snapshot, che
+    // chrome.debugger non può dare (HeapProfiler rifiutato, Lighthouse vuole
+    // un browser intero). Porta scelta dal sistema, letta da DevToolsActivePort.
+    // Il profilo è temporaneo: la porta non espone i dati dell'utente.
+    '--remote-debugging-port=0',
   ];
   if (headless) args.push('--headless=new');
   args.push('about:blank');
@@ -129,5 +134,18 @@ export async function launchBrowser({ port, headless = false }) {
   console.error(`[chrome-bridge] launched ${browser}${headless ? ' (headless)' : ''} pid=${proc.pid}, ws port ${port}`);
   const branded = isBrandedChrome(browser);
   if (branded) console.error(`[chrome-bridge] warning: ${BRANDED_CHROME_HINT}`);
-  return { pid: proc.pid, stop, branded };
+  return { pid: proc.pid, stop, branded, cdpPort: () => readDevToolsPort(profileDir) };
+}
+
+/** Porta CDP del browser lanciato: Chrome la scrive in DevToolsActivePort appena è in ascolto. */
+export async function readDevToolsPort(profileDir, { timeoutMs = 10000 } = {}) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const port = Number((await readFile(join(profileDir, 'DevToolsActivePort'), 'utf8')).split('\n')[0]);
+      if (port > 0) return port;
+    } catch { /* non ancora scritto */ }
+    if (Date.now() > until) throw new Error('The launched browser did not open its DevTools port (DevToolsActivePort missing)');
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
