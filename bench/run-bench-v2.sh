@@ -36,6 +36,14 @@ PROMPT_HEAVY="Apri http://${URLHOST}:8099/heavy.html. Nella tabella del catalogo
 PROMPT_DEBUG="Apri http://${URLHOST}:8099/debug/ . È la pagina di checkout che sto sviluppando: il carrello resta vuoto e il pulsante 'Pay now' non si vede. Trova la causa di entrambi i problemi e riporta: l'errore JavaScript con file e riga del sorgente originale (non del bundle), la richiesta di rete che fallisce con il suo status, e la regola CSS responsabile del pulsante invisibile."
 if [ "$TASK" = "form" ]; then PROMPT="$PROMPT_FORM"; elif [ "$TASK" = "debug" ]; then PROMPT="$PROMPT_DEBUG"; else PROMPT="$PROMPT_HEAVY"; fi
 
+# Cartella di lavoro vuota, fuori dal repository: dentro il repo lo stato git
+# entra nel contesto e cambia a ogni run (i file di results/ non tracciati),
+# così la cache del prompt non si riusava fra sessioni; e il modello poteva
+# cercare la risposta nei sorgenti con Grep e Read (serie w128a, 01/10/2026).
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/cb-bench-XXXXXX")
+trap 'rm -rf "$WORKDIR"' EXIT
+cd "$WORKDIR" || exit 1
+
 if [ "$ARM" = "bridge" ] || [ "$ARM" = "bridgeall" ]; then
   timeout 360 claude -p "$PROMPT" \
     --model claude-sonnet-5 \

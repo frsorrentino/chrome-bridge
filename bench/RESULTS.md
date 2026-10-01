@@ -441,3 +441,33 @@ era accoppiata a un browser remoto macOS che non raggiungeva `localhost:8099`
 
 Sulle run di allora (12 run bridge): 41.985 token di cache read per turno contro
 36.613 di claude-in-chrome, $0,0373 contro $0,0337 per turno.
+
+## Serie w128a — tool rimandati contro tutti caricati (01/10/2026, Windows)
+
+Girata da master su ee55202:
+- Edge 154 headless (Google Chrome non carica l'estensione in launch);
+- Claude Code 2.1.287, claude-sonnet-5, caps `core`, n=5 per cella.
+
+I due bracci:
+- `bridge`: 20 tool caricati, gli altri 23 rimandati con `_meta['anthropic/alwaysLoad']`;
+- `bridgeall`: `CHROME_BRIDGE_ALWAYS_LOAD=all`.
+
+Adattamenti per Windows, solo sulla copia: `REPO` con `pwd -W`, uno shim `python3`, `PYTHONUTF8=1`. Script e log in `results/w128a-win/`.
+
+| task | arm | turni | $/run | corretta |
+|---|---|---:|---:|---:|
+| form | bridge | 3 (3) | 0,092 | 5/5 |
+| form | bridgeall | 3 (3) | 0,048 | 5/5 |
+| heavy | bridge | 4 (4-5) | 0,102 | 5/5 |
+| heavy | bridgeall | 3 (3-4) | 0,044 | 5/5 |
+| debug | bridge | 4 (3-9) | 0,114 | 5/5 |
+| debug | bridgeall | 4 (4-5) | 0,078 | 5/5 |
+
+- **Turni:** su heavy ogni run `bridge` carica `extract_table` con ToolSearch, un turno in più. Su debug carica `get_css_styles`. Dopo questa serie `EAGER_TOOLS` comprende i due tool.
+- **Costo: non confrontabile.** Le run hanno girato nella cartella del repository, e Claude Code mette lo stato git nel contesto della sessione. Ogni run aggiungeva quattro file non tracciati in `results/`, quindi il contesto cambiava a ogni sessione.
+  - Prova: la scrittura in cache alla prima richiesta di `bridge` cresce di run in run, 12 588 → 12 660 → 12 821 … → 13 434.
+  - `bridgeall` ha girato dopo, quando l'elenco dei file era già al limite oltre il quale Claude Code lo tronca: la sua cache si riusava (0 token scritti dalla seconda run di ogni task).
+  - La stessa cartella spiega le 2 run debug su 5 che cercavano nei sorgenti con Grep e Read.
+- **Correzione:** `run-bench-v2.sh` ora fa girare `claude` in una cartella vuota fuori dal repository.
+
+**Da rifare:** la stessa serie con lo script corretto e i due bracci alternati run per run, così l'ordine non pesa.

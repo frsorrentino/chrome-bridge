@@ -279,12 +279,16 @@ export const TOOL_CAPS = {
 // _meta['anthropic/alwaysLoad'] = false e restano dietro la ricerca dei tool
 // (Claude Code 2.1.285+): lo schema pagato a ogni sessione scende, e un tool
 // rimandato si trova con ToolSearch. Scelti dall'uso reale: ogni tool usato
-// almeno 5 volte in 61 sessioni dell'autore (docs/analisi-2026-09-01.md, B.4).
+// almeno 5 volte in 61 sessioni dell'autore (docs/analisi-2026-09-01.md, B.4),
+// più extract_table e get_css_styles: le istruzioni del server li indicano per
+// tabelle e debug, e nel benchmark appaiato del 01/10 (w128a) ogni run heavy
+// caricava extract_table con ToolSearch, un turno in più, e le debug
+// get_css_styles.
 // CHROME_BRIDGE_ALWAYS_LOAD=all li rimette tutti, o una lista ne sceglie altri.
 export const EAGER_TOOLS = [
   'execute_js', 'navigate', 'screenshot', 'find_text', 'click', 'get_interactives', 'create_tab', 'get_tabs',
   'tab_action', 'tile_windows', 'full_page_screenshot', 'extract', 'read_page', 'get_status', 'scroll',
-  'wait_for', 'element_screenshot', 'type_text', 'window_layout', 'fill_form',
+  'wait_for', 'element_screenshot', 'type_text', 'window_layout', 'fill_form', 'extract_table', 'get_css_styles',
 ];
 const DEFER_META = { 'anthropic/alwaysLoad': false };
 

@@ -28,7 +28,8 @@ test('di default: i tool più usati caricati, gli altri rimandati', async () => 
   for (const n of EAGER_TOOLS) assert.ok(names.has(n), `${n} non è nel core`);
   const eager = tools.filter((t) => !deferred(t)).map((t) => t.name).sort();
   assert.deepEqual(eager, [...EAGER_TOOLS].sort());
-  assert.ok(tools.find((t) => t.name === 'extract_table') && deferred(tools.find((t) => t.name === 'extract_table')));
+  assert.ok(deferred(tools.find((t) => t.name === 'audit')), 'audit resta dietro ToolSearch');
+  assert.ok(!deferred(tools.find((t) => t.name === 'extract_table')), 'extract_table caricato: ogni run heavy lo cercava');
 });
 
 test('CHROME_BRIDGE_ALWAYS_LOAD=all: nessun tool rimandato; una lista sceglie i caricati', async () => {
