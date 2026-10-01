@@ -32,14 +32,14 @@ function textOf(result) {
 
 // --- capability opt-in ---
 
-test('caps=all registra tutti i 60 tool', () => {
-  assert.equal(setup().size, 60);
+test('caps=all registra tutti i 66 tool', () => {
+  assert.equal(setup().size, 66);
 });
 
 test('caps=core registra solo il set core (43 tool)', () => {
   const handlers = setup({}, 'core');
   const optInCount = Object.values(TOOL_CAPS).flat().length;
-  assert.equal(handlers.size, 60 - optInCount);
+  assert.equal(handlers.size, 66 - optInCount);
   assert.ok(handlers.has('click'));
   assert.ok(handlers.has('get_interactives'));
   assert.ok(!handlers.has('cookie_audit'));
@@ -64,7 +64,7 @@ test('tools/list attraverso il layer MCP reale: tutti gli schemi serializzano', 
   const client = new Client({ name: 'c', version: '0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 60);
+  assert.equal(tools.length, 66);
   await client.close();
 });
 
@@ -79,7 +79,7 @@ test('caps=core con il server MCP reale: gruppi spenti, get_status({enable}) li 
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const optIn = Object.values(TOOL_CAPS).flat().length;
   let { tools } = await client.listTools();
-  assert.equal(tools.length, 60 - optIn);
+  assert.equal(tools.length, 66 - optIn);
   assert.ok(tools.some((t) => t.name === 'extract_table'), 'extract_table sta nel core');
   assert.ok(!tools.some((t) => t.name === 'cookie_audit'));
   const res = await client.callTool({ name: 'get_status', arguments: { enable: ['audits', 'visual'] } });
@@ -89,7 +89,7 @@ test('caps=core con il server MCP reale: gruppi spenti, get_status({enable}) li 
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(notices, 1, 'N tool accesi, una notifica');
   ({ tools } = await client.listTools());
-  assert.equal(tools.length, 60 - optIn + TOOL_CAPS.audits.length + TOOL_CAPS.visual.length);
+  assert.equal(tools.length, 66 - optIn + TOOL_CAPS.audits.length + TOOL_CAPS.visual.length);
   const again = JSON.parse((await client.callTool({ name: 'get_status', arguments: { enable: ['audits'] } })).content[0].text);
   assert.deepEqual(again.enabled, [], 'riaccendere un gruppo attivo non fa nulla');
   await client.close();

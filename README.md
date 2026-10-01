@@ -164,12 +164,12 @@ user-script toggle isn't available.
 
 ## Tools
 
-60 in total. `core` (43 tools, every tool used in 101 real sessions) loads by
-default; the other 17 sit in six optional caps that the agent switches on
+66 in total. `core` (43 tools, every tool used in 101 real sessions) loads by
+default; the other 23 sit in seven optional caps that the agent switches on
 mid-session with `get_status({enable: ["visual"]})`, with no restart
 (`--caps` still sets them at startup).
 
-![60 tools in seven groups, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
+![The tools by group, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
@@ -180,6 +180,7 @@ mid-session with `get_status({enable: ["visual"]})`, with no restart
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
 | Audits | 2 | `audit` (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), `cookie_audit` |
 | State, Storage & Files | 9 | storage, fixtures, MHTML, recording, `assert` |
+| Motion & Performance | 6 | `animations`, `frames` (long frames, CLS, INP), `perf_trace`, `screencast`, `lighthouse` and `heap_snapshot` (launch mode) |
 
 Every tool, with the notes that matter: [docs/TOOLS.md](docs/TOOLS.md).
 
@@ -236,6 +237,14 @@ do with them.
 
 - **Who can connect:** see above — loopback bind, `chrome-extension://` origin
   check, `CHROME_BRIDGE_TOKEN` on both handshakes.
+- **Launch mode also opens a DevTools port** on 127.0.0.1 (chosen by the
+  system), for `lighthouse` and `heap_snapshot`. CDP has no authentication:
+  any local process can drive that dedicated browser while it runs. Its profile
+  is temporary and holds nothing of yours; your own Chrome never gets a port.
+- **The debugger bar is the signal.** `click`/`press_key` with `trusted`,
+  `emulate_media via: "debugger"`, `perf_trace` and `screencast` attach
+  `chrome.debugger` to one tab only for that work; Chrome shows its "started
+  debugging this browser" bar meanwhile, and cancelling it ends the work.
 - **The real risk is prompt injection.** A page can ask the agent to run
   JavaScript, send a request with your cookies, submit a form or upload a file.
   Treat every page you automate as untrusted input, and review what the agent
@@ -304,7 +313,7 @@ count.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 60 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 66 tools, by group
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`

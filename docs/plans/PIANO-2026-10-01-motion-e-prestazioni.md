@@ -31,9 +31,9 @@ Incidente del 01/10, 17:42-17:48: lo script di prova caricava l'estensione del r
 ## Checklist
 
 - [x] Tappa 0: la prova dei domini
-- [ ] Tappa 1: gruppo `perf`, `animations` (istantanea e finestra con azione), `frames` (LoAF, CLS, INP, rAF); test unitari di `lib/motion.js`; pagina di prova in `bench/`; e2e in launch
+- [x] Tappa 1 (e2e 74/75 con il solo `viewport_resize` noto): gruppo `perf`, `animations` (istantanea e finestra con azione), `frames` (LoAF, CLS, INP, rAF); test unitari di `lib/motion.js`; pagina di prova in `bench/`; e2e in launch
 - [x] Tappa 2 (e2e 78/79; esempio in `assert` scartato: assert controlla DOM, testo e URL, la verifica sta in `animations` con `summary.not_fade_only` = 0, va nelle ricette): `emulate_media` con il debugger su richiesta (`Emulation.setEmulatedMedia`, CPU, rete, viewport/DPR, touch) e il ripiego dichiarato; esempio di reduced-motion in `assert`
 - [x] Tappa 3 (e2e 82/83; il motore dei trace è un peer opzionale, npm non lo installa: API dichiarata instabile e due dipendenze a `latest`; analisi di base in `server/trace-analysis.js`): `perf_trace` (trace su file, analisi con `@paulirish/trace_engine` opzionale o ripiego interno) e `screencast` (ffmpeg, scheda attiva)
 - [x] Tappa 4 (e2e 85/86; Lighthouse 13 vuole Node >= 22.19: sotto si usa la 12.8.2): porta CDP del launch (`--remote-debugging-port=0`, `DevToolsActivePort`), `lighthouse` con `npx`, `heap_snapshot` solo in launch
-- [ ] Per ogni tappa: `TOOLS.md`, `CAPABILITIES.md`, conteggi (`tool-counts.test.js`, README, package/server/manifest), CHANGELOG
+- [x] Documenti, una volta sola a tool completi (66 tool, nucleo 43; unit 476/476): `TOOLS.md`, `CAPABILITIES.md`, conteggi (`tool-counts.test.js`, README, package/server/manifest), CHANGELOG
 - [ ] Verifica finale: lotto D3 di francescosorrentino.com e confronto con chrome-devtools-mcp 1.10.1

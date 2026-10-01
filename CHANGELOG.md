@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- **Motion and performance, in a new optional cap `perf`** (6 tools, 66 in
+  all; `core` unchanged at 43). Switch it on with
+  `get_status({enable: ["perf"]})`.
+  - `animations`: the page animations with selector and ref, properties,
+    timing, `linear()` easing, timeline (document, scroll, view), View
+    Transitions, a composited estimate and `fade_only`; a snapshot, or every
+    animation that starts in a window around an action.
+  - `frames`: frame rate, Long Animation Frames with their scripts, layout
+    shifts with their elements, INP of the window.
+  - `perf_trace`: a DevTools trace to disk and its conclusions (LCP phases,
+    FCP, CLS, INP, document, render-blocking resources, long tasks with the
+    function responsible). Performance-panel insights when the optional peer
+    `@paulirish/trace_engine` is installed.
+  - `screencast`: the tab to `.mp4`/`.webm` with ffmpeg, real frame timing.
+  - `lighthouse` and `heap_snapshot`, launch mode only.
+- **`emulate_media via: "debugger"`:** real emulation, so the site's own
+  `@media (prefers-reduced-motion)` rules apply (the page shim zeroed every
+  animation instead), plus `contrast`, `cpu_throttle`, `network`, `device`,
+  `touch`. The debugger stays attached until `reset`.
+- **Launch mode opens a DevTools port** on 127.0.0.1 (`--remote-debugging-port=0`,
+  temporary profile), for `lighthouse` and `heap_snapshot`.
+
+No new permission: `debugger` arrived in 1.26.0.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

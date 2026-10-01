@@ -80,7 +80,7 @@ async function main() {
       // finestra era dietro un'altra.
       // Il 42% delle sessioni reali caricava i tool con 2+ ToolSearch (media 2,0).
       'When tools are deferred, batch every tool needed for the next workflow into ONE ToolSearch call using exact names (select:name1,name2,...); do not search one tool at a time.',
-      'Missing optional tools: call get_status({enable:["group",...]}) once for all required groups (audits, visual, network, storage, dom, files; "all" enables all). After tools/list_changed, use them next turn; if still deferred, batch-search their names once. No restart or user configuration needed.',
+      'Missing optional tools: call get_status({enable:["group",...]}) once for all required groups (audits, visual, network, storage, dom, files, perf; "all" enables all). After tools/list_changed, use them next turn; if still deferred, batch-search their names once. No restart or user configuration needed.',
       'A tab in a minimized, covered or background window does not render: screenshots fail, timers slow down. get_page_info reports visibility (page_hidden in a result means the same); bring the window on screen, or create_tab new_window with bounds.',
     ].join(' '),
   });

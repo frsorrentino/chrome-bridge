@@ -41,6 +41,10 @@ A list that only says yes is a brochure; this one is for planning against.
 | Console, network, web vitals | **Measured** 2026-09-11 | `read_console`, `monitor_network` (page hook, browser-level, WebSocket, HAR), `audit vitals`. |
 | Screenshots, visual regression | **Measured** 2026-09-11 | `screenshot`, `element_screenshot` (region, scale), `full_page_screenshot`, `screenshot_diff` with a baseline from disk. Known: two captures closer than ~500 ms hit Chrome's 2-per-second quota (`docs/PERFORMANCE.md`). |
 | Accessibility, SEO, security headers, links, unused CSS, cache | **Measured** 2026-09-11 (a11y) / **By design** (rest) | `audit` runs the nine kinds in one call and writes the report to disk; the e2e runs the accessibility audit, the others are unit-tested on fixtures. |
+| Animations, long frames, layout shifts, INP | **Measured** 2026-10-01 | `animations` and `frames` on `bench/motion.html` in the e2e: infinite CSS animation, scroll timeline, `linear()` easing, View Transition, a 120 ms task named with its handler, a late banner's CLS, INP with trusted input. Page script: Chrome refuses the `Animation` and `PerformanceTimeline` domains to extensions. |
+| Real reduced motion, CPU and network throttling, device emulation | **Measured** 2026-10-01 | `emulate_media via: "debugger"`: the page's own `@media (prefers-reduced-motion)` rule stops its animation, CPU ×4 slows a fixed workload about five times, trusted input keeps the emulation. |
+| Performance traces, video | **Measured** 2026-10-01 | `perf_trace` (image LCP with its four phases, on a page whose image is served 300 ms late) and `screencast` (mp4 whose length matches the frames), headless launch mode. On your own Chrome they show the debugging bar while recording. |
+| Lighthouse with performance, heap snapshots | **Measured** 2026-10-01, launch mode only | They need the DevTools port of the launched browser: Lighthouse wants a whole browser, and Chrome refuses `HeapProfiler` to extensions. |
 
 ## Environment
 
@@ -61,7 +65,7 @@ A list that only says yes is a brochure; this one is for planning against.
 | Wall | Why not |
 |---|---|
 | Bot detection (Cloudflare, DataDome, fingerprinting) | Chrome Bridge works because it **is** your browser, not because anything is circumvented. |
-| Breakpoints, heap snapshots, performance traces, `captureBeyondViewport` | They need the `debugger` permission and its yellow "is debugging this browser" bar. The extension asks for 14 permissions and not that one, by choice; `full_page_screenshot` stitches segments within the capture quota instead. |
+| Breakpoints, `captureBeyondViewport` | The extension has the `debugger` permission since 1.26, but uses it only on request (trusted input, debugger emulation, traces, video), because Chrome shows its "is debugging this browser" bar while attached. Pausing the page's JS is not on that list; `full_page_screenshot` stitches segments within the capture quota instead. |
 | `chrome://` pages, the Web Store, `data:` URLs | Chrome forbids scripting them; the tools say so instead of failing vaguely. |
 | Accounts that are not yours | The session is the one in your Chrome. That boundary is not a technical one. |
 

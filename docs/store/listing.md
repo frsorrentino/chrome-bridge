@@ -6,9 +6,9 @@ Chrome Bridge for Claude Code
 
 ## Summary (max 132 chars)
 
-On the Store the summary is the manifest `description` (today: "Bridge your browser to Claude Code: 60 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included."). The line below is the positioning version: it reaches the Store only by moving it into `extension/manifest.json` in a release that uploads a new package.
+On the Store the summary is the manifest `description` (today: "Bridge your browser to Claude Code: 66 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included."). The line below is the positioning version: it reaches the Store only by moving it into `extension/manifest.json` in a release that uploads a new package.
 
-Lend Claude Code a tab of your own logged-in Chrome and get it back. 60 web-dev tools. ChromeOS too.
+Lend Claude Code a tab of your own logged-in Chrome and get it back. 66 web-dev tools. ChromeOS too.
 
 ## Category
 
@@ -28,7 +28,7 @@ Chrome Bridge lets Claude Code — Anthropic's CLI coding agent — develop and 
 
 Built to be token-efficient: the agent acts on compact element references instead of screenshots, tables are filtered and paginated server-side before they reach the model, and every output is capped — so complex sessions cost far fewer tokens.
 
-60 specialized web-development tools:
+66 specialized web-development tools:
 
 • Debugging — console logs with source-mapped stacks, which CSS rule sets each style, JS execution, dev-server error overlays, background page watch
 • Network — monitor requests, mock/block/redirect, record and replay API responses with forced errors, HAR export

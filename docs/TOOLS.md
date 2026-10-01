@@ -1,7 +1,7 @@
 # Tool reference
 
-All 60 tools, by area. `core` (43 tools, every tool used in 101 real
-sessions) loads by default. The other 17 sit in six optional caps, which the
+All 66 tools, by area. `core` (43 tools, every tool used in 101 real
+sessions) loads by default. The other 23 sit in seven optional caps, which the
 agent switches on mid-session with `get_status({enable: [...]})` (no restart)
 or you set at startup with `--caps` / `CHROME_BRIDGE_CAPS`:
 
@@ -13,6 +13,7 @@ or you set at startup with `--caps` / `CHROME_BRIDGE_CAPS`:
 | `storage` | `get_storage`, `set_storage`, `session_fixture` |
 | `dom` | `modify_dom`, `watch_dom`, `drag_and_drop` |
 | `files` | `save_page`, `manage_downloads`, `session_record` |
+| `perf` | `animations`, `frames`, `perf_trace`, `screencast`, `lighthouse`, `heap_snapshot` |
 
 Check what is active in your session with `get_status` → `caps_active` /
 `caps_available`, and the schema cost of that set with `npm run measure`.
@@ -87,6 +88,17 @@ capturing again. `save_to` still decides where the file goes.
 `element_screenshot`, `full_page_screenshot`, `screenshot_diff`,
 `viewport_resize` (presets, explicit size, zoom), `emulate_media`, `set_geolocation`.
 
+`emulate_media` has two ways in. `via: "page"` (the default for color scheme,
+reduced motion and print) patches `matchMedia` in the page and, for `reduce`,
+zeroes every animation: the site's own `@media (prefers-reduced-motion)` rules
+never apply. `via: "debugger"` emulates as DevTools does
+(`Emulation.setEmulatedMedia`), so the site's rules do apply, and adds
+`contrast`, `cpu_throttle`, `network` profiles (`3g`, `slow-4g`, `fast-4g`,
+`offline`), `device` (viewport with DPR, mobile) and `touch`. CDP emulation
+lives only while the debugger is attached: the tab stays held, with Chrome's
+debugging bar, until `emulate_media({reset: true})`. Trusted input on a held
+tab reuses that session instead of detaching it.
+
 `screenshot_diff` also takes its baseline from a PNG on disk (`from_file`): the
 design mockup or a production screenshot becomes the reference; `compare_urls`
 diffs two pages (production vs staging) in pixels and in text. `screenshot`
@@ -115,6 +127,59 @@ against 50,070 bytes for `read_page` on the same table.
 
 `session_record` + `replay` run a recorded flow with no model in the loop —
 the basis for CI smoke tests.
+
+## Motion & Performance (6, cap `perf`)
+
+`animations`, `frames`, `perf_trace`, `screencast`, `lighthouse`,
+`heap_snapshot`. Results are conclusions, counts and file paths; traces,
+videos and reports go to disk (`~/.config/chrome-bridge/captures/`, or
+`save_to`).
+
+- `animations` lists what runs now (CSS animations, transitions, Web
+  Animations, View Transitions): selector and ref, properties, duration,
+  delay, easing (`linear()` curves cut at 200 characters with their point
+  count), iterations, play state, timeline (document, scroll, view).
+  `composited_estimate` is a guess from the properties (transform, opacity,
+  filter), not the compositor's answer; `fade_only` marks opacity-only fades.
+  With `duration_ms` or `action` (click, hover, scroll, key) it records every
+  animation that starts in the window: a 150 ms transition is over before a
+  second call could see it.
+- `frames` records for `duration_ms`: main-thread frame rate and dropped
+  frames, Long Animation Frames with the scripts responsible, layout shifts
+  with the elements that moved (CLS of the window), and the slowest
+  interaction split into input delay, processing and presentation (INP of the
+  window). INP needs `action.trusted`: synthetic events have no interaction id.
+- `perf_trace` records a DevTools trace (`record` = start, reload, wait, stop;
+  or `start`/`stop` around other actions) and returns LCP with its phases,
+  FCP, CLS in session windows, INP, the document request, render-blocking
+  resources, long tasks with the function responsible and long animation
+  frames. The JSON opens in DevTools > Performance. When
+  `@paulirish/trace_engine` is installed next to chrome-bridge (an optional
+  peer: npm does not install it, its API is declared unstable), the
+  Performance panel's insights are added.
+- `screencast` records the tab to `.mp4` or `.webm` with the real timing of
+  each frame (Chrome sends one only when the page changes). Needs the tab
+  active and visible, and ffmpeg; without ffmpeg it returns the JPEG folder
+  and the command.
+- `lighthouse` (launch mode only) runs the Lighthouse CLI through `npx`
+  against the launched browser, performance included: scores, the five lab
+  metrics, the failing audits that weigh most. Lighthouse 13.5.0 on
+  Node ≥ 22.19, 12.8.2 below.
+- `heap_snapshot` (launch mode only: Chrome refuses `HeapProfiler` to
+  extensions) writes a `.heapsnapshot` after a garbage collection and sums it
+  up by class, with detached DOM nodes; `compare_to` an earlier file lists the
+  classes that grew.
+
+`perf_trace`, `screencast` and `emulate_media via debugger` use
+`chrome.debugger` on request: Chrome shows its "started debugging this
+browser" bar while they hold the tab. In launch mode nobody sees it. `frames`,
+`perf_trace` and `screencast` refuse a hidden page, where rAF and observers
+stop.
+
+Checking reduced motion: `emulate_media({reducedMotion: "reduce", via:
+"debugger"})`, then `animations` with the interaction (`action`) that
+animates; `summary.not_fade_only` must be 0, and `max_duration_ms` short.
+`emulate_media({reset: true})` at the end.
 
 ## Stateful tools
 

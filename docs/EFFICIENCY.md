@@ -52,11 +52,13 @@ the two failed Chrome launches under machine load included, with their cause) an
 
 ## The schema cost, and why it grew
 
-The 43 core tools cost ≈11.7k tokens of `tools/list`; all 60 cost ≈15.6k
-(`npm run measure`, 2026-09-28). Core is every tool used in 101 real sessions;
-the 17 never used sit in six optional caps (`audits`, `visual`, `network`,
-`storage`, `dom`, `files`) that the agent switches on mid-session with
-`get_status({enable})`. Until 1.24 the plugin and `install.sh` forced all 60.
+The 43 core tools cost ≈11.7k tokens of `tools/list`; all 66 cost ≈19.2k
+(`npm run measure`, 2026-10-01). Core is every tool used in 101 real sessions;
+the 17 never used there sit in six optional caps (`audits`, `visual`,
+`network`, `storage`, `dom`, `files`), and the six motion and performance
+tools added on 2026-10-01 in a seventh (`perf`, ≈2.8k tokens). The agent switches them on
+mid-session with `get_status({enable})`. Until 1.24 the plugin and
+`install.sh` forced every tool.
 
 That core figure was ≈3.8k in 1.8.0 and roughly doubled in 1.10.0: MCP
 annotations on every tool, rewritten descriptions, and a documented
