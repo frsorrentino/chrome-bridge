@@ -13,6 +13,7 @@
  *   chrome-bridge screenshot --out /tmp/shot.png
  */
 
+import { uploadBuffer } from './upload.js';
 import WebSocket from 'ws';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
@@ -421,11 +422,9 @@ async function run(client, command, params, opts) {
   // Comandi con file I/O lato CLI
   if (command === 'upload_file') {
     const buf = await readFile(params.path);
-    if (buf.length > 10 * 1024 * 1024) throw new Error(`File too large: ${buf.length} bytes (max 10MB)`);
     const mime = params.mime_type || MIME_BY_EXT[extname(params.path).toLowerCase()] || 'application/octet-stream';
-    const data = await client.sendCommand(MessageType.UPLOAD_FILE, {
-      selector: params.selector, name: basename(params.path), mime_type: mime,
-      content_b64: buf.toString('base64'), tab_id: params.tab_id,
+    const data = await uploadBuffer((t, p) => client.sendCommand(t, p), {
+      selector: params.selector, name: basename(params.path), mime_type: mime, buf, tab_id: params.tab_id,
     });
     return JSON.stringify(data);
   }

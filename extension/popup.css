@@ -58,6 +58,7 @@ body {
 .dot.connected { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .dot.connecting { background: #f39c12; }
 .dot.disconnected { background: var(--err); }
+.dot.refused { background: #f39c12; }
 #status-text { font-weight: 600; }
 .status-row .ws-url {
   margin-left: auto;

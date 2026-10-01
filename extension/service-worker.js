@@ -99,7 +99,38 @@ const KEEPALIVE_ALARM = 'chrome-bridge-keepalive';
 let ws = null;
 let reconnectTimer = null;
 let reconnectDelay = RECONNECT_BASE_MS;
-let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected'
+let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected' | 'refused'
+// Rifiutata perché un altro browser tiene la porta: si riprova piano, senza
+// riempire il log del server a ogni secondo.
+const REFUSED_RETRY_MS = 15000;
+let refusedBy = null;
+
+// Identità del browser per il server: un id che resta fra un riavvio e
+// l'altro (lo stesso browser che si riconnette sostituisce la sua vecchia
+// connessione, un altro browser no) e un'etichetta leggibile in get_status.
+// Calcolata una volta: all'apertura del socket l'ext_init deve partire
+// subito, o il server chiude la connessione non identificata (sotto carico lo
+// storage può metterci secondi). Prima di loadConfig launchMode non è noto:
+// si chiede dopo il primo connect.
+let identityPromise = null;
+function cachedIdentity() {
+  identityPromise ??= browserIdentity().catch(() => ({ id: null, label: 'Chromium-based browser' }));
+  return identityPromise;
+}
+
+async function browserIdentity() {
+  let { browserId } = await chrome.storage.local.get({ browserId: null });
+  if (!browserId) {
+    browserId = crypto.randomUUID();
+    await chrome.storage.local.set({ browserId });
+  }
+  const brands = navigator.userAgentData?.brands ?? [];
+  const brand = brands.find((b) => !/Not.?A.?Brand|^Chromium$/i.test(b.brand)) ?? brands.find((b) => /Chromium/i.test(b.brand));
+  const os = (await chrome.runtime.getPlatformInfo().catch(() => null))?.os ?? navigator.userAgentData?.platform ?? '';
+  const label = [brand ? `${brand.brand} ${brand.version}` : 'Chromium-based browser', os && `on ${os}`, launchMode && '(launch mode)']
+    .filter(Boolean).join(' ');
+  return { id: browserId, label };
+}
 
 let serverVersion = null;
 let sessionStats = { toolCallCount: 0, lastTool: null, lastToolTs: null, recentErrors: [] };
@@ -184,6 +215,7 @@ function connect() {
   }
 
   setConnectionState('connecting');
+  cachedIdentity();
 
   try {
     ws = new WebSocket(wsUrl);
@@ -195,12 +227,14 @@ function connect() {
 
   const socket = ws;
 
-  ws.onopen = () => {
+  ws.onopen = async () => {
     console.log('[chrome-bridge] Connected to MCP server');
-    const init = { type: 'ext_init', version: chrome.runtime.getManifest().version };
+    const init = { type: 'ext_init', version: chrome.runtime.getManifest().version, browser: await cachedIdentity() };
     if (extToken) init.token = extToken;
-    ws.send(JSON.stringify(init));
+    if (socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify(init));
     setConnectionState('connected');
+    refusedBy = null;
     reconnectDelay = RECONNECT_BASE_MS; // Reset backoff
   };
 
@@ -209,7 +243,7 @@ function connect() {
     console.log('[chrome-bridge] Disconnected from MCP server');
     ws = null;
     serverVersion = null;
-    setConnectionState('disconnected');
+    setConnectionState(refusedBy ? 'refused' : 'disconnected');
     scheduleReconnect();
   };
 
@@ -230,6 +264,12 @@ function connect() {
     // Gestisci ping
     if (msg.type === 'ping') {
       sendMessage({ type: 'pong', timestamp: Date.now() });
+      return;
+    }
+
+    if (msg.type === 'ext_init_refused') {
+      refusedBy = msg.connected || 'another browser';
+      console.warn(`[chrome-bridge] Refused: ${msg.reason}`);
       return;
     }
 
@@ -271,7 +311,7 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(() => {
     reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
     connect();
-  }, reconnectDelay);
+  }, refusedBy ? REFUSED_RETRY_MS : reconnectDelay);
 }
 
 function sendMessage(obj) {
@@ -458,6 +498,10 @@ async function executeCommand(msg) {
       return await cmdScreencast(params);
     case 'cdp_target':
       return await cmdCdpTarget(params);
+    case 'upload_chunk':
+      return await cmdUploadChunk(params);
+    case 'handoff_end':
+      return await cmdHandoffEnd(params);
     case 'list_event_listeners':
       return await cmdListEventListeners(params);
     case 'monitor_websocket':
@@ -2762,6 +2806,19 @@ async function cmdHandoff({ message, pick_element = false, ask = false, pick_max
   });
 }
 
+// handoff_end: l'utente ha risposto nel terminale (elicitation MCP) prima che
+// nella pagina. Il banner va tolto e l'handoff in attesa finisce con quella
+// risposta, così la chiamata handoff originale ritorna una sola volta.
+async function cmdHandoffEnd({ action = 'done', answer, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const entry = handoffs.get(tabId);
+  if (!entry) return { ended: false };
+  try { await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('cb-handoff-host')?.remove() }); } catch { /* tab chiusa */ }
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  entry.resolve({ done: action === 'done', action, url: tab?.url ?? null, via: 'terminal', ...(typeof answer === 'string' && { answer }) });
+  return { ended: true };
+}
+
 // --- keyboard_walk ---
 // Ordine di tabulazione calcolato (tabindex>0 crescente, poi ordine DOM) e
 // focus programmatico elemento per elemento. NON sono veri tasti Tab: un
@@ -3575,27 +3632,55 @@ async function cmdGetFrames({ tab_id }) {
 
 // --- upload_file ---
 
-async function cmdUploadFile({ selector, name, mime_type, content_b64, tab_id }) {
-  if (!selector) throw new Error('Missing required parameter: selector');
-  if (!content_b64) throw new Error('Missing required parameter: content_b64');
+// upload_chunk: i file oltre 6 MB arrivano a pezzi (server/upload.js). La
+// pagina li tiene in window.__cbUploads finché upload_file li monta, o un
+// abort li butta.
+async function cmdUploadChunk({ upload_id, index, total, content_b64, abort = false, tab_id }) {
+  if (!upload_id) throw new Error('Missing required parameter: upload_id');
   const tabId = await resolveTabId(tab_id);
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: (sel, fname, mime, b64) => {
+    func: (id, i, n, b64, drop) => {
+      const all = (window.__cbUploads ??= {});
+      if (drop) { delete all[id]; return { aborted: true }; }
+      const u = (all[id] ??= { parts: [], total: n });
+      u.parts[i] = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      return { received: i + 1, total: n };
+    },
+    args: [upload_id, index ?? 0, total ?? 1, content_b64 ?? '', abort],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { received: 0 };
+}
+
+async function cmdUploadFile({ selector, name, mime_type, content_b64, upload_id, size, tab_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  if (!content_b64 && !upload_id) throw new Error('Missing required parameter: content_b64');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, fname, mime, b64, id, expected) => {
+      const pieces = id ? window.__cbUploads?.[id] : null;
+      if (id) delete window.__cbUploads?.[id];
       const el = document.querySelector(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       // Un throw qui si perderebbe (elementOutcome lo leggerebbe come «not found»): esito esplicito.
       if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { uploaded: false, error: 'Element is not an input[type=file]' };
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      if (id && (!pieces || pieces.parts.filter(Boolean).length !== pieces.total)) {
+        return { uploaded: false, error: `Upload ${id} incomplete: ${pieces ? pieces.parts.filter(Boolean).length : 0}/${pieces?.total ?? '?'} pieces (page reloaded meanwhile?)` };
+      }
+      const bytes = id ? new Blob(pieces.parts) : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const length = id ? bytes.size : bytes.length;
+      if (id && expected != null && length !== expected) return { uploaded: false, error: `Upload ${id}: ${length} bytes arrived, ${expected} expected` };
       const file = new File([bytes], fname, { type: mime });
       const dt = new DataTransfer();
       dt.items.add(file);
       el.files = dt.files;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      return { uploaded: fname, size: bytes.length, mime };
+      return { uploaded: fname, size: length, mime, ...(id && { pieces: pieces.total }) };
     },
-    args: [selector, name, mime_type, content_b64],
+    args: [selector, name, mime_type, content_b64 ?? null, upload_id ?? null, size ?? null],
     world: 'MAIN',
   });
   return elementOutcome(results, selector);

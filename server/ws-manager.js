@@ -23,6 +23,16 @@ export function relayExpiry(msg) {
   return Math.max(PENDING_RELAY_TTL_MS, base, Number.isFinite(asked) && asked > 0 ? asked + 5000 : 0) + 5000;
 }
 
+/**
+ * Stesso browser: stesso id persistente. Le estensioni fino alla 1.27 non
+ * mandano un id: fra due di queste vale la sostituzione di sempre (non si
+ * possono distinguere), mentre un id contro nessun id sono browser diversi.
+ */
+export function sameBrowser(a, b) {
+  if (!a?.id && !b?.id) return true;
+  return Boolean(a?.id && b?.id && a.id === b.id);
+}
+
 export class WSManager {
   constructor(port = DEFAULT_PORT, opts = {}) {
     this.port = port;
@@ -49,6 +59,8 @@ export class WSManager {
     this.relayExtConnected = undefined;  // relay mode: stato estensione riportato dal primary
     this.relayExtVersion = null;
     this._extVersion = null;     // versione estensione da ext_init (primary)
+    this._browser = null;        // { id, label } del browser collegato, da ext_init
+    this.refusedBrowsers = [];   // ultimi browser rifiutati perché un altro era già collegato
 
     // --- primary mode ---
     this.wss = null;
@@ -99,6 +111,11 @@ export class WSManager {
   }
 
   /** Versione dell'estensione collegata (da ext_init), o null. */
+  /** Browser collegato ({ id, label }) e ultimi rifiutati; in relay mode non noti. */
+  get browser() {
+    return this.mode === 'relay' ? null : this._browser;
+  }
+
   get extVersion() {
     return this.mode === 'relay' ? (this.relayExtVersion ?? null) : (this._extVersion ?? null);
   }
@@ -304,7 +321,7 @@ export class WSManager {
           ws.terminate();
           return;
         }
-        this._setupChromeClient(ws, msg.version ?? null);
+        this._setupChromeClient(ws, msg.version ?? null, msg.browser ?? null);
         return;
       }
 
@@ -316,8 +333,29 @@ export class WSManager {
     ws.on('close', () => clearTimeout(idTimer));
   }
 
-  _setupChromeClient(ws, extVersion = null) {
+  _setupChromeClient(ws, extVersion = null, browser = null) {
+    // Un secondo browser non prende più la connessione a quello collegato:
+    // il 01/10/2026 un Chromium di prova sulla stessa porta ha rubato la
+    // connessione al Chrome dell'utente, e i comandi delle altre sessioni
+    // finivano nel browser sbagliato. Lo stesso browser che si riconnette
+    // (service worker riavviato) sostituisce la sua vecchia connessione; un
+    // browser diverso aspetta che l'altro si scolleghi o smetta di rispondere.
+    const current = this.client;
+    const alive = current && current.readyState === WebSocket.OPEN
+      && Date.now() - this.lastPong <= this.pingIntervalMs * 2 + this.pongGraceMs;
+    if (alive && !sameBrowser(this._browser, browser)) {
+      const refused = { label: browser?.label ?? 'a browser with an older extension', id: browser?.id ?? null, at: new Date().toISOString() };
+      this.refusedBrowsers = [refused, ...this.refusedBrowsers.filter((r) => r.id !== refused.id || r.label !== refused.label)].slice(0, 5);
+      const connected = this._browser?.label ?? 'another browser';
+      console.error(`[chrome-bridge] Refused ${refused.label}: ${connected} is already connected on this port`);
+      try {
+        ws.send(JSON.stringify({ type: 'ext_init_refused', connected, reason: `${connected} is already connected to this chrome-bridge` }));
+      } catch {}
+      ws.close(4409, 'Another browser is connected');
+      return;
+    }
     this._extVersion = extVersion;
+    this._browser = browser;
     // Lo skew server/estensione era invisibile: con la latenza di review del
     // Chrome Web Store è la norma, non l'eccezione.
     if (extVersion && extVersion !== VERSION) {
@@ -363,6 +401,7 @@ export class WSManager {
       if (this.client === ws) {
         this.client = null;
         this._extVersion = null;
+        this._browser = null;
         this._broadcastExtState();
         // Rigetta pending locali
         this._rejectAllPending('Extension disconnected');

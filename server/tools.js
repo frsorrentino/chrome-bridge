@@ -26,6 +26,7 @@ import { windowLayout } from './layouts.js';
 import { fingerprintDelta } from './effect.js';
 import { analyzeTrace, traceEventsOf } from './trace-analysis.js';
 import { assembleVideo } from './video.js';
+import { uploadBuffer, MAX_UPLOAD_BYTES } from './upload.js';
 import { cdpConnect, targetWsUrl, takeHeapSnapshot, summarizeHeap, diffHeap } from './heap.js';
 import { lighthouseArgs, runLighthouse, summarizeLighthouse } from './lighthouse.js';
 import { consoleLines, networkLines, interactivesLines, interactiveLine, linksLines } from './formatters.js';
@@ -273,6 +274,20 @@ export const TOOL_CAPS = {
   files: ['save_page', 'manage_downloads', 'session_record'],
 };
 
+// Tool sempre caricati nel contesto quando il client carica il server per
+// intero (alwaysLoad del plugin). Gli altri portano
+// _meta['anthropic/alwaysLoad'] = false e restano dietro la ricerca dei tool
+// (Claude Code 2.1.285+): lo schema pagato a ogni sessione scende, e un tool
+// rimandato si trova con ToolSearch. Scelti dall'uso reale: ogni tool usato
+// almeno 5 volte in 61 sessioni dell'autore (docs/analisi-2026-09-01.md, B.4).
+// CHROME_BRIDGE_ALWAYS_LOAD=all li rimette tutti, o una lista ne sceglie altri.
+export const EAGER_TOOLS = [
+  'execute_js', 'navigate', 'screenshot', 'find_text', 'click', 'get_interactives', 'create_tab', 'get_tabs',
+  'tab_action', 'tile_windows', 'full_page_screenshot', 'extract', 'read_page', 'get_status', 'scroll',
+  'wait_for', 'element_screenshot', 'type_text', 'window_layout', 'fill_form',
+];
+const DEFER_META = { 'anthropic/alwaysLoad': false };
+
 // Parametri ubiqui: un solo testo, così `tab_id` non significa una cosa in un
 // tool e un'altra nel gemello. test/unit/tool-parameters.test.js lo verifica.
 // save_to: il payload va su disco e nel contesto resta solo il percorso più un
@@ -499,8 +514,14 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // fuori dai gruppi attivi, e le annotations vengono applicate da TOOL_ANNOTATIONS.
   // Un solo wrapper per entrambe le cose, altrimenti con caps != 'all' le
   // annotations sparivano insieme al filtro.
+  // Il server MCP a basso livello (capability del client, elicitation): il
+  // wrapper qui sotto espone solo tool().
+  const lowLevelServer = server.server ?? null;
   {
     const target = server;
+    const eagerOpt = options.alwaysLoad ?? null;
+    const eager = eagerOpt === 'all' ? null
+      : new Set(eagerOpt ? String(eagerOpt).split(',').map((s) => s.trim()).filter(Boolean) : EAGER_TOOLS);
     const enabled = caps !== 'all'
       ? new Set(String(caps).split(',').map((s) => s.trim()).filter(Boolean))
       : null;
@@ -517,6 +538,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         // Un tool senza voce resta registrato (meglio di un crash all'avvio):
         // è il test tool-annotations a segnalarlo.
         const reg = annotations ? target.tool(name, desc, schema, annotations, run) : target.tool(name, desc, schema, run);
+        // Assegnato e non con update(): update() manderebbe tools/list_changed
+        // per ogni tool, prima ancora che il client sia collegato.
+        if (eager && !eager.has(name) && reg && typeof reg === 'object') reg._meta = { ...(reg._meta ?? {}), ...DEFER_META };
         if (inactive) { reg.disable(); dormant.set(name, reg); }
       },
     };
@@ -843,6 +867,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
             port: wsManager.port,
             version: VERSION,
             extension_version: wsManager.extVersion ?? null,
+            ...(wsManager.browser && { browser: wsManager.browser.label }),
+            ...(wsManager.refusedBrowsers?.length && { refused_browsers: wsManager.refusedBrowsers.map((r) => `${r.label} at ${r.at}`) }),
             // Un agente che non trova accessibility_audit non aveva modo di
             // scoprire che esiste ma è in un gruppo disattivato.
             js_evaluation: !noJs,
@@ -2219,7 +2245,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- upload_file ---
   server.tool(
     'upload_file',
-    'Set a file on input[type=file] from the server filesystem via DataTransfer (max 10MB). Keys and credentials (~/.ssh, ~/.aws, '
+    'Set a file on input[type=file] from the server filesystem via DataTransfer (max 200 MB; over 6 MB it travels in pieces). Keys and credentials (~/.ssh, ~/.aws, '
       + '~/.gnupg, .env*, *.pem, *.key, id_*…) are refused, and a --read-root on the server limits the readable tree: the call fails '
       + 'with an error, nothing is read.',
     {
@@ -2229,12 +2255,12 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       tab_id: tabId,
     },
     async ({ selector, path, mime_type, tab_id }) => {
-      const buf = await readFile(await guardRead(path));
-      if (buf.length > 10 * 1024 * 1024) throw new Error(`File too large: ${buf.length} bytes (max 10MB)`);
+      const abs = await guardRead(path);
+      const { size } = await stat(abs);
+      if (size > MAX_UPLOAD_BYTES) throw new Error(`File too large: ${size} bytes (max ${MAX_UPLOAD_BYTES / 1024 / 1024} MB)`);
+      const buf = await readFile(abs);
       const mime = mime_type || MIME_BY_EXT[extname(path).toLowerCase()] || 'application/octet-stream';
-      const data = await send(MessageType.UPLOAD_FILE, {
-        selector, name: basename(path), mime_type: mime, content_b64: buf.toString('base64'), tab_id,
-      });
+      const data = await uploadBuffer(send, { selector, name: basename(path), mime_type: mime, buf, tab_id });
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -2516,11 +2542,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       ask: z.boolean().optional().default(false).describe('Show a text box in the banner; the reply comes back as answer'),
       pick_max: z.number().optional().default(1).describe('With pick_element: up to N elements, the user presses Done when finished'),
       timeout: z.number().optional().default(300000).describe('ms to wait for the click, default 5 min'),
+      in_terminal: z.boolean().optional().default(true).describe('Also ask in the Claude Code terminal (MCP elicitation) when the client supports it; the first answer wins. Not for pick_element'),
       tab_id: tabId,
     },
-    async ({ message, pick_element, ask, pick_max, timeout, tab_id }) => {
-      const d = await send(MessageType.HANDOFF, { message, pick_element, ask, pick_max, timeout, tab_id });
-      const lines = [`handoff ${d.action}${d.url ? ` url=${d.url}` : ''}`];
+    async ({ message, pick_element, ask, pick_max, timeout, in_terminal, tab_id }) => {
+      const banner = send(MessageType.HANDOFF, { message, pick_element, ask, pick_max, timeout, tab_id });
+      const d = in_terminal !== false && !pick_element ? await withTerminalAsk(banner, { message, ask, tab_id }) : await banner;
+      const lines = [`handoff ${d.action}${d.url ? ` url=${d.url}` : ''}${d.via === 'terminal' ? ' via=terminal' : ''}`];
       if (ask && typeof d.answer === 'string' && d.answer.trim()) lines.push(`answer: ${d.answer.trim()}`);
       const fmt = (p) => `${p.selector}\t${p.tag}\t${p.text}\t@${p.rect.x},${p.rect.y} ${p.rect.width}x${p.rect.height}`;
       if (Array.isArray(d.picked_all) && d.picked_all.length) {
@@ -2532,6 +2560,33 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
   );
+
+  // handoff anche nel terminale: chi lavora con Claude Code spesso guarda il
+  // terminale, non il browser. Una richiesta form (elicitation MCP) corre in
+  // parallelo al banner e vince la prima risposta: dal terminale si chiude il
+  // banner (handoff_end), dal banner si annulla la richiesta nel terminale.
+  // La modalità URL dell'elicitation non serve qui: aprirebbe il link nel
+  // browser predefinito, che può non essere il Chrome in cui lavora l'agente.
+  async function withTerminalAsk(banner, { message, ask, tab_id }) {
+    const lowLevel = lowLevelServer;
+    if (!lowLevel?.getClientCapabilities?.()?.elicitation) return banner;
+    const abort = new AbortController();
+    const requestedSchema = ask
+      ? { type: 'object', properties: { answer: { type: 'string', title: 'Reply' } }, required: ['answer'] }
+      : { type: 'object', properties: {} };
+    const terminal = lowLevel.elicitInput(
+      { mode: 'form', message: `${message}\n\nDo it in Chrome (a banner there waits too), then accept here; decline to cancel.`, requestedSchema },
+      { signal: abort.signal, timeout: 24 * 3600 * 1000 },
+    ).then((r) => ({ from: 'terminal', r }), () => null);
+    const first = await Promise.race([banner.then((d) => ({ from: 'banner', d })), terminal.then((t) => t ?? banner.then((d) => ({ from: 'banner', d })))]);
+    if (first.from === 'banner') {
+      abort.abort();
+      return first.d;
+    }
+    const accepted = first.r.action === 'accept';
+    await send(MessageType.HANDOFF_END, { action: accepted ? 'done' : 'cancel', ...(accepted && ask && { answer: String(first.r.content?.answer ?? '') }), tab_id }).catch(() => {});
+    return banner;
+  }
 
   // --- watch ---
   server.tool(

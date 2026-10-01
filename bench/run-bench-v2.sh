@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# run-bench.sh <arm: bridge|cic> <task: form|heavy> <run-n>
+# run-bench.sh <arm: bridge|bridgeall|cic> <task: form|heavy|debug> <run-n>
+# bridgeall = chrome-bridge con tutti i tool sempre caricati
+# (CHROME_BRIDGE_ALWAYS_LOAD=all), per misurare contro bridge i tool rimandati
+# con _meta['anthropic/alwaysLoad'] (Claude Code 2.1.285+).
 set -uo pipefail
 ARM=$1; TASK=$2; RUN=$3
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,12 +20,14 @@ URLHOST="localhost"
 SERVER_VER=$(node -e "console.log(require('$REPO/package.json').version)" 2>/dev/null || echo unknown)
 EXT_VER=$(node -e "console.log(require('$REPO/extension/manifest.json').version)" 2>/dev/null || echo unknown)
 CAPS="${CHROME_BRIDGE_CAPS:-all}"
+ALWAYS_LOAD=""
+[ "$ARM" = "bridgeall" ] && ALWAYS_LOAD="all"
 # Commit e stato di server/ ed extension/: due arm girati in momenti diversi sono
 # appaiati solo se questi due campi coincidono.
 GIT_HEAD=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)
 GIT_TREE=$(git -C "$REPO" diff --quiet HEAD -- server extension 2>/dev/null && echo clean || echo dirty)
 cat > "$META" <<META_EOF
-{"arm":"$ARM","task":"$TASK","run":"$RUN","server_version":"$SERVER_VER","extension_version":"$EXT_VER","caps":"$CAPS","git_head":"$GIT_HEAD","server_ext_tree":"$GIT_TREE","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","claude_version":"$(claude --version 2>/dev/null | head -1)"}
+{"arm":"$ARM","task":"$TASK","run":"$RUN","always_load":"${ALWAYS_LOAD:-default}","server_version":"$SERVER_VER","extension_version":"$EXT_VER","caps":"$CAPS","git_head":"$GIT_HEAD","server_ext_tree":"$GIT_TREE","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","claude_version":"$(claude --version 2>/dev/null | head -1)"}
 META_EOF
 
 PROMPT_FORM="Apri http://${URLHOST}:8099/form.html e compila il form: nome 'Mario Rossi', email 'mario.rossi@example.com', telefono '0961123456', regione 'Calabria', spunta la casella privacy, NON spuntare la newsletter. Invia il form e riporta il testo esatto del messaggio di conferma che appare."
@@ -31,12 +36,12 @@ PROMPT_HEAVY="Apri http://${URLHOST}:8099/heavy.html. Nella tabella del catalogo
 PROMPT_DEBUG="Apri http://${URLHOST}:8099/debug/ . È la pagina di checkout che sto sviluppando: il carrello resta vuoto e il pulsante 'Pay now' non si vede. Trova la causa di entrambi i problemi e riporta: l'errore JavaScript con file e riga del sorgente originale (non del bundle), la richiesta di rete che fallisce con il suo status, e la regola CSS responsabile del pulsante invisibile."
 if [ "$TASK" = "form" ]; then PROMPT="$PROMPT_FORM"; elif [ "$TASK" = "debug" ]; then PROMPT="$PROMPT_DEBUG"; else PROMPT="$PROMPT_HEAVY"; fi
 
-if [ "$ARM" = "bridge" ]; then
+if [ "$ARM" = "bridge" ] || [ "$ARM" = "bridgeall" ]; then
   timeout 360 claude -p "$PROMPT" \
     --model claude-sonnet-5 \
     --output-format stream-json --verbose \
     --strict-mcp-config \
-    --mcp-config "{\"mcpServers\":{\"chrome-bridge\":{\"type\":\"stdio\",\"command\":\"node\",\"alwaysLoad\":true,\"args\":[\"$REPO/server/index.js\",\"--launch\",\"--headless\",\"--caps\",\"$CAPS\"],\"env\":{\"CHROME_BRIDGE_PORT\":\"8768\"}}}}" \
+    --mcp-config "{\"mcpServers\":{\"chrome-bridge\":{\"type\":\"stdio\",\"command\":\"node\",\"alwaysLoad\":true,\"args\":[\"$REPO/server/index.js\",\"--launch\",\"--headless\",\"--caps\",\"$CAPS\"],\"env\":{\"CHROME_BRIDGE_PORT\":\"8768\",\"CHROME_BRIDGE_ALWAYS_LOAD\":\"$ALWAYS_LOAD\"}}}}" \
     --allowedTools "mcp__chrome-bridge__*" \
     > "$STREAM" 2>"$ERR"
 else

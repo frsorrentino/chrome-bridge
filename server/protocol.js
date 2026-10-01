@@ -44,6 +44,7 @@ export const MessageType = Object.freeze({
   MOVE_TAB:             'move_tab',
   TILE_WINDOWS:         'tile_windows',
   UPLOAD_FILE:           'upload_file',
+  UPLOAD_CHUNK:          'upload_chunk',
   WAIT_FOR_NAVIGATION:   'wait_for_navigation',
   WAIT_FOR_NETWORK_IDLE: 'wait_for_network_idle',
   WAIT_FOR_TEXT:         'wait_for_text',
@@ -82,6 +83,7 @@ export const MessageType = Object.freeze({
   PERF_TRACE:            'perf_trace',
   SCREENCAST:            'screencast',
   CDP_TARGET:            'cdp_target',
+  HANDOFF_END:           'handoff_end',
 
   // Risposte (extension → server)
   RESULT: 'result',
@@ -149,6 +151,7 @@ export function getTimeout(type) {
     || type === MessageType.WAIT_FOR_NETWORK_IDLE
     || type === MessageType.WAIT_FOR_TEXT
     || type === MessageType.UPLOAD_FILE
+    || type === MessageType.UPLOAD_CHUNK
     || type === MessageType.MANAGE_DOWNLOADS
     || type === MessageType.SAVE_PAGE
     || type === MessageType.HTTP_REQUEST

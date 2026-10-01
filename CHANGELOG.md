@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Changed
+
+- **Fewer tools always in context** (Claude Code 2.1.285+): 20 of the 43
+  core tools, the ones used at least five times in 61 real sessions, stay
+  loaded; the other 23 carry `_meta['anthropic/alwaysLoad'] = false` and wait
+  behind tool search. About 5.7k tokens of schema per session instead of
+  about 12.2k. `CHROME_BRIDGE_ALWAYS_LOAD=all` (or `--always-load all`) loads
+  every tool again; a comma list picks others.
+- **A second browser no longer takes the connection.** The extension sends a
+  persistent browser id and a label; while a browser is connected and
+  answering, another one is refused (`ext_init_refused`, close code 4409) and
+  retries every 15 s. The same browser reconnecting replaces its old
+  connection. `get_status` shows `browser` and `refused_browsers`; the popup
+  says «In attesa: un altro browser è collegato». On 01/10 a test Chromium on
+  port 8765 had taken the connection from the user's Chrome.
+- **`handoff` also asks in the Claude Code terminal** through an MCP form
+  elicitation, beside the page banner; the first answer wins
+  (`via=terminal`). `in_terminal: false` keeps the banner only.
+- **`upload_file` up to 200 MB:** over 6 MB the file travels in pieces
+  (`upload_chunk`) instead of one message capped at 10 MB. Needs the
+  extension of this release for files over 6 MB; smaller ones work with older
+  extensions.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

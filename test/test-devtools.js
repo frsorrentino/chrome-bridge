@@ -27,7 +27,7 @@ import { deflateSync } from 'node:zlib';
 const PORT = parseInt(process.env.CHROME_BRIDGE_PORT || '8765', 10);
 const LAUNCH = process.argv.includes('--launch');
 const HEADLESS = process.argv.includes('--headless');
-const TIMEOUT_CONNECT = 30000;
+const TIMEOUT_CONNECT = Number(process.env.E2E_CONNECT_MS || 30000);
 
 let wsManager;
 let passed = 0;
@@ -1140,6 +1140,29 @@ async function testLaunchOnlyTools(browser) {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// 1.28: upload_file oltre i 10 MB, a pezzi (server/upload.js).
+async function testUploadLarge() {
+  const { uploadBuffer } = await import('../server/upload.js');
+  const { createHash, randomBytes } = await import('node:crypto');
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}upload`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  try {
+    const buf = randomBytes(25 * 1024 * 1024);
+    const t0 = Date.now();
+    const r = await uploadBuffer((t, p) => wsManager.sendCommand(t, p), { selector: '#f', name: 'big.bin', mime_type: 'application/octet-stream', buf, tab_id });
+    const ms = Date.now() - t0;
+    const page = await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: '(async () => { const f = document.getElementById("f").files[0]; const h = await crypto.subtle.digest("SHA-256", await f.arrayBuffer()); return f.size + ":" + [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join(""); })()',
+      tab_id, timeout: 60000,
+    });
+    const expected = `${buf.length}:${createHash('sha256').update(buf).digest('hex')}`;
+    if (r.uploaded !== 'big.bin' || r.pieces !== 5 || page.result !== expected) throw new Error(`esito ${JSON.stringify(r)}, pagina ${page.result}`);
+    ok(`upload_file 25 MB in ${r.pieces} pezzi, ${ms} ms, SHA-256 uguale nella pagina`);
+  } catch (e) { fail('upload_file oltre 10 MB', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // Copia locale della pagina di example.com com'era fino a settembre 2026: il
 // sito vero ha cambiato markup (niente h1, niente width) e i test che ci
 // contavano sono diventati rossi senza che il nostro codice cambiasse.
@@ -1174,6 +1197,7 @@ async function startFixture() {
       setTimeout(() => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(HERO_PNG); }, 300);
       return;
     }
+    if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }
     if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(req.url === '/motion' ? motionHtml : EXAMPLE_HTML);
@@ -1276,6 +1300,9 @@ async function main() {
     await testPerfTrace();
     await testScreencast();
     await testLaunchOnlyTools(browser);
+
+    // 1.28
+    await testUploadLarge();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

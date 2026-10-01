@@ -4,6 +4,7 @@ const stateLabels = {
   connected: 'Connesso',
   connecting: 'Connessione…',
   disconnected: 'Disconnesso',
+  refused: 'In attesa: un altro browser è collegato',
 };
 
 function renderState(state) {
