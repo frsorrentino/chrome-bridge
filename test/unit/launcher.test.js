@@ -63,3 +63,38 @@ test('estensione non connessa dopo il lancio di Chrome brandizzato: l\'errore di
   ws.notConnectedHint = BRANDED_CHROME_HINT;
   await assert.rejects(ws.sendCommand('get_tabs'), /ignores --load-extension.*CHROME_BRIDGE_BROWSER/);
 });
+
+test('sweepStaleLaunchDirs: via le cartelle di server morti e quelle vecchie senza proprietario', async () => {
+  const { mkdtemp: mk, mkdir: md, writeFile: wf, utimes, readdir: rd } = await import('node:fs/promises');
+  const { tmpdir: td } = await import('node:os');
+  const { sweepStaleLaunchDirs } = await import('../../server/launcher.js');
+  const dir = await mk(join(td(), 'cb-sweep-'));
+  try {
+    const make = async (name, owner, ageMs = 0) => {
+      const p = join(dir, name);
+      await md(join(p, 'profile'), { recursive: true });
+      if (owner) await wf(join(p, 'owner.json'), JSON.stringify(owner));
+      if (ageMs) { const t = new Date(Date.now() - ageMs); await utimes(p, t, t); }
+    };
+    await make('chrome-bridge-launch-dead', { pid: 111 });
+    await make('chrome-bridge-launch-live', { pid: 222 });
+    await make('chrome-bridge-launch-old', null, 25 * 3600 * 1000);
+    await make('chrome-bridge-launch-young', null, 3600 * 1000);
+    await make('other-folder', { pid: 111 });
+    const removed = await sweepStaleLaunchDirs({ dir, alive: (pid) => pid === 222 });
+    assert.deepEqual(removed.sort(), ['chrome-bridge-launch-dead', 'chrome-bridge-launch-old']);
+    assert.deepEqual((await rd(dir)).sort(), ['chrome-bridge-launch-live', 'chrome-bridge-launch-young', 'other-folder']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('prepareLaunch scrive owner.json con il pid del server', async () => {
+  const { base } = await prepareLaunch(40124);
+  try {
+    const owner = JSON.parse(await readFile(join(base, 'owner.json'), 'utf8'));
+    assert.equal(owner.pid, process.pid);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});

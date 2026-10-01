@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 } from 'node:path';
@@ -71,9 +71,45 @@ export function findBrowser() {
   return found;
 }
 
+const LAUNCH_PREFIX = 'chrome-bridge-launch-';
+const STALE_WITHOUT_OWNER_MS = 24 * 3600 * 1000;
+
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+// Cartelle di sessioni launch finite male o mai pulite: su Windows Edge tiene
+// i file del profilo anche dopo la chiusura, rm falliva in silenzio e restavano
+// circa 47 MB a sessione (01-02/10/2026: 73 cartelle, 3,5 GB in %TEMP%). Ogni
+// cartella dice di chi è (owner.json con il pid del server): si cancella se
+// quel processo non esiste più. Senza owner.json (versioni fino alla 1.27) solo
+// dopo 24 ore, per non toccare una sessione in corso.
+export async function sweepStaleLaunchDirs({ dir = tmpdir(), now = Date.now(), alive = processAlive } = {}) {
+  const removed = [];
+  let names = [];
+  try { names = await readdir(dir); } catch { return removed; }
+  for (const name of names.filter((n) => n.startsWith(LAUNCH_PREFIX))) {
+    const path = join(dir, name);
+    let stale;
+    try {
+      const owner = JSON.parse(await readFile(join(path, 'owner.json'), 'utf8'));
+      stale = !alive(owner.pid);
+    } catch {
+      try { stale = now - (await stat(path)).mtimeMs > STALE_WITHOUT_OWNER_MS; } catch { stale = false; }
+    }
+    if (!stale) continue;
+    try {
+      await rm(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+      removed.push(name);
+    } catch { /* ancora bloccata: ci riprova il prossimo avvio */ }
+  }
+  return removed;
+}
+
 /** Prepara dir temporanee: copia estensione + launch.json, profilo con dev mode. */
 export async function prepareLaunch(port) {
-  const base = await mkdtemp(join(tmpdir(), 'chrome-bridge-launch-'));
+  const base = await mkdtemp(join(tmpdir(), LAUNCH_PREFIX));
+  await writeFile(join(base, 'owner.json'), JSON.stringify({ pid: process.pid, started: new Date().toISOString() }));
   const extDir = join(base, 'ext');
   const profileDir = join(base, 'profile');
 
@@ -95,6 +131,8 @@ export async function prepareLaunch(port) {
  */
 export async function launchBrowser({ port, headless = false }) {
   const browser = findBrowser();
+  const swept = await sweepStaleLaunchDirs();
+  if (swept.length) console.error(`[chrome-bridge] removed ${swept.length} leftover launch profile(s) from earlier sessions`);
   const { base, extDir, profileDir } = await prepareLaunch(port);
 
   const args = [
@@ -128,7 +166,13 @@ export async function launchBrowser({ port, headless = false }) {
         proc.once('exit', () => { clearTimeout(t); resolve(); });
       });
     }
-    await rm(base, { recursive: true, force: true }).catch(() => {});
+    // Su Windows i processi figli del browser rilasciano i file qualche
+    // istante dopo l'uscita del principale: ritentativi invece di un solo
+    // tentativo silenzioso. Se non basta, la spazzata del prossimo avvio la
+    // trova (owner.json con un pid morto).
+    await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch((e) => {
+      console.error(`[chrome-bridge] could not remove ${base} (${e.code ?? e.message}); the next launch removes it`);
+    });
   };
 
   console.error(`[chrome-bridge] launched ${browser}${headless ? ' (headless)' : ''} pid=${proc.pid}, ws port ${port}`);

@@ -26,6 +26,17 @@
   extension of this release for files over 6 MB; smaller ones work with older
   extensions.
 
+### Fixed
+
+- **Launch mode no longer leaves its temporary profile behind on Windows.**
+  Edge kept the files after exit and the single silent `rm` failed: about
+  47 MB per session in `%TEMP%` (73 folders, 3.5 GB, on 01-02/10). The
+  folder is now removed with retries, carries an `owner.json` with the
+  server's pid, and every launch removes the leftovers of servers that no
+  longer run (folders without an owner after 24 hours).
+- **Plugin and marketplace descriptions** still said «no debugger
+  permission», untrue since 1.26: the debugger is used on request only.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

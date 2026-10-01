@@ -40,9 +40,11 @@ if [ "$TASK" = "form" ]; then PROMPT="$PROMPT_FORM"; elif [ "$TASK" = "debug" ];
 # entra nel contesto e cambia a ogni run (i file di results/ non tracciati),
 # così la cache del prompt non si riusava fra sessioni; e il modello poteva
 # cercare la risposta nei sorgenti con Grep e Read (serie w128a, 01/10/2026).
-WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/cb-bench-XXXXXX")
-trap 'rm -rf "$WORKDIR"' EXIT
-cd "$WORKDIR" || exit 1
+# Percorso fisso, svuotato a ogni run: anche il percorso entra nel prompt, e
+# con mktemp ogni sessione partiva a freddo (serie w128b, 17,5-27k token di
+# cache scritti a ogni run). CB_BENCH_WORKDIR lo sposta.
+WORKDIR="${CB_BENCH_WORKDIR:-${TMPDIR:-/tmp}/cb-bench-work}"
+rm -rf "$WORKDIR" && mkdir -p "$WORKDIR" && cd "$WORKDIR" || exit 1
 
 if [ "$ARM" = "bridge" ] || [ "$ARM" = "bridgeall" ]; then
   timeout 360 claude -p "$PROMPT" \
