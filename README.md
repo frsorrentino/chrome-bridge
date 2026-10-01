@@ -169,13 +169,13 @@ default; the other 23 sit in seven optional caps that the agent switches on
 mid-session with `get_status({enable: ["visual"]})`, with no restart
 (`--caps` still sets them at startup).
 
-![The tools by group, from clicking a button to auditing a whole page](assets/readme/card4-toolbox.png)
+![66 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
 | Core & Navigation | 13 | tabs, windows, `navigate`, `screenshot`, `tile_windows` |
 | Interaction | 11 | `click`, `fill_form`, `upload_file`, dialogs, clipboard |
-| DOM & Inspection | 11 | `read_page`, `extract`, `query_dom`, `get_css_styles`, `watch_dom` |
+| DOM & Inspection | 12 | `read_page`, `extract`, `extract_table`, `query_dom`, `get_css_styles`, `watch_dom` |
 | Debugging & Network | 8 | `execute_js`, console, network log, mocking, `track_events` |
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
 | Audits | 2 | `audit` (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), `cookie_audit` |

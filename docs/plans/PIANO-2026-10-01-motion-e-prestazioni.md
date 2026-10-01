@@ -62,4 +62,4 @@ Incidente del 01/10, 17:42-17:48: lo script di prova caricava l'estensione del r
 - `hover` sintetico non accende il `:hover` del CSS: ora c'è `hover({trusted})`, ed è il default nelle finestre di `animations` e `frames`;
 - l'input fidato leggeva le coordinate a metà di uno scorrimento morbido: ora `behavior: 'instant'`.
 
-**Da fare fuori dal codice:** la card `assets/readme/card4-toolbox.png` mostra ancora il vecchio conteggio nell'immagine.
+**Card del README:** `card4-toolbox` ridisegnata il 01/10 alle 20:30 (66 tool, otto gruppi; DOM a 12 con `extract_table`, che TOOLS.md non elencava).

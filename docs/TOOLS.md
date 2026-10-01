@@ -56,9 +56,9 @@ only, debugging bar for the moment of the move).
 `fill_form` fills N fields and submits in one call — 3 calls instead of 9 on the
 benchmark form, at the same byte count.
 
-## DOM & Inspection (11)
+## DOM & Inspection (12)
 
-`read_page`, `extract`, `get_page_info`, `query_dom`, `get_css_styles`, `modify_dom`, `find_text`,
+`read_page`, `extract`, `extract_table`, `get_page_info`, `query_dom`, `get_css_styles`, `modify_dom`, `find_text`,
 `get_interactives`, `inject_css`, `watch_dom`, `get_page_info` (with `dev`: dev server and
 error overlay when one is open),
 `measure_spacing`.
