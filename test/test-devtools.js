@@ -973,6 +973,19 @@ async function testMotion() {
     });
     ok('frames: stop senza start rifiutato');
   } catch (e) { fail('frames stop senza start', e.message); }
+  const hoverWindow = async () => {
+    await wsManager.sendCommand(MessageType.HOVER, { selector: 'h1', trusted: true, tab_id });
+    await motion('start');
+    await wsManager.sendCommand(MessageType.HOVER, { selector: '#card', trusted: true, tab_id });
+    await new Promise((r) => setTimeout(r, 400));
+    return (await motion('stop')).animations.list.filter((a) => a.selector === '#card');
+  };
+  try {
+    const [t] = await hoverWindow();
+    if (t?.kind !== 'CSSTransition' || !t.properties.includes('transform') || t.duration_ms !== 150) throw new Error(`hover: ${JSON.stringify(t)}`);
+    ok('hover trusted: il :hover CSS parte, transizione transform da 150 ms');
+  } catch (e) { fail('hover trusted e transizione CSS', e.message); }
+
   // emulate_media via debugger: le @media del sito valgono davvero.
   const emulate = (p) => wsManager.sendCommand(MessageType.EMULATE_MEDIA, { tab_id, ...p });
   try {
@@ -983,6 +996,11 @@ async function testMotion() {
     if (!snap.prefers_reduced_motion || names.includes('spin') || !names.includes('grow')) throw new Error(`con reduce: ${names} rm=${snap.prefers_reduced_motion}`);
     ok('emulate_media via debugger: la regola reduce del sito toglie spin, grow resta');
   } catch (e) { fail('emulate_media via debugger reduce', e.message); }
+  try {
+    const list = await hoverWindow();
+    if (!list.length || !list.every((a) => a.fade_only && a.duration_ms <= 150)) throw new Error(`con reduce: ${JSON.stringify(list)}`);
+    ok('reduce: al passaggio del mouse resta solo la dissolvenza da 150 ms');
+  } catch (e) { fail('reduce e passaggio del mouse', e.message); }
   try {
     // Minimo di tre esecuzioni: la prima paga la compilazione del JIT, e un
     // picco di carico della macchina non deve passare per rallentamento.

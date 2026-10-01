@@ -36,4 +36,30 @@ Incidente del 01/10, 17:42-17:48: lo script di prova caricava l'estensione del r
 - [x] Tappa 3 (e2e 82/83; il motore dei trace è un peer opzionale, npm non lo installa: API dichiarata instabile e due dipendenze a `latest`; analisi di base in `server/trace-analysis.js`): `perf_trace` (trace su file, analisi con `@paulirish/trace_engine` opzionale o ripiego interno) e `screencast` (ffmpeg, scheda attiva)
 - [x] Tappa 4 (e2e 85/86; Lighthouse 13 vuole Node >= 22.19: sotto si usa la 12.8.2): porta CDP del launch (`--remote-debugging-port=0`, `DevToolsActivePort`), `lighthouse` con `npx`, `heap_snapshot` solo in launch
 - [x] Documenti, una volta sola a tool completi (66 tool, nucleo 43; unit 476/476): `TOOLS.md`, `CAPABILITIES.md`, conteggi (`tool-counts.test.js`, README, package/server/manifest), CHANGELOG
-- [ ] Verifica finale: lotto D3 di francescosorrentino.com e confronto con chrome-devtools-mcp 1.10.1
+- [x] Verifica finale (01/10, 18:30-18:50), con i dettagli qui sotto
+
+## Verifica finale
+
+**D3 non esiste ancora.** Il recap del sito lo mette dopo D2. La verifica gira su `/strumenti/`, dove `--spring` e `--settle` sono in produzione dal rilascio D1/D1b. Condizioni: `php -S 127.0.0.1:8099` in sola lettura sul repository del sito, launch headless sulla porta 8799, handler veri del working tree.
+
+- **`animations` con hover sulla prima card:** 6 transizioni.
+  - Le card: `border-*-color` e `transform` a 220 ms con la molla `--spring`, riconosciuta come `linear(0 0%, 0.0455 5%, …)` a 21 punti.
+  - L'intestazione: `transform` a 320 ms, perché si nasconde allo scorrimento.
+- **Con `reduce` via debugger:** zero transizioni. Il CSS del sito porta le durate a zero (`css/style.css`), quindi le dissolvenze da 150 ms del brief sono un obiettivo di D3, ancora da costruire.
+- **`frames` sul click fidato di un filtro:**
+  - circa 58 fps, nessun fotogramma lungo, CLS 0;
+  - INP 80-128 ms, con presentazione dominante (100+ ms);
+  - 23 animazioni partite.
+- **`perf_trace` contro chrome-devtools-mcp 1.10.1 sugli stessi file di trace:**
+  - i trace sono 6, salvati da chrome-devtools-mcp con `filePath`: tre di `/strumenti/` e tre della home;
+  - LCP, CLS e TTFB coincidono al millisecondo, e l'elemento LCP è lo stesso;
+  - la tolleranza dichiarata è quindi zero, sullo stesso trace.
+
+  Fra registrazioni diverse invece i numeri cambiano col browser: su `/strumenti/` LCP 582-818 ms con la scheda del launch già calda, 1 659-2 746 ms con il Chromium appena avviato da chrome-devtools-mcp, con carico della macchina fra 4 e 11.
+
+**Difetti trovati con la verifica, corretti:**
+
+- `hover` sintetico non accende il `:hover` del CSS: ora c'è `hover({trusted})`, ed è il default nelle finestre di `animations` e `frames`;
+- l'input fidato leggeva le coordinate a metà di uno scorrimento morbido: ora `behavior: 'instant'`.
+
+**Da fare fuori dal codice:** la card `assets/readme/card4-toolbox.png` mostra ancora il vecchio conteggio nell'immagine.

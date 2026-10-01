@@ -1765,15 +1765,17 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     ref: z.string().optional().describe('From get_interactives, e.g. "n3"'),
     key: z.string().optional().describe('press_key: e.g. "Enter", "Escape", "ArrowDown"'),
     y: z.number().optional().describe('scroll without selector: absolute vertical position in px'),
-    trusted: z.boolean().optional().default(false).describe('click/press_key: real browser input via chrome.debugger'),
+    trusted: z.boolean().optional().describe('Real browser input via chrome.debugger; default true for hover (CSS :hover needs it), false otherwise'),
   }).optional().describe('Action run right after recording starts');
   const MOTION_MAX_MS = 30000;
 
   async function runMotionAction(action, tab_id, frame_id) {
     const t = action.selector || action.ref ? resolveTarget(action.selector, action.ref, tab_id, frame_id) : { selector: undefined, frame_id };
-    const trusted = action.trusted ? { trusted: true } : {};
+    // Un hover sintetico non accende il :hover del CSS: per misurare le sue
+    // transizioni serve il puntatore vero, quindi qui è il default.
+    const trusted = (action.trusted ?? action.type === 'hover') ? { trusted: true } : {};
     if (action.type === 'click') return send(MessageType.CLICK, { selector: t.selector, button: 'left', count: 1, ...trusted, frame_id: t.frame_id, tab_id });
-    if (action.type === 'hover') return send(MessageType.HOVER, { selector: t.selector, frame_id: t.frame_id, tab_id });
+    if (action.type === 'hover') return send(MessageType.HOVER, { selector: t.selector, ...trusted, frame_id: t.frame_id, tab_id });
     if (action.type === 'press_key') return send(MessageType.PRESS_KEY, { key: action.key ?? 'Enter', selector: t.selector, ...trusted, frame_id: t.frame_id, tab_id });
     return send(MessageType.SCROLL_TO, { selector: t.selector, y: action.y, behavior: 'smooth', tab_id, frame_id: t.frame_id });
   }
@@ -2118,16 +2120,18 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- hover ---
   server.tool(
     'hover',
-    'Hover over an element (mouseenter/mouseover), by CSS selector or ref.',
+    'Hover over an element, by CSS selector or ref. Default: synthetic mouseenter/mouseover/mousemove, which fire JS hover handlers '
+      + 'but not CSS :hover. trusted moves the real mouse pointer (chrome.debugger), so CSS :hover rules and their transitions apply.',
     {
-      selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM. Triggers CSS and JS hover handlers'),
+      selector: z.string().optional().describe('CSS selector; ">>>" pierces shadow DOM'),
       ref: z.string().optional().describe('From get_interactives'),
+      trusted: z.boolean().optional().default(false).describe('Real browser pointer via chrome.debugger, main frame only: needed for CSS :hover'),
       tab_id: tabId,
       frame_id: frameId,
     },
-    async ({ selector, ref, tab_id, frame_id }) => {
+    async ({ selector, ref, trusted, tab_id, frame_id }) => {
       const t = resolveTarget(selector, ref, tab_id, frame_id);
-      const data = await send(MessageType.HOVER, { selector: t.selector, tab_id, frame_id: t.frame_id });
+      const data = await send(MessageType.HOVER, { selector: t.selector, ...(trusted && { trusted: true }), tab_id, frame_id: t.frame_id });
       return {
         content: [{
           type: 'text',

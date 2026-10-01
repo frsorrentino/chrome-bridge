@@ -949,7 +949,10 @@ async function trustedTarget(tabId, frame_id, selector, what) {
       const el = sel ? deepQuery(sel) : (document.activeElement || document.body);
       if (!el) return { missing: true };
       if (kind === 'point') {
-        el.scrollIntoView({ block: 'center', inline: 'center' });
+        // instant: con scroll-behavior: smooth nella pagina il rettangolo letto
+        // subito dopo è a metà scorrimento, e il puntatore finiva su un altro
+        // elemento (francescosorrentino.com/strumenti, 01/10/2026).
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         const r = el.getBoundingClientRect();
         const x = r.left + r.width / 2; const y = r.top + r.height / 2;
         const top = document.elementFromPoint(x, y);
@@ -980,6 +983,15 @@ async function trustedClick(tabId, { selector, frame_id, force, button, count })
     for (const ev of mouseClickEvents(t.x, t.y, { button, count })) await send('Input.dispatchMouseEvent', ev);
   });
   return { clicked: true, trusted: true, button, count, tagName: t.tagName, text: t.text };
+}
+
+// Passaggio del mouse fidato: solo un mouseMoved del browser accende il
+// :hover del CSS; gli eventi sintetici di cmdHover lo lasciano spento, e una
+// transizione al passaggio del mouse non parte (animations sul sito, 01/10).
+async function trustedHover(tabId, { selector, frame_id }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'point');
+  await withDebugger(tabId, (send) => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: t.x, y: t.y }));
+  return { hovered: true, trusted: true, tagName: t.tagName, ...(t.occluded && { occluded_by: t.occluder }) };
 }
 
 async function trustedType(tabId, { selector, text, frame_id }) {
@@ -3437,9 +3449,10 @@ async function cmdEmulateMediaPage({ colorScheme, reducedMotion, printMode = fal
 
 // --- hover ---
 
-async function cmdHover({ selector, tab_id, frame_id }) {
+async function cmdHover({ selector, tab_id, frame_id, trusted = false }) {
   if (!selector) throw new Error('Missing required parameter: selector');
   const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedHover(tabId, { selector, frame_id });
 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),

@@ -48,6 +48,11 @@ agent can act without a separate discovery call.
 `drag_and_drop`, `upload_file`, `dismiss_overlays`, `handle_dialogs`,
 `clipboard`.
 
+`hover` by default dispatches synthetic mouse events: JS hover handlers fire,
+CSS `:hover` does not. `hover({trusted: true})` moves the real pointer through
+`chrome.debugger`, so `:hover` rules and their transitions apply (main frame
+only, debugging bar for the moment of the move).
+
 `fill_form` fills N fields and submits in one call — 3 calls instead of 9 on the
 benchmark form, at the same byte count.
 

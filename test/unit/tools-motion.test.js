@@ -26,6 +26,7 @@ test('animations con azione: start, hover, stop nell ordine, con ref alle animaz
   const res = await handlers.get('animations').handler({ duration_ms: 100, action: { type: 'hover', selector: '.card' }, limit: 50 });
   assert.deepEqual(sent.map((m) => m.params.op ?? m.type), ['start', MessageType.HOVER, 'stop']);
   assert.equal(sent[1].params.selector, '.card');
+  assert.equal(sent[1].params.trusted, true, 'hover fidato di default: il :hover del CSS non scatta con eventi sintetici');
   const data = JSON.parse(res.content[0].text);
   assert.equal(data.animations[0].ref, 'n1');
   assert.equal(data.summary.count, 1);

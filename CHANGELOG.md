@@ -26,7 +26,19 @@
 - **Launch mode opens a DevTools port** on 127.0.0.1 (`--remote-debugging-port=0`,
   temporary profile), for `lighthouse` and `heap_snapshot`.
 
+- **`hover({trusted: true})`** moves the real pointer through
+  `chrome.debugger`, so CSS `:hover` rules and their transitions apply; the
+  default synthetic events fire JS handlers only (the description said CSS
+  too, wrongly). The `animations`/`frames` hover action is trusted by default.
+
 No new permission: `debugger` arrived in 1.26.0.
+
+### Fixed
+
+- **Trusted click and hover on pages with `scroll-behavior: smooth`** hit
+  another element: the target's position was read mid-scroll. The scroll is
+  now instant (found on francescosorrentino.com/strumenti, where the pointer
+  landed on the fifth card instead of the first).
 
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
