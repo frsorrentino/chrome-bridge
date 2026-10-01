@@ -87,6 +87,19 @@ test('clic sul banner prima: la richiesta nel terminale viene annullata', async 
   await client.close();
 });
 
+test('estensione 1.27 senza handoff_end: vale la risposta del terminale, la chiamata non resta appesa', async () => {
+  const ext = fakeExtension();
+  const send = ext.sendCommand;
+  ext.sendCommand = async (type, params) => {
+    if (type === MessageType.HANDOFF_END) { ext.sent.push({ type, params }); throw new Error('Unknown command type: handoff_end'); }
+    return send(type, params);
+  };
+  const client = await setup(ext, async () => ({ action: 'accept', content: { answer: 'yes' } }));
+  const r = await client.callTool({ name: 'handoff', arguments: { message: 'Ok?', ask: true } });
+  assert.match(text(r), /^handoff done via=terminal\nanswer: yes\n.*banner is still open/);
+  await client.close();
+});
+
 test('client senza elicitation, pick_element o in_terminal false: solo il banner', async () => {
   for (const [cap, args] of [[false, {}], [true, { pick_element: true }], [true, { in_terminal: false }]]) {
     const ext = fakeExtension({ bannerAfterMs: 10 });

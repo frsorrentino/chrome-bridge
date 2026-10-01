@@ -2561,6 +2561,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         lines.push(`picked ${fmt(d.picked)}`);
       }
       if (d.action === 'timeout') lines.push('the user did not click within the timeout: ask before retrying');
+      if (d.banner_left_open) lines.push('answered in the terminal; the page banner is still open (extension older than the server): the user can close it');
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
   );
@@ -2588,8 +2589,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return first.d;
     }
     const accepted = first.r.action === 'accept';
-    await send(MessageType.HANDOFF_END, { action: accepted ? 'done' : 'cancel', ...(accepted && ask && { answer: String(first.r.content?.answer ?? '') }), tab_id }).catch(() => {});
-    return banner;
+    const action = accepted ? 'done' : 'cancel';
+    const answer = accepted && ask ? String(first.r.content?.answer ?? '') : undefined;
+    try {
+      const end = await send(MessageType.HANDOFF_END, { action, ...(answer != null && { answer }), tab_id });
+      if (end?.ended) return banner;
+    } catch { /* estensione fino alla 1.27: handoff_end non esiste */ }
+    // Il banner non si è potuto chiudere (estensione vecchia, o handoff già
+    // finito): vale la risposta del terminale, senza aspettare il banner.
+    return { done: accepted, action, url: null, via: 'terminal', ...(answer != null && { answer }), banner_left_open: true };
   }
 
   // --- watch ---
