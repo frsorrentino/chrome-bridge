@@ -4,11 +4,12 @@
 
 ### Changed
 
-- **Fewer tools always in context** (Claude Code 2.1.285+): 20 of the 43
-  core tools, the ones used at least five times in 61 real sessions, stay
-  loaded; the other 23 carry `_meta['anthropic/alwaysLoad'] = false` and wait
-  behind tool search. About 5.7k tokens of schema per session instead of
-  about 12.2k. `CHROME_BRIDGE_ALWAYS_LOAD=all` (or `--always-load all`) loads
+- **Fewer tools always in context** (Claude Code 2.1.285+): 22 of the 43
+  core tools stay loaded (the ones used at least five times in 61 real
+  sessions, plus `extract_table` and `get_css_styles`, which the paired
+  benchmark loaded every time); the other 21 carry
+  `_meta['anthropic/alwaysLoad'] = false` and wait behind tool search. About
+  6.4k tokens of schema per session instead of about 12.2k. `CHROME_BRIDGE_ALWAYS_LOAD=all` (or `--always-load all`) loads
   every tool again; a comma list picks others.
 - **A second browser no longer takes the connection.** The extension sends a
   persistent browser id and a label; while a browser is connected and
