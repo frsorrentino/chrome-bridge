@@ -471,3 +471,29 @@ Adattamenti per Windows, solo sulla copia: `REPO` con `pwd -W`, uno shim `python
 - **Correzione:** `run-bench-v2.sh` ora fa girare `claude` in una cartella vuota fuori dal repository.
 
 **Da rifare:** la stessa serie con lo script corretto e i due bracci alternati run per run, così l'ordine non pesa.
+
+## Serie w128b — tool rimandati contro tutti caricati, bracci alternati (02/10/2026, Windows)
+
+Girata da master su afd7a15:
+- 22 tool caricati;
+- ogni run in una cartella vuota fuori dal repository;
+- bracci alternati run per run, con l'ordine invertito nei giri pari;
+- Edge 154 headless, Claude Code 2.1.287, claude-sonnet-5, caps `core`, n=5.
+
+Script e log in `results/w128b-win/`.
+
+| task | arm | turni | $/run | corretta |
+|---|---|---:|---:|---:|
+| form | bridge | 3 (3) | 0,107 | 5/5 |
+| form | bridgeall | 3 (3) | 0,111 | 5/5 |
+| heavy | bridge | 3 (3) | 0,103 | 4/5 |
+| heavy | bridgeall | 3 (3-4) | 0,107 | 4/5 |
+| debug | bridge | 4 (3-6) | 0,130 | 5/5 |
+| debug | bridgeall | 6 (3-8) | 0,141 | 4/5 |
+
+- **Criterio del piano rispettato:** con i tool rimandati non peggiorano né i turni né le risposte corrette. Il turno in più di w128a su heavy non c'è più.
+- **Le 3 risposte mancate** vengono tutte dall'ambiente, non dai tool, e sono divise fra i due bracci:
+  - `bridgeall` heavy 2: il server MCP non è partito (`status: failed` nell'`init`, 0 tool), e il modello ha ripiegato su curl;
+  - `bridge` heavy 2: l'estensione non si è collegata entro 30 s;
+  - `bridgeall` debug 2: `CONNECTION_CLOSED` a metà run.
+- **Costo:** è misurato sempre a freddo. `mktemp` dà a ogni run una cartella diversa, che entra nel prompt, quindi nessuna sessione riusa la cache: ogni run scrive 17,5-27k token. Il confronto fra i bracci resta equo. Per misurare il costo realistico servirebbe una cartella vuota con percorso fisso: è un seguito.

@@ -1,0 +1,204 @@
+claude 2.1.287 (Claude Code) · REPO 1 · HEAD afd7a15
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:12:30 bridge form w128b-1 load=0.00
+{"file": "bridge-form-w128b-1.json", "turns": 3, "in": 6, "out": 419, "cache_w": 18579, "cache_r": 139263, "cost": 0.1064, "result_head": "Form compilato e inviato correttamente. Il testo esatto del messaggio di conferma \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example."}
+== fine 00:12:43
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:12:44 bridgeall form w128b-1 load=0.10
+{"file": "bridgeall-form-w128b-1.json", "turns": 3, "in": 6, "out": 502, "cache_w": 18287, "cache_r": 164903, "cost": 0.1112, "result_head": "Il form \u00e8 stato inviato correttamente. Il testo esatto del messaggio di conferma \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.c"}
+== fine 00:13:01
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:13:02 bridge heavy w128b-1 load=0.33
+{"file": "bridge-heavy-w128b-1.json", "turns": 3, "in": 6, "out": 366, "cache_w": 17966, "cache_r": 139120, "cost": 0.1034, "result_head": "Trovata la riga **SKU-0777**:\n\n- **Nome**: Prodotto 777\n- **Categoria**: Casa\n- **Prezzo**: 292.0\n- **Stock**: 1\n\nLa tabella del catalogo contiene **1500 righe "}
+== fine 00:13:17
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:13:18 bridgeall heavy w128b-1 load=0.25
+{"file": "bridgeall-heavy-w128b-1.json", "turns": 3, "in": 6, "out": 262, "cache_w": 17513, "cache_r": 164588, "cost": 0.1056, "result_head": "Riga trovata per **SKU-0777**:\n\n- **Nome**: Prodotto 777\n- **Categoria**: Casa\n- **Prezzo**: 292.0\n- **Stock**: 1\n\nLa tabella ha in totale **1500 righe dati**."}
+== fine 00:13:32
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:13:33 bridge debug w128b-1 load=0.20
+{"file": "bridge-debug-w128b-1.json", "turns": 5, "in": 10, "out": 1662, "cache_w": 19594, "cache_r": 246488, "cost": 0.1443, "result_head": "Riga 8 di `style.css`:\n```css\n.pay { width: 100%; padding: 12px; font-size: 15px; font-weight: 600; color: #fff;\n  background-color: var(--brand-primary); borde"}
+== fine 00:14:04
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:14:05 bridgeall debug w128b-1 load=0.25
+{"file": "bridgeall-debug-w128b-1.json", "turns": 3, "in": 6, "out": 1495, "cache_w": 19951, "cache_r": 165041, "cost": 0.1278, "result_head": "Ho individuato entrambe le cause.\n\n## 1. Carrello vuoto \u2014 errore JavaScript\n```\nTypeError: Cannot read properties of undefined (reading 'items')\n  at renderCart"}
+== fine 00:14:29
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:14:30 bridgeall form w128b-2 load=0.66
+{"file": "bridgeall-form-w128b-2.json", "turns": 3, "in": 6, "out": 377, "cache_w": 18134, "cache_r": 164826, "cost": 0.1093, "result_head": "Form inviato correttamente. Il messaggio di conferma mostrato \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, new"}
+== fine 00:14:43
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:14:44 bridge form w128b-2 load=0.63
+{"file": "bridge-form-w128b-2.json", "turns": 3, "in": 6, "out": 432, "cache_w": 18588, "cache_r": 139269, "cost": 0.1065, "result_head": "Il form \u00e8 stato compilato e inviato correttamente. Il messaggio di conferma esatto \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example"}
+== fine 00:14:59
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:15:00 bridgeall heavy w128b-2 load=0.95
+{"file": "bridgeall-heavy-w128b-2.json", "turns": 4, "in": 8, "out": 825, "cache_w": 18348, "cache_r": 149893, "cost": 0.1116, "result_head": "Serve la tua approvazione per eseguire il comando curl che scarica la pagina dal server locale. Confermi?"}
+== fine 00:15:23
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:15:24 bridge heavy w128b-2 load=1.29
+{"file": "bridge-heavy-w128b-2.json", "turns": 3, "in": 6, "out": 462, "cache_w": 18052, "cache_r": 139144, "cost": 0.1047, "result_head": "Confermato: il server del bridge \u00e8 attivo (porta 8768) ma l'estensione Chrome non risulta connessa (`connected: false`). Per procedere ho bisogno che tu:\n\n1. ap"}
+== fine 00:16:11
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:16:12 bridgeall debug w128b-2 load=1.68
+{"file": "bridgeall-debug-w128b-2.json", "turns": 8, "in": 14, "out": 2124, "cache_w": 27342, "cache_r": 320268, "cost": 0.1947, "result_head": "Non riesco a procedere con il debug in-browser: il server MCP **chrome-bridge** \u00e8 configurato ma la connessione \u00e8 caduta (`CONNECTION_CLOSED`), quindi gli strum"}
+== fine 00:16:56
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:16:57 bridge debug w128b-2 load=2.55
+{"file": "bridge-debug-w128b-2.json", "turns": 6, "in": 12, "out": 2218, "cache_w": 21466, "cache_r": 305461, "cost": 0.1692, "result_head": "Ho individuato entrambe le cause.\n\n## 1. Carrello vuoto \u2014 errore JavaScript\n```\nTypeError: Cannot read properties of undefined (reading 'items')\n```\n- **File/ri"}
+== fine 00:17:36
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:17:37 bridge form w128b-3 load=2.28
+{"file": "bridge-form-w128b-3.json", "turns": 3, "in": 6, "out": 506, "cache_w": 18664, "cache_r": 139349, "cost": 0.1076, "result_head": "Il form \u00e8 stato compilato e inviato correttamente. Il messaggio di conferma mostrato \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@examp"}
+== fine 00:17:53
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:17:54 bridgeall form w128b-3 load=2.21
+{"file": "bridgeall-form-w128b-3.json", "turns": 3, "in": 6, "out": 438, "cache_w": 18241, "cache_r": 164844, "cost": 0.1103, "result_head": "Form inviato con successo. Il messaggio di conferma mostrato nella pagina \u00e8 esattamente:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@exam"}
+== fine 00:18:09
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:18:10 bridge heavy w128b-3 load=1.92
+{"file": "bridge-heavy-w128b-3.json", "turns": 3, "in": 6, "out": 385, "cache_w": 17983, "cache_r": 139137, "cost": 0.1036, "result_head": "Ecco i dati trovati per **SKU-0777**:\n\n- **Nome**: Prodotto 777\n- **Categoria**: Casa\n- **Prezzo**: 292.0\n- **Stock**: 1\n\nLa tabella del catalogo ha **1500 righ"}
+== fine 00:18:26
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:18:27 bridgeall heavy w128b-3 load=1.45
+{"file": "bridgeall-heavy-w128b-3.json", "turns": 3, "in": 6, "out": 391, "cache_w": 17652, "cache_r": 164724, "cost": 0.1075, "result_head": "**SKU-0777:**\n- Nome: Prodotto 777\n- Categoria: Casa\n- Prezzo: 292.0\n- Stock: 1\n\nLa tabella ha **1500 righe dati** in totale."}
+== fine 00:18:42
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:18:43 bridge debug w128b-3 load=1.40
+{"file": "bridge-debug-w128b-3.json", "turns": 3, "in": 6, "out": 1254, "cache_w": 20323, "cache_r": 139488, "cost": 0.1217, "result_head": "Confermato: la causa \u00e8 la variabile CSS `--brand-primary` non definita, quindi `background-color` risolve a `rgba(0,0,0,0)` (trasparente) e `color` \u00e8 bianco \u2014 i"}
+== fine 00:19:09
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:19:10 bridgeall debug w128b-3 load=0.89
+{"file": "bridgeall-debug-w128b-3.json", "turns": 4, "in": 8, "out": 1301, "cache_w": 20613, "cache_r": 228294, "cost": 0.1411, "result_head": "Ho trovato entrambe le cause. Riassumendo:\n\n## 1. Carrello vuoto \u2014 errore JavaScript\n```\nTypeError: Cannot read properties of undefined (reading 'items')\n  at r"}
+== fine 00:19:37
+== 00:19:38 bridgeall form w128b-4 load=0.81
+ps: unknown option -- o
+Try `ps --help' for more information.
+{"file": "bridgeall-form-w128b-4.json", "turns": 3, "in": 6, "out": 462, "cache_w": 18253, "cache_r": 164870, "cost": 0.1106, "result_head": "Form compilato e inviato correttamente. Il messaggio di conferma mostrato \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 C"}
+== fine 00:19:53
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:19:54 bridge form w128b-4 load=0.85
+{"file": "bridge-form-w128b-4.json", "turns": 3, "in": 6, "out": 508, "cache_w": 18662, "cache_r": 139344, "cost": 0.1076, "result_head": "Il form \u00e8 stato inviato correttamente. Il messaggio di conferma esatto mostrato nella pagina \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.ros"}
+== fine 00:20:11
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:20:11 bridgeall heavy w128b-4 load=0.72
+{"file": "bridgeall-heavy-w128b-4.json", "turns": 3, "in": 6, "out": 382, "cache_w": 17636, "cache_r": 164711, "cost": 0.1073, "result_head": "Ecco i dati trovati:\n\n- **Nome:** Prodotto 777\n- **Categoria:** Casa\n- **Prezzo:** 292.0\n- **Stock:** 1\n\nLa tabella ha **1500 righe** di dati in totale."}
+== fine 00:20:25
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:20:26 bridge heavy w128b-4 load=0.71
+{"file": "bridge-heavy-w128b-4.json", "turns": 3, "in": 6, "out": 333, "cache_w": 17940, "cache_r": 139094, "cost": 0.1029, "result_head": "Trovata la riga SKU-0777:\n\n- **Nome**: Prodotto 777\n- **Categoria**: Casa\n- **Prezzo**: 292.0\n- **Stock**: 1\n\nLa tabella ha in totale **1500 righe dati**."}
+== fine 00:20:38
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:20:39 bridgeall debug w128b-4 load=0.58
+{"file": "bridgeall-debug-w128b-4.json", "turns": 7, "in": 10, "out": 2230, "cache_w": 21682, "cache_r": 292048, "cost": 0.1675, "result_head": "Ecco il quadro completo dei due problemi, entrambi confermati sulla pagina reale.\n\n## 1. Carrello vuoto\n\n**Richiesta di rete fallita:** `GET /api/cart` \u2192 **404*"}
+== fine 00:21:15
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:21:16 bridge debug w128b-4 load=0.31
+{"file": "bridge-debug-w128b-4.json", "turns": 3, "in": 6, "out": 1066, "cache_w": 20171, "cache_r": 139545, "cost": 0.1193, "result_head": "Trovate entrambe le cause. Ecco il report:\n\n**1. Carrello vuoto \u2014 errore JavaScript**\n- File/riga sorgente originale: `src/cart.js:5` (chiamata `renderCart(data"}
+== fine 00:21:37
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:21:38 bridge form w128b-5 load=0.21
+{"file": "bridge-form-w128b-5.json", "turns": 3, "in": 6, "out": 483, "cache_w": 18591, "cache_r": 139337, "cost": 0.1071, "result_head": "Il form \u00e8 stato inviato correttamente. Il messaggio di conferma mostrato \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Ca"}
+== fine 00:21:55
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:21:56 bridgeall form w128b-5 load=0.16
+{"file": "bridgeall-form-w128b-5.json", "turns": 3, "in": 6, "out": 457, "cache_w": 18259, "cache_r": 164889, "cost": 0.1106, "result_head": "Il form \u00e8 stato compilato e inviato correttamente. Il messaggio di conferma mostrato \u00e8:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@examp"}
+== fine 00:22:13
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:22:14 bridge heavy w128b-5 load=0.38
+{"file": "bridge-heavy-w128b-5.json", "turns": 3, "in": 6, "out": 370, "cache_w": 17967, "cache_r": 139118, "cost": 0.1034, "result_head": "Ecco i dati trovati per **SKU-0777**:\n\n- **Nome:** Prodotto 777\n- **Categoria:** Casa\n- **Prezzo:** 292.0\n- **Stock:** 1\n\nLa tabella contiene in totale **1500 r"}
+== fine 00:22:28
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:22:28 bridgeall heavy w128b-5 load=0.61
+{"file": "bridgeall-heavy-w128b-5.json", "turns": 3, "in": 6, "out": 330, "cache_w": 17581, "cache_r": 164659, "cost": 0.1066, "result_head": "Riga trovata per **SKU-0777**:\n\n- **Nome:** Prodotto 777\n- **Categoria:** Casa\n- **Prezzo:** 292.0\n- **Stock:** 1\n\nLa tabella contiene in totale **1500 righe** "}
+== fine 00:22:41
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:22:41 bridge debug w128b-5 load=0.48
+{"file": "bridge-debug-w128b-5.json", "turns": 4, "in": 6, "out": 1488, "cache_w": 21707, "cache_r": 139472, "cost": 0.1296, "result_head": "Ho individuato entrambe le cause.\n\n## 1. Carrello vuoto\n\n**Richiesta di rete fallita:** `GET /api/cart` \u2192 **404**\n\n**Errore JavaScript** (mappato al sorgente or"}
+== fine 00:23:08
+ps: unknown option -- o
+Try `ps --help' for more information.
+== 00:23:08 bridgeall debug w128b-5 load=0.31
+{"file": "bridgeall-debug-w128b-5.json", "turns": 6, "in": 8, "out": 1458, "cache_w": 19816, "cache_r": 226921, "cost": 0.1392, "result_head": "## Risultati\n\n**1. Carrello vuoto \u2014 errore JavaScript**\n`TypeError: Cannot read properties of undefined (reading 'items')`\nFile sorgente: **`src/cart.js:10`**\n`"}
+== fine 00:23:37
+debug  bridge  n=5 ok=5/5  turni med=  4.0 [3-6]  out med=  1488 [1066-2218]  cache_r med= 140k [139-305k]  $ med=0.130 [0.119-0.169]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+debug  bridgeall n=5 ok=4/5  turni med=  6.0 [3-8]  out med=  1495 [1301-2230]  cache_r med= 228k [165-320k]  $ med=0.141 [0.128-0.195]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+form   bridge  n=5 ok=5/5  turni med=  3.0 [3]  out med=   483 [419-508]  cache_r med= 139k [139-139k]  $ med=0.107 [0.106-0.108]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+form   bridgeall n=5 ok=5/5  turni med=  3.0 [3]  out med=   457 [377-502]  cache_r med= 165k [165-165k]  $ med=0.111 [0.109-0.111]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+heavy  bridge  n=5 ok=4/5  turni med=  3.0 [3]  out med=   370 [333-462]  cache_r med= 139k [139-139k]  $ med=0.103 [0.103-0.105]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+heavy  bridgeall n=5 ok=4/5  turni med=  3.0 [3-4]  out med=   382 [262-825]  cache_r med= 165k [150-165k]  $ med=0.107 [0.106-0.112]   runs: w128b-1,w128b-2,w128b-3,w128b-4,w128b-5
+
+
+debug  bridge  tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    get_css_styles                1.0  err=0       3.5 KB
+    screenshot                    0.2  err=0       0.0 KB  img=0.2
+    navigate                      1.2  err=0       0.6 KB
+    read_page                     0.6  err=0       0.3 KB
+    execute_js                    0.2  err=0       0.2 KB
+debug  bridgeall tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    get_css_styles                0.8  err=0       1.9 KB
+    screenshot                    0.2  err=0       0.0 KB  img=0.2
+    http_request                  1.0  err=0       1.0 KB
+    navigate                      0.8  err=0       0.5 KB
+    ToolSearch                    0.2  err=0       0.1 KB
+    monitor_network               0.4  err=0       0.0 KB
+    Bash                          0.6  err=3       0.0 KB
+    PowerShell                    0.2  err=1       0.0 KB
+    Skill                         0.2  err=0       0.0 KB
+form   bridge  tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    fill_form                     1.0  err=0       1.0 KB
+    navigate                      1.0  err=0       0.5 KB
+form   bridgeall tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    fill_form                     1.0  err=0       1.0 KB
+    navigate                      1.0  err=0       0.5 KB
+heavy  bridge  tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    extract_table                 0.8  err=0       0.2 KB
+    navigate                      1.0  err=1       0.1 KB
+    get_status                    0.2  err=0       0.1 KB
+heavy  bridgeall tool su 5 run (chiamate/run, errori tot, KB di testo/run, immagini/run):
+    extract_table                 0.8  err=0       0.2 KB
+    navigate                      0.8  err=0       0.1 KB
+    Bash                          0.4  err=2       0.0 KB
+    ToolSearch                    0.2  err=0       0.0 KB
+NON AGGREGATA cic-form-0927-3.invalid-claude-md-refusal: estensione fuori dal glob *.json
+NON AGGREGATA cic-form-17a.invalid-remote-browser: estensione fuori dal glob *.json
+NON AGGREGATA cic-heavy-0927-3.invalid-claude-md-refusal: estensione fuori dal glob *.json
+NON AGGREGATA cic-heavy-0927-5.invalid-claude-md-refusal: estensione fuori dal glob *.json
+NON AGGREGATA cic-heavy-0927-6.invalid-claude-md-refusal: estensione fuori dal glob *.json
+NON AGGREGATA excluded-0929: estensione fuori dal glob *.json
+NON AGGREGATA serie-0928.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-cic-0929-bis.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-cic-0929.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-debug-0928.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-debug-0929.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-finale-0928.log: estensione fuori dal glob *.json
+NON AGGREGATA serie-finale-0929.log: estensione fuori dal glob *.json
+NON AGGREGATA w128a-win: estensione fuori dal glob *.json
