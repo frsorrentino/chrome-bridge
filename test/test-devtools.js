@@ -18,6 +18,7 @@ import { registerTools } from '../server/tools.js';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 
 // Con un'altra sessione che tiene la 8765 il test non partiva mai: la porta
 // viene dall'ambiente, e con --launch il browser lo apre lo script stesso
@@ -921,6 +922,59 @@ async function testGetCssStyles(tabId) {
   }
 }
 
+// 1.27.0: animations e frames (gruppo perf) su bench/motion.html.
+async function testMotion() {
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}motion`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const motion = (op, extra = {}) => wsManager.sendCommand(MessageType.MOTION, { op, tab_id, ...extra });
+  const windowWith = async (selector, ms, trusted = false) => {
+    await motion('start');
+    await wsManager.sendCommand(MessageType.CLICK, { selector, button: 'left', count: 1, ...(trusted && { trusted: true }), tab_id });
+    await new Promise((r) => setTimeout(r, ms));
+    return motion('stop');
+  };
+  try {
+    const snap = await motion('snapshot');
+    const spin = snap.animations.find((a) => a.name === 'spin');
+    if (!spin || spin.iterations !== 'infinite' || !spin.composited_estimate) throw new Error(`spin: ${JSON.stringify(spin)}`);
+    const grow = snap.animations.find((a) => a.name === 'grow');
+    if (grow?.timeline !== 'scroll') throw new Error(`grow timeline: ${JSON.stringify(grow)}`);
+    ok('animations snapshot (CSS infinita, timeline di scroll)');
+  } catch (e) { fail('animations snapshot', e.message); }
+  try {
+    const rec = await windowWith('#pop', 600);
+    const pop = rec.animations.list.find((a) => a.kind === 'Animation');
+    if (!pop || !String(pop.easing).startsWith('linear(')) throw new Error(`pop: ${JSON.stringify(pop)}`);
+    ok('animations window (Web Animation con linear())');
+  } catch (e) { fail('animations window', e.message); }
+  try {
+    const rec = await windowWith('#busy', 600, true);
+    if (!rec.support.long_animation_frame) throw new Error('LoAF non supportato');
+    if (rec.long_frames.count < 1) throw new Error(`nessun fotogramma lungo: ${JSON.stringify(rec.long_frames)}`);
+    if (!rec.frames.count) throw new Error('nessun fotogramma rAF');
+    if (!(rec.interactions.inp_ms >= 100) || rec.interactions.worst.selector !== '#busy') throw new Error(`INP: ${JSON.stringify(rec.interactions)}`);
+    ok(`frames: fotogramma lungo ${rec.long_frames.worst[0].duration_ms} ms, script ${rec.long_frames.worst[0].scripts[0]?.invoker ?? '?'}, INP ${rec.interactions.inp_ms}`);
+  } catch (e) { fail('frames long frame', e.message); }
+  try {
+    const rec = await windowWith('#shift', 1200);
+    if (!(rec.layout_shifts.cls > 0)) throw new Error(`CLS: ${JSON.stringify(rec.layout_shifts)}`);
+    ok(`frames: layout shift CLS ${rec.layout_shifts.cls} su ${rec.layout_shifts.top[0]?.sources[0]?.selector}`);
+  } catch (e) { fail('frames layout shift', e.message); }
+  try {
+    const rec = await windowWith('#vt', 800);
+    if (!rec.animations.summary.view_transitions) throw new Error(`nessuna View Transition: ${JSON.stringify(rec.animations.summary)}`);
+    ok(`animations: ${rec.animations.summary.view_transitions} animazioni di View Transition`);
+  } catch (e) { fail('animations view transition', e.message); }
+  try {
+    await motion('stop').then(() => { throw new Error('stop senza start accettato'); }, (err) => {
+      if (!/No recording/.test(err.message)) throw err;
+    });
+    ok('frames: stop senza start rifiutato');
+  } catch (e) { fail('frames stop senza start', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // Copia locale della pagina di example.com com'era fino a settembre 2026: il
 // sito vero ha cambiato markup (niente h1, niente width) e i test che ci
 // contavano sono diventati rossi senza che il nostro codice cambiasse.
@@ -930,7 +984,11 @@ const EXAMPLE_HTML = '<!doctype html><html><head><title>Example Domain</title><m
   + '<p><a href="https://www.iana.org/help/example-domains">Learn more</a></p></div></body></html>';
 let FIXTURE_URL = 'https://example.com/';
 async function startFixture() {
-  const http = createHttpServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(EXAMPLE_HTML); });
+  const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
+  const http = createHttpServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(req.url === '/motion' ? motionHtml : EXAMPLE_HTML);
+  });
   await new Promise((r) => http.listen(0, '127.0.0.1', r));
   FIXTURE_URL = `http://127.0.0.1:${http.address().port}/`;
   return http;
@@ -1023,6 +1081,9 @@ async function main() {
     // 1.26.0
     await testTrustedInput(testTabId);
     await testNavigateConnectionRefused(testTabId);
+
+    // 1.27.0
+    await testMotion();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

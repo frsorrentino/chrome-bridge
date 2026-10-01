@@ -257,6 +257,9 @@ export const TOOL_CAPS = {
   // che get_status({enable}) accende a sessione in corso.
   audits: ['cookie_audit'],
   visual: ['inject_css', 'measure_spacing', 'emulate_media', 'viewport_resize'],
+  // Misure di movimento e prestazioni (01/10/2026): per chi verifica le
+  // animazioni di un sito, non per la navigazione di tutti i giorni.
+  perf: ['animations', 'frames'],
   network: ['http_auth', 'set_geolocation', 'track_events'],
   storage: ['get_storage', 'set_storage', 'session_fixture'],
   dom: ['modify_dom', 'watch_dom', 'drag_and_drop'],
@@ -336,6 +339,8 @@ export const TOOL_ANNOTATIONS = {
   get_tabs: ro(),
   manage_downloads: rw({ open: true }),  // action=download scrive un file sul disco e va in rete
   measure_spacing: ro(),
+  animations: rw(),   // con action clicca, passa sopra, scorre o preme un tasto
+  frames: rw(),
   monitor_network: ro(true),
   query_dom: ro(),
   get_css_styles: ro(),
@@ -1721,6 +1726,108 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           text: jsonText(data),
         }],
       };
+    }
+  );
+
+  // --- animations, frames (gruppo perf) ---
+  // Finestra di registrazione nella pagina con un'azione eseguita dai tool di
+  // sempre: un :hover CSS o un listener di click scattano come con hover e
+  // click, mentre l'osservatore è già in ascolto.
+  const motionAction = z.object({
+    type: z.enum(['click', 'hover', 'scroll', 'press_key']).describe('What to do once recording has started'),
+    selector: z.string().optional().describe('CSS selector of the element to act on (scroll: element to scroll into view)'),
+    ref: z.string().optional().describe('From get_interactives, e.g. "n3"'),
+    key: z.string().optional().describe('press_key: e.g. "Enter", "Escape", "ArrowDown"'),
+    y: z.number().optional().describe('scroll without selector: absolute vertical position in px'),
+    trusted: z.boolean().optional().default(false).describe('click/press_key: real browser input via chrome.debugger'),
+  }).optional().describe('Action run right after recording starts');
+  const MOTION_MAX_MS = 30000;
+
+  async function runMotionAction(action, tab_id, frame_id) {
+    const t = action.selector || action.ref ? resolveTarget(action.selector, action.ref, tab_id, frame_id) : { selector: undefined, frame_id };
+    const trusted = action.trusted ? { trusted: true } : {};
+    if (action.type === 'click') return send(MessageType.CLICK, { selector: t.selector, button: 'left', count: 1, ...trusted, frame_id: t.frame_id, tab_id });
+    if (action.type === 'hover') return send(MessageType.HOVER, { selector: t.selector, frame_id: t.frame_id, tab_id });
+    if (action.type === 'press_key') return send(MessageType.PRESS_KEY, { key: action.key ?? 'Enter', selector: t.selector, ...trusted, frame_id: t.frame_id, tab_id });
+    return send(MessageType.SCROLL_TO, { selector: t.selector, y: action.y, behavior: 'smooth', tab_id, frame_id: t.frame_id });
+  }
+
+  async function motionWindow({ duration_ms, action, scope, limit, threshold_ms, tab_id, frame_id }) {
+    const ms = Math.min(Math.max(duration_ms, 100), MOTION_MAX_MS);
+    const t0 = Date.now();
+    await send(MessageType.MOTION, { op: 'start', scope, tab_id, frame_id });
+    let actionError = null;
+    try {
+      if (action) await runMotionAction(action, tab_id, frame_id);
+    } catch (err) {
+      actionError = err.message;
+    }
+    // Dopo l'azione resta almeno un po' di finestra: una transizione parte al
+    // fotogramma successivo al click.
+    const rest = Math.max(ms - (Date.now() - t0), action ? 300 : 0);
+    await new Promise((r) => setTimeout(r, rest));
+    const data = await send(MessageType.MOTION, { op: 'stop', limit, threshold_ms, tab_id, frame_id });
+    if (actionError) data.action_error = actionError;
+    return data;
+  }
+
+  server.tool(
+    'animations',
+    'List the page animations: CSS animations, transitions, Web Animations and View Transitions, each with selector and ref, '
+      + 'animated properties, duration, delay, easing (linear() curves included), iterations, play state, timeline (document, scroll, view). '
+      + 'composited_estimate guesses whether only transform/opacity/filter move (an estimate, not the compositor\'s answer); fade_only marks '
+      + 'opacity-only fades, what prefers-reduced-motion should leave. Without duration_ms: what runs now. With duration_ms: records every '
+      + 'animation that starts in the window, optionally after an action (hover, click, scroll, key), since a 150 ms transition is over '
+      + 'before a second call. Refuses on a hidden page. Pair with emulate_media reducedMotion to check the reduced version.',
+    {
+      scope: z.string().optional().describe('CSS selector: only animations on this element or inside it'),
+      duration_ms: z.number().optional().describe('Record for this many ms (max 30000) instead of a snapshot'),
+      action: motionAction,
+      limit: z.number().optional().default(50).describe('Max animations listed; the summary counts all'),
+      tab_id: tabId,
+      frame_id: frameId,
+    },
+    async ({ scope, duration_ms, action, limit, tab_id, frame_id }) => {
+      let data;
+      if (duration_ms == null && !action) {
+        data = await send(MessageType.MOTION, { op: 'snapshot', scope, limit, tab_id, frame_id });
+      } else {
+        const rec = await motionWindow({ duration_ms: duration_ms ?? 1000, action, scope, limit: Math.ceil(limit / 3), tab_id, frame_id });
+        data = {
+          window_ms: rec.window_ms,
+          prefers_reduced_motion: rec.prefers_reduced_motion,
+          ...(rec.page_hidden_during && { page_hidden_during: true }),
+          ...(rec.action_error && { action_error: rec.action_error }),
+          summary: rec.animations.summary,
+          animations: rec.animations.list,
+          ...(rec.animations.truncated && { truncated: rec.animations.truncated }),
+        };
+      }
+      assignRefs(tab_id, data.animations, frame_id);
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  server.tool(
+    'frames',
+    'Record the page for duration_ms and report how smooth it ran: main-thread frame rate and dropped frames, Long Animation Frames '
+      + '(duration, blocking time, render and style/layout start, the scripts responsible), layout shifts with the elements that moved (CLS '
+      + 'for the window only), and the slowest interaction (INP for the window, split into input delay, processing, presentation; needs trusted input, synthetic events have no interaction id). '
+      + 'Optionally runs an action (click, hover, scroll, key) right after recording starts. Animations that started are counted too. '
+      + 'Compositor-only animations can stay smooth while the main thread drops frames. Refuses on a hidden page: rAF and observers stop there.',
+    {
+      duration_ms: z.number().optional().default(3000).describe('Recording window in ms (max 30000)'),
+      action: motionAction,
+      threshold_ms: z.number().optional().default(50).describe('Long frames shorter than this are not listed'),
+      limit: z.number().optional().default(10).describe('Max long frames listed; counts include all'),
+      tab_id: tabId,
+      frame_id: frameId,
+    },
+    async ({ duration_ms, action, threshold_ms, limit, tab_id, frame_id }) => {
+      const rec = await motionWindow({ duration_ms, action, limit, threshold_ms, tab_id, frame_id });
+      const { animations, ...rest } = rec;
+      const data = { ...rest, animations: animations.summary };
+      return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
 

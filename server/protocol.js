@@ -78,6 +78,7 @@ export const MessageType = Object.freeze({
   READ_FORM:             'read_form',
   LIST_ASSETS:           'list_assets',
   RESOURCE_TIMING:       'resource_timing',
+  MOTION:                'motion',
 
   // Risposte (extension → server)
   RESULT: 'result',

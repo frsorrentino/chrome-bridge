@@ -449,6 +449,8 @@ async function executeCommand(msg) {
       return await cmdScreenshotDiff(params);
     case 'web_vitals':
       return await cmdWebVitals(params);
+    case 'motion':
+      return await cmdMotion(params);
     case 'list_event_listeners':
       return await cmdListEventListeners(params);
     case 'monitor_websocket':
@@ -3984,6 +3986,31 @@ async function cmdWebVitals({ tab_id }) {
     world: 'MAIN',
   });
   return results?.[0]?.result ?? { available: false };
+}
+
+// --- motion (animations, frames) ---
+
+// lib/motion.js tiene la logica (testata in Node); qui solo l'iniezione. Una
+// finestra di registrazione su pagina nascosta misurerebbe il nulla: rAF e
+// osservatori si fermano, quindi start rifiuta invece di restituire zeri.
+async function cmdMotion({ op, scope = null, limit, threshold_ms, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (op === 'start' && await pageHidden(tabId)) throw new Error(`Not recording: ${HIDDEN_HINT}`);
+  const target = scriptTarget(tabId, frame_id);
+  if (op !== 'stop') await chrome.scripting.executeScript({ target, files: ['lib/motion.js'], world: 'MAIN' });
+  const results = await chrome.scripting.executeScript({
+    target,
+    func: (o, opts) => {
+      const m = globalThis.__cbMotion;
+      if (!m) return { error: 'No recording in this page: it was never started, or the page navigated and lost it.' };
+      return m[o](opts);
+    },
+    args: [op, { scope, ...(limit != null && { limit }), ...(threshold_ms != null && { threshold_ms }) }],
+    world: 'MAIN',
+  });
+  const out = results?.[0]?.result;
+  if (out?.error) throw new Error(out.error);
+  return out;
 }
 
 // --- list_event_listeners ---

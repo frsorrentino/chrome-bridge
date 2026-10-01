@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Motion test page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Pagina di prova per animations e frames (test/test-devtools.js): un'animazione
+  CSS infinita, una transizione al passaggio del mouse, una Web Animation con
+  curva linear(), un'animazione legata allo scroll, una View Transition, un
+  compito lungo e un salto di layout a comando. Con prefers-reduced-motion
+  restano solo dissolvenze.
+-->
+<style>
+  :root { --spring: linear(0, 0.35 12%, 0.82 28%, 1.04 42%, 1.01 60%, 1); }
+  body { font-family: system-ui, sans-serif; margin: 2rem; min-height: 300vh; }
+  #spin { width: 40px; height: 40px; background: #4a7; animation: spin 2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .card { width: 160px; padding: 1rem; background: #eee; transition: transform 150ms ease-out; }
+  .card:hover { transform: translateY(-4px); }
+  #progress { position: fixed; top: 0; left: 0; height: 4px; width: 100%; background: #36c; transform-origin: 0 50%;
+    animation: grow linear both; animation-timeline: scroll(root); }
+  @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  #slot { min-height: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #spin { animation: none; }
+    .card { transition: opacity 150ms linear; }
+    .card:hover { transform: none; opacity: 0.8; }
+  }
+</style>
+</head>
+<body>
+  <div id="progress"></div>
+  <div id="slot"></div>
+  <h1>Motion test page</h1>
+  <div id="spin"></div>
+  <p><div class="card" id="card">Hover me</div></p>
+  <button id="pop">Pop (Web Animation)</button>
+  <button id="busy">Busy (120 ms task)</button>
+  <button id="shift">Shift (layout shift after 600 ms)</button>
+  <button id="vt">View transition</button>
+  <p id="vt-text">Before</p>
+<script>
+  const spring = getComputedStyle(document.documentElement).getPropertyValue('--spring').trim();
+  document.getElementById('pop').addEventListener('click', (e) => {
+    e.currentTarget.animate([{ transform: 'scale(0.9)' }, { transform: 'scale(1)' }], { duration: 400, easing: spring });
+  });
+  document.getElementById('busy').addEventListener('click', function busyHandler() {
+    const end = performance.now() + 120;
+    while (performance.now() < end) { /* compito lungo voluto */ }
+  });
+  document.getElementById('shift').addEventListener('click', () => {
+    setTimeout(() => {
+      const banner = document.createElement('div');
+      banner.style.height = '80px';
+      banner.textContent = 'Late banner';
+      document.getElementById('slot').append(banner);
+    }, 600);
+  });
+  document.getElementById('vt').addEventListener('click', () => {
+    const swap = () => { document.getElementById('vt-text').textContent = 'After'; };
+    if (document.startViewTransition) document.startViewTransition(swap); else swap();
+  });
+</script>
+</body>
+</html>
