@@ -972,6 +972,40 @@ async function testMotion() {
     });
     ok('frames: stop senza start rifiutato');
   } catch (e) { fail('frames stop senza start', e.message); }
+  // emulate_media via debugger: le @media del sito valgono davvero.
+  const emulate = (p) => wsManager.sendCommand(MessageType.EMULATE_MEDIA, { tab_id, ...p });
+  try {
+    const on = await emulate({ reducedMotion: 'reduce', via: 'debugger' });
+    if (on.via !== 'debugger' || on.emulated.reducedMotion !== 'reduce') throw new Error(JSON.stringify(on));
+    const snap = await motion('snapshot');
+    const names = snap.animations.map((a) => a.name);
+    if (!snap.prefers_reduced_motion || names.includes('spin') || !names.includes('grow')) throw new Error(`con reduce: ${names} rm=${snap.prefers_reduced_motion}`);
+    ok('emulate_media via debugger: la regola reduce del sito toglie spin, grow resta');
+  } catch (e) { fail('emulate_media via debugger reduce', e.message); }
+  try {
+    const work = async () => (await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: '(() => { const t = performance.now(); let x = 0; for (let i = 0; i < 2e7; i++) x += i % 7; return performance.now() - t; })()', tab_id,
+    })).result;
+    const before = await work();
+    await emulate({ cpu_throttle: 4 });
+    await windowWith('#busy', 300, true);
+    const still = await motion('snapshot');
+    if (still.prefers_reduced_motion !== true) throw new Error('il click fidato ha staccato il debugger: emulazione persa');
+    const after = await work();
+    if (!(after > before * 2)) throw new Error(`CPU x4 non visibile: ${Math.round(before)} → ${Math.round(after)} ms`);
+    ok(`emulate_media: reduce resta dopo un click fidato, CPU x4 porta un lavoro fisso da ${Math.round(before)} a ${Math.round(after)} ms`);
+  } catch (e) { fail('emulate_media con input fidato e CPU', e.message); }
+  try {
+    const off = await emulate({ reset: true });
+    if (!off.debugger_released) throw new Error(JSON.stringify(off));
+    const snap = await motion('snapshot');
+    if (snap.prefers_reduced_motion || !snap.animations.some((a) => a.name === 'spin')) throw new Error('reset non ha tolto reduce');
+    ok('emulate_media reset: debugger staccato, spin di nuovo in corso');
+  } catch (e) { fail('emulate_media reset', e.message); }
+  try {
+    await emulate({ network: '3g', via: 'page' }).then(() => { throw new Error('network via page accettato'); }, (err) => { if (!/need via/.test(err.message)) throw err; });
+    ok('emulate_media: opzioni del debugger rifiutate via page');
+  } catch (e) { fail('emulate_media via page con network', e.message); }
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 

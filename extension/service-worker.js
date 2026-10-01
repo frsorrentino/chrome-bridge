@@ -13,7 +13,8 @@ import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 import { findTextInPage } from './lib/find-text.js';
 import { elementOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
-import { withDebugger, keyEvents, mouseClickEvents } from './lib/trusted-input.js';
+import { withDebugger, keyEvents, mouseClickEvents, holdDebugger, releaseDebugger, debuggerHeld } from './lib/trusted-input.js';
+import { emulationCommands } from './lib/emulation.js';
 const { pushError } = globalThis.__cbTelemetry;
 
 const DEFAULT_PORT = 8765;
@@ -3265,8 +3266,53 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
 
 // --- emulate_media ---
 
-async function cmdEmulateMedia({ colorScheme, reducedMotion, printMode = false, user_agent = null, reset = false, tab_id }) {
+// Emulazione via debugger: vive finché il debugger resta agganciato, quindi la
+// scheda è «tenuta» fino a reset (o finché l'utente annulla la barra). Lo stato
+// si accumula fra le chiamate e si rimanda per intero: setEmulatedMedia
+// sostituisce l'elenco delle preferenze, non lo integra.
+const emulationState = new Map();
+const CDP_ONLY = ['contrast', 'cpu_throttle', 'network', 'device', 'touch'];
+
+async function cmdEmulateMedia(params) {
+  const { via, reset = false, user_agent = null, tab_id } = params;
   const tabId = await resolveTabId(tab_id);
+  if (reset) {
+    const released = await releaseDebugger(tabId, 'emulation');
+    emulationState.delete(tabId);
+    await cmdEmulateMediaPage({ reset: true, tabId });
+    return { reset: true, ...(released && { debugger_released: true }) };
+  }
+  const cdpOnly = CDP_ONLY.filter((k) => params[k] != null);
+  const useDebugger = via === 'debugger' || (via !== 'page' && cdpOnly.length > 0);
+  if (!useDebugger) {
+    if (cdpOnly.length) throw new Error(`${cdpOnly.join(', ')} need via: "debugger"`);
+    return cmdEmulateMediaPage({ ...params, tabId });
+  }
+  if (params.reducedMotion || params.colorScheme || params.printMode) {
+    // Il ripiego nella pagina sovrascriverebbe le regole del sito: via
+    // debugger si toglie, così valgono le @media vere.
+    await cmdEmulateMediaPage({ reset: true, tabId }).catch(() => {});
+  }
+  if (!debuggerHeld(tabId).held) emulationState.delete(tabId);
+  const prev = emulationState.get(tabId) ?? {};
+  const pick = Object.fromEntries(['colorScheme', 'reducedMotion', 'contrast', 'cpu_throttle', 'network', 'device', 'touch']
+    .filter((k) => params[k] != null).map((k) => [k, params[k]]));
+  if (params.printMode) pick.printMode = true;
+  const merged = { ...prev, ...pick };
+  const { commands, emulated } = emulationCommands(merged);
+  const send = await holdDebugger(tabId, 'emulation', 'emulate_media via debugger');
+  for (const [method, p] of commands) await send(method, p);
+  emulationState.set(tabId, merged);
+  const out = {
+    emulated,
+    via: 'debugger',
+    debugger_bar: 'Chrome shows a "started debugging this browser" bar until emulate_media reset: true; cancelling it ends the emulation',
+  };
+  if (user_agent) out.user_agent = (await cmdEmulateMediaPage({ user_agent, tabId })).emulated?.userAgent ?? user_agent;
+  return out;
+}
+
+async function cmdEmulateMediaPage({ colorScheme, reducedMotion, printMode = false, user_agent = null, reset = false, tabId }) {
 
   const results = await chrome.scripting.executeScript({
     target: { tabId },

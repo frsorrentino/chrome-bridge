@@ -5,7 +5,10 @@
  * scorciatoie di tastiera gestite dal browser.
  *
  * Il debugger si aggancia solo per la durata dell'azione e si stacca subito:
- * la barra «sta eseguendo il debug» compare solo in quel momento.
+ * la barra «sta eseguendo il debug» compare solo in quel momento. Eccezione:
+ * una scheda «tenuta» (holdDebugger, per l'emulazione di emulate_media, che
+ * vive solo finché il debugger è agganciato) resta agganciata fino al
+ * rilascio, e withDebugger usa quell'aggancio senza staccarlo.
  */
 
 // Tasti con nome: code e keyCode di Windows che Input.dispatchKeyEvent vuole
@@ -73,20 +76,76 @@ export function mouseClickEvents(x, y, { button = 'left', count = 1 } = {}) {
   return events;
 }
 
+// Schede tenute agganciate: tabId → insieme dei motivi ('emulation', …).
+// Chrome stacca il debugger da solo quando l'utente preme «Annulla» sulla
+// barra o la scheda si chiude: onDetach toglie la voce, e chi la teneva lo
+// scopre con debuggerHeld.
+const held = new Map();
+let detachListener = false;
+
+function listenDetach() {
+  if (detachListener || !globalThis.chrome?.debugger?.onDetach) return;
+  detachListener = true;
+  chrome.debugger.onDetach.addListener((source, reason) => {
+    if (source.tabId == null || !held.has(source.tabId)) return;
+    held.delete(source.tabId);
+    lastDetach.set(source.tabId, reason);
+  });
+}
+const lastDetach = new Map();
+
+async function attach(tabId, purpose) {
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+  } catch (e) {
+    const msg = String(e?.message ?? e);
+    if (/already attached/i.test(msg)) throw new Error(`${purpose} unavailable: another debugger (DevTools?) is attached to this tab — close it, or retry without it`);
+    throw new Error(`${purpose} unavailable: ${msg}`);
+  }
+}
+
+/** Tiene il debugger agganciato alla scheda per un motivo, finché releaseDebugger. */
+export async function holdDebugger(tabId, why, purpose = why) {
+  listenDetach();
+  let reasons = held.get(tabId);
+  if (!reasons) {
+    await attach(tabId, purpose);
+    reasons = new Set();
+    held.set(tabId, reasons);
+    lastDetach.delete(tabId);
+  }
+  reasons.add(why);
+  return (method, params) => chrome.debugger.sendCommand({ tabId }, method, params);
+}
+
+/** Toglie un motivo; senza più motivi il debugger si stacca e la barra sparisce. */
+export async function releaseDebugger(tabId, why) {
+  const reasons = held.get(tabId);
+  if (!reasons) return false;
+  reasons.delete(why);
+  if (reasons.size) return true;
+  held.delete(tabId);
+  await chrome.debugger.detach({ tabId }).catch(() => {});
+  return true;
+}
+
+/** Stato della tenuta: held, i motivi, o il motivo dello stacco (canceled_by_user, target_closed). */
+export function debuggerHeld(tabId) {
+  const reasons = held.get(tabId);
+  if (reasons) return { held: true, reasons: [...reasons] };
+  return { held: false, ...(lastDetach.has(tabId) && { detached: lastDetach.get(tabId) }) };
+}
+
 /**
  * Aggancia il debugger alla scheda, esegue fn(send) e si stacca sempre, anche
  * su errore. Un DevTools già aperto sulla scheda impedisce l'aggancio: lo dice.
+ * Su una scheda tenuta usa l'aggancio esistente e non lo stacca.
  */
 export async function withDebugger(tabId, fn) {
   const target = { tabId };
-  try {
-    await chrome.debugger.attach(target, '1.3');
-  } catch (e) {
-    const msg = String(e?.message ?? e);
-    if (/already attached/i.test(msg)) throw new Error('trusted input unavailable: another debugger (DevTools?) is attached to this tab — close it, or retry without trusted');
-    throw new Error(`trusted input unavailable: ${msg}`);
-  }
   const send = (method, params) => chrome.debugger.sendCommand(target, method, params);
+  if (held.has(tabId)) return fn(send);
+  await attach(tabId, 'trusted input');
   try {
     return await fn(send);
   } finally {

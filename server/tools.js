@@ -1709,17 +1709,32 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'emulate_media',
     'Make the page believe it runs elsewhere, until reset or reload: prefers-color-scheme, prefers-reduced-motion, print mode, '
       + 'navigator.userAgent/platform. user_agent changes only what page JS reads — the request header is network_rules modify_header. '
-      + 'Pair with viewport_resize to emulate a device.',
+      + 'via "page" (default for these) only patches matchMedia and, for reduce, zeroes every animation: the site\'s own @media rules do not apply. '
+      + 'via "debugger" emulates like DevTools, so the site\'s @media (prefers-reduced-motion) rules really apply — use it to check reduced motion with animations — '
+      + 'and adds contrast, CPU throttling, network profiles, device viewport with DPR, touch (these imply via debugger). '
+      + 'via debugger keeps Chrome\'s "started debugging this browser" bar until reset: true; in launch mode nobody sees it. '
+      + 'Pair with viewport_resize to emulate a device in page mode.',
     {
       colorScheme: z.enum(['dark', 'light', 'no-preference']).optional().describe('Value reported to prefers-color-scheme queries'),
       reducedMotion: z.enum(['reduce', 'no-preference']).optional().describe('Value reported to prefers-reduced-motion queries'),
       printMode: z.boolean().optional().default(false).describe('Make print media queries match, without opening a print dialog'),
       user_agent: z.string().optional().describe('Overrides navigator.userAgent and appVersion in the page (not the HTTP header)'),
-      reset: z.boolean().optional().default(false).describe('Remove all emulations'),
+      via: z.enum(['page', 'debugger']).optional().describe('page: script shim, no browser bar; debugger: real emulation (default when a debugger-only option is set)'),
+      contrast: z.enum(['more', 'less', 'no-preference']).optional().describe('Value reported to prefers-contrast queries (debugger)'),
+      cpu_throttle: z.number().optional().describe('CPU slowdown factor, e.g. 4 for a mid-range phone; 1 turns it off (debugger)'),
+      network: z.enum(['offline', '3g', 'slow-4g', 'fast-4g', 'none']).optional().describe('DevTools network profile; none turns it off (debugger)'),
+      device: z.object({
+        width: z.number().describe('Viewport width in CSS px'),
+        height: z.number().describe('Viewport height in CSS px'),
+        dpr: z.number().optional().default(1).describe('Device pixel ratio'),
+        mobile: z.boolean().optional().default(false).describe('Mobile viewport: meta viewport and overlay scrollbars apply'),
+      }).optional().describe('Device metrics override (debugger)'),
+      touch: z.boolean().optional().describe('Emulate a touch screen (debugger)'),
+      reset: z.boolean().optional().default(false).describe('Remove all emulations and detach the debugger'),
       tab_id: tabId,
     },
-    async ({ colorScheme, reducedMotion, printMode, user_agent, reset, tab_id }) => {
-      const data = await send(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, user_agent, reset, tab_id });
+    async ({ colorScheme, reducedMotion, printMode, user_agent, via, contrast, cpu_throttle, network, device, touch, reset, tab_id }) => {
+      const data = await send(MessageType.EMULATE_MEDIA, { colorScheme, reducedMotion, printMode, user_agent, via, contrast, cpu_throttle, network, device, touch, reset, tab_id });
       return {
         content: [{
           type: 'text',

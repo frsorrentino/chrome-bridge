@@ -32,7 +32,7 @@ Incidente del 01/10, 17:42-17:48: lo script di prova caricava l'estensione del r
 
 - [x] Tappa 0: la prova dei domini
 - [ ] Tappa 1: gruppo `perf`, `animations` (istantanea e finestra con azione), `frames` (LoAF, CLS, INP, rAF); test unitari di `lib/motion.js`; pagina di prova in `bench/`; e2e in launch
-- [ ] Tappa 2: `emulate_media` con il debugger su richiesta (`Emulation.setEmulatedMedia`, CPU, rete, viewport/DPR, touch) e il ripiego dichiarato; esempio di reduced-motion in `assert`
+- [x] Tappa 2 (e2e 78/79; esempio in `assert` scartato: assert controlla DOM, testo e URL, la verifica sta in `animations` con `summary.not_fade_only` = 0, va nelle ricette): `emulate_media` con il debugger su richiesta (`Emulation.setEmulatedMedia`, CPU, rete, viewport/DPR, touch) e il ripiego dichiarato; esempio di reduced-motion in `assert`
 - [ ] Tappa 3: `perf_trace` (trace su file, analisi con `@paulirish/trace_engine` opzionale o ripiego interno) e `screencast` (ffmpeg, scheda attiva)
 - [ ] Tappa 4: porta CDP del launch (`--remote-debugging-port=0`, `DevToolsActivePort`), `lighthouse` con `npx`, `heap_snapshot` solo in launch
 - [ ] Per ogni tappa: `TOOLS.md`, `CAPABILITIES.md`, conteggi (`tool-counts.test.js`, README, package/server/manifest), CHANGELOG
