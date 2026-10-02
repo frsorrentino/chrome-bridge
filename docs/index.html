@@ -333,7 +333,7 @@ chrome-bridge replay --file ./recordings/login.jsonl</pre>
         <p class="section-lead">Requires Node.js 18+ and Chrome 135+.</p>
         <ol class="steps">
             <li>Install the extension from the <a href="https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb">Chrome Web Store</a>.
-<pre>git clone git@github.com:frsorrentino/chrome-bridge.git
+<pre>git clone https://github.com/frsorrentino/chrome-bridge.git
 cd chrome-bridge &amp;&amp; ./install.sh</pre></li>
             <li>Restart Claude Code. <code>install.sh</code> registers the MCP server with <code>--scope user</code>; by hand it is <code>claude mcp add --scope user chrome-bridge node /path/to/server/index.js</code>.</li>
             <li>Ask for something real: <em>“open localhost:3000, run an accessibility audit and find the Sign Up button”</em>.</li>

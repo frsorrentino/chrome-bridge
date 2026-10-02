@@ -56,3 +56,14 @@ Fonte: il riferimento dei Mods per la v2.1.287. Un mod è un plugin con `hooks/h
 - uno screenshot ogni 5 s, solo mentre un turno è in corso (`turn.start`/`turn.complete`);
 - pausa quando la pagina è nascosta;
 - verifica: `claude plugin test` e una sessione con `--plugin-dir`.
+
+## Claude Code 2.1.288 (02/10/2026, ok di Franz alle 23:30 via master)
+
+| # | Voce del changelog | Esito | Prova |
+|---|---|---|---|
+| 1 | Le richieste URL dei server che non sanno quando l'utente ha finito aspettano «I'm done, continue» | rivalutata, resta il form | La modalità URL ora equivale a un link più una conferma. Per un login nella scheda dell'agente il link resta di troppo: aprirebbe la pagina nel browser predefinito, che può non essere il Chrome dell'agente, o in una scheda doppia. Il form di `handoff` («fallo in Chrome, poi accetta qui») dà già la stessa conferma senza aprire niente. Da riconsiderare solo per un flusso che inizia fuori dalla scheda, per esempio un OAuth del server stesso. |
+| 2 | Cloud: il primo turno non aspetta un server stdio con `alwaysLoad: false` | verificata, niente da cambiare | Il plugin dichiara `alwaysLoad: true` sul server (`.claude-plugin/plugin.json`), e 44 tool su 66 restano rimandati con `_meta`. Il primo turno aspetta il server di proposito: i 22 tool caricati servono subito, e il server parte in circa 100 ms. |
+| 3 | Tool call MCP doppie con risultati remoti oltre 16 MB o non parsabili | non ci riguarda | Il server parla MCP solo via stdio (`server/index.js`, `StdioServerTransport`). Il relay è un WebSocket fra processi locali di chrome-bridge, non un server MCP remoto, e `http_request` è un tool come gli altri. |
+| 4 | Claude in Chrome chiede meno conferme per screenshot e lettura | niente da aggiornare | Nessun testo pubblico (README, sito, scheda Store, EFFICIENCY, RESULTS) presenta le conferme di Claude in Chrome come svantaggio. Nel benchmark il braccio cic girava già in `bypassPermissions`. |
+| 5 | `claude plugin install` da GitHub ripiega su HTTPS; git-subdir con git < 2.39 | fatto | Le istruzioni del plugin usano già `owner/repo`. Il `git clone` dell'installazione manuale, in README e sito, passa da SSH a HTTPS, che funziona anche senza chiave GitHub. |
+| 6 | `claude -p` ignorava SIGTERM se `timeout` mandava anche SIGCONT | verificata | `timeout 8 claude -p` con un `sleep 60` in corso esce con 124 dopo 10,5 s, senza processi residui (2.1.288). Il `timeout 360` del bench chiude le run scadute. |

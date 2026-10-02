@@ -25,7 +25,7 @@ CI. Self-hosted, local-only. Works on ChromeOS.
 **Requires** Node.js 18+ and Chrome 135+.
 
 ```bash
-git clone git@github.com:frsorrentino/chrome-bridge.git
+git clone https://github.com/frsorrentino/chrome-bridge.git
 cd chrome-bridge && ./install.sh
 ```
 

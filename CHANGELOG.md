@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- **Manual install clones over HTTPS** (README and site): the SSH URL failed
+  without a GitHub key.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
