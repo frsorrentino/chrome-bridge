@@ -1,0 +1,11 @@
+== 08:41:00 bridge debug v125d-1 load=2.35
+{"file": "bridge-debug-v125d-1.json", "turns": 5, "in": 8, "out": 1391, "cache_w": 37054, "cache_r": 268557, "cost": 0.2159, "result_head": "Due bug, indipendenti.\n\n**Carrello vuoto \u2014 errore JS**\n`TypeError: Cannot read properties of undefined (reading 'items')`\nFile sorgente: `src/cart.js:10:3` \u2014 `f"}
+== 08:41:30 bridge debug v125d-2 load=3.10
+{"file": "bridge-debug-v125d-2.json", "turns": 5, "in": 8, "out": 1264, "cache_w": 31314, "cache_r": 259301, "cost": 0.1898, "result_head": ".pay \u00e8 alla riga 8 di style.css (`background-color: var(--brand-primary);`). Variabile `--brand-primary` non definita in nessun scope \u2192 fallback trasparente, te"}
+== 08:41:59 bridge debug v125d-3 load=3.22
+{"file": "bridge-debug-v125d-3.json", "turns": 5, "in": 8, "out": 1317, "cache_w": 37034, "cache_r": 268468, "cost": 0.215, "result_head": "Carrello vuoto \u2014 errore JS:\n`TypeError: Cannot read properties of undefined (reading 'items')`\nFile sorgente originale: `src/cart.js:10:3` \u2014 `for (const item of"}
+== 08:42:41 bridge debug v125d-4 load=5.91
+{"file": "bridge-debug-v125d-4.json", "turns": 5, "in": 8, "out": 1476, "cache_w": 32805, "cache_r": 260696, "cost": 0.1981, "result_head": "Trovate cause di entrambi problemi.\n\n**Carrello vuoto \u2014 errore JS**\n`src/cart.js:10` \u2192 `for (const item of cart.items) {}` in `renderCart`, chiamata da `src/car"}
+== 08:43:33 bridge debug v125d-5 load=5.22
+{"file": "bridge-debug-v125d-5.json", "turns": 3, "in": 6, "out": 791, "cache_w": 31726, "cache_r": 186223, "cost": 0.1721, "result_head": "Trovate cause di entrambi problemi.\n\n**Carrello vuoto \u2014 errore JS**\n`TypeError: Cannot read properties of undefined (reading 'items')` in `src/cart.js:10:3`, fu"}
+== fine 08:43:56

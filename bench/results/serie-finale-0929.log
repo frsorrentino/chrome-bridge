@@ -1,0 +1,32 @@
+== 08:32:27 bridge form v125c-1 load=3.00
+{"file": "bridge-form-v125c-1.json", "turns": 3, "in": 6, "out": 484, "cache_w": 71806, "cache_r": 141705, "cost": 0.3204, "result_head": "Form inviato. Messaggio di conferma esatto:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, newsletter: no\n```"}
+== 08:32:49 bridge heavy v125c-1 load=3.58
+{"file": "bridge-heavy-v125c-1.json", "turns": 3, "in": 6, "out": 286, "cache_w": 28398, "cache_r": 183624, "cost": 0.1532, "result_head": "SKU-0777: nome \"Prodotto 777\", categoria Casa, prezzo 292.0, stock 1.\n\nRighe dati tabella totali: 1500."}
+== 08:33:09 bridge debug v125c-1 load=4.55
+{"file": "bridge-debug-v125c-1.json", "turns": 3, "in": 6, "out": 806, "cache_w": 29311, "cache_r": 184603, "cost": 0.1622, "result_head": "Causa trovata, entrambi i bug.\n\n**Errore JavaScript**\n`TypeError: Cannot read properties of undefined (reading 'items')` in `src/cart.js:10:3` (`for (const item"}
+== 08:33:32 bridge form v125c-2 load=4.34
+{"file": "bridge-form-v125c-2.json", "turns": 3, "in": 6, "out": 446, "cache_w": 29555, "cache_r": 184808, "cost": 0.1597, "result_head": "Form inviato, tutti i campi corretti.\n\nMessaggio esatto di conferma:\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, "}
+== 08:33:50 bridge heavy v125c-2 load=4.50
+{"file": "bridge-heavy-v125c-2.json", "turns": 3, "in": 6, "out": 317, "cache_w": 28723, "cache_r": 184240, "cost": 0.1549, "result_head": "SKU-0777: Prodotto 777, categoria Casa, prezzo 292.0, stock 1.\n\nRighe dati tabella totali: 1500."}
+== 08:34:07 bridge debug v125c-2 load=4.58
+{"file": "bridge-debug-v125c-2.json", "turns": 3, "in": 6, "out": 967, "cache_w": 29806, "cache_r": 185316, "cost": 0.166, "result_head": "Trovate entrambe cause.\n\n**Errore JavaScript** (carrello vuoto)\n`Cannot read properties of undefined (reading 'items')` in `src/cart.js:10:3` (`for (const item "}
+== 08:34:40 bridge form v125c-3 load=2.98
+{"file": "bridge-form-v125c-3.json", "turns": 3, "in": 6, "out": 606, "cache_w": 29996, "cache_r": 185524, "cost": 0.1632, "result_head": "Form inviato, tutti campi corretti (privacy s\u00ec, newsletter no).\n\nMessaggio conferma esatto:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@e"}
+== 08:35:05 bridge heavy v125c-3 load=4.75
+{"file": "bridge-heavy-v125c-3.json", "turns": 3, "in": 6, "out": 286, "cache_w": 28984, "cache_r": 184792, "cost": 0.1558, "result_head": "SKU-0777: Prodotto 777, categoria Casa, prezzo 292.0, stock 1.\n\nRighe dati totali tabella: 1500."}
+== 08:35:22 bridge debug v125c-3 load=5.18
+{"file": "bridge-debug-v125c-3.json", "turns": 9, "in": 14, "out": 2209, "cache_w": 38113, "cache_r": 500136, "cost": 0.2746, "result_head": "Trovato tutto. Causa unica dietro entrambi i sintomi: fetch a `/api/cart` fallisce (404), il gestore non copre il caso e lancia eccezione; il bottone usa una cu"}
+== 08:35:59 bridge form v125c-4 load=4.59
+{"file": "bridge-form-v125c-4.json", "turns": 3, "in": 6, "out": 494, "cache_w": 30129, "cache_r": 186007, "cost": 0.1627, "result_head": "Form inviato, campi corretti, newsletter esclusa.\n\nMessaggio di conferma esatto:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com>"}
+== 08:36:16 bridge heavy v125c-4 load=5.12
+{"file": "bridge-heavy-v125c-4.json", "turns": 3, "in": 6, "out": 298, "cache_w": 29293, "cache_r": 185403, "cost": 0.1572, "result_head": "SKU-0777: nome \"Prodotto 777\", categoria Casa, prezzo 292.0, stock 1.\n\nTabella: 1500 righe dati totali."}
+== 08:36:52 bridge debug v125c-4 load=5.51
+{"file": "bridge-debug-v125c-4.json", "turns": 6, "in": 10, "out": 1254, "cache_w": 36724, "cache_r": 344001, "cost": 0.2283, "result_head": "Trovate cause di entrambi i problemi.\n\n**Carrello vuoto:**\n- Errore JS: `TypeError: Cannot read properties of undefined (reading 'items')` in `src/cart.js:10:3`"}
+== 08:37:22 bridge form v125c-5 load=5.09
+{"file": "bridge-form-v125c-5.json", "turns": 3, "in": 6, "out": 424, "cache_w": 30180, "cache_r": 186185, "cost": 0.1622, "result_head": "Form inviato. Messaggio conferma esatto:\n\n```\nRegistrazione completata\nRegistrato: Mario Rossi <mario.rossi@example.com> \u2014 Calabria, newsletter: no\n```"}
+== 08:37:38 bridge heavy v125c-5 load=5.01
+{"file": "bridge-heavy-v125c-5.json", "turns": 3, "in": 6, "out": 330, "cache_w": 29318, "cache_r": 185419, "cost": 0.1577, "result_head": "SKU-0777: nome \"Prodotto 777\", categoria Casa, prezzo 292.0, stock 1.\n\nRighe dati totali tabella: 1500."}
+== 08:37:59 bridge debug v125c-5 load=4.16
+{"file": "bridge-debug-v125c-5.json", "turns": 7, "in": 10, "out": 1796, "cache_w": 33282, "cache_r": 333572, "cost": 0.2178, "result_head": "Causa comuni: `/api/cart` non risponde. Due sintomi, stessa radice parziale.\n\n**1. Errore JS** \u2014 `src/cart.js:10:3`\n```\nfor (const item of cart.items) {\n```\nin "}
+== fine 08:38:32
+FINALE BRIDGE FINITO 08:38
