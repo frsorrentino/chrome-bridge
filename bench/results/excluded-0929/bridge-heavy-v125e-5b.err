@@ -1,2 +1,0 @@
-SessionEnd hook [bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/fd-telemetry.py" session-summary] failed: Hook cancelled
-SessionEnd hook [bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/cm-hook.py" SessionEnd] failed: Hook cancelled

@@ -5,6 +5,12 @@ Confronto a parità di modello (Claude Sonnet 5) e task tra **chrome-bridge**
 screenshot/coordinate). Metrica: **turni** e **token** per completare il task —
 non wall-clock.
 
+I campioni grezzi citati qui sotto (`bench/results/…`) stanno sul branch
+`bench-results`, non su `main`: la directory dei plugin legge al massimo 512
+file per plugin. Per rifare gli aggregati:
+`git restore --source bench-results bench/results` (la cartella resta ignorata
+da git).
+
 ## Regola di inclusione (fissata, non discrezionale)
 
 1. Un confronto è pubblicabile solo tra run **appaiate**: stessa data, stessa

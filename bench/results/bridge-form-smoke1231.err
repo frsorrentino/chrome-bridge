@@ -1,2 +1,0 @@
-Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
-SessionEnd hook [python3 "${CLAUDE_PLUGIN_ROOT}/scripts/fd-telemetry.py" session-summary] failed: Hook cancelled

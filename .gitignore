@@ -9,3 +9,6 @@ evals/results/
 
 # skill del repo per la sessione locale (symlink a skills/chrome-bridge): il plugin carica ./skills/, il portale non vuole symlink
 .claude/skills/chrome-bridge
+
+# campioni grezzi dei benchmark: sul branch bench-results, non su main (il portale della directory legge al massimo 512 file)
+bench/results/
