@@ -2,16 +2,6 @@
 
 ## Unreleased
 
-### Changed
-
-- **Manual install clones over HTTPS** (README and site): the SSH URL failed
-  without a GitHub key.
-- **`create_tab` and `move_tab` with `new_window` report the real window
-  bounds** (`window_bounds`), and a `bounds_note` when the window manager
-  changed what was asked: on ChromeOS a 320 px window opens 501 px wide, and
-  nothing said so. The note points to `emulate_media({device})` for narrower
-  viewports. Extension change: it reaches users with the next Store upload.
-
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
@@ -37,6 +27,34 @@ home non si chiude finché ha compagnia, ma si può portare via da sola:
 finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.29.0 — 2026-10-06
+
+Corrections for the Anthropic plugin directory, which held 1.28.0, and a
+field note from the francescosorrentino.com redesign.
+
+### Changed
+
+- **Manual install clones over HTTPS** (README and site): the SSH URL failed
+  without a GitHub key.
+- **`create_tab` and `move_tab` with `new_window` report the real window
+  bounds** (`window_bounds`), and a `bounds_note` when the window manager
+  changed what was asked: on ChromeOS a 320 px window opens 501 px wide, and
+  nothing said so. The note points to `emulate_media({device})` for narrower
+  viewports.
+- **`/chrome-bridge:observe` pre-approves only its own command**:
+  `allowed-tools` names `observe/py.sh` and `observe/observe.py` under
+  `${CLAUDE_PLUGIN_ROOT}`, quoted as the command runs them. The previous
+  `Bash(bash *observe/py.sh*)` had a wildcard in the path, which the directory
+  holds.
+- **Raw benchmark samples moved off `main`** to the `bench-results` branch:
+  the directory reads at most 512 files per plugin and the repo had 1,269.
+  `bench/RESULTS.md` says how to restore them.
+- **claude-observe 344e154**: `/chrome-bridge:observe send` can also send a
+  report anonymously, only when the user picks that button after reading the
+  draft; the plugin's own anonymizer runs first. The privacy policy has a new
+  section on these optional reports; the extension is unchanged and still
+  talks only to `localhost`.
 
 ## 1.28.0 — 2026-10-02
 
