@@ -6,6 +6,11 @@
 
 - **Manual install clones over HTTPS** (README and site): the SSH URL failed
   without a GitHub key.
+- **`create_tab` and `move_tab` with `new_window` report the real window
+  bounds** (`window_bounds`), and a `bounds_note` when the window manager
+  changed what was asked: on ChromeOS a 320 px window opens 501 px wide, and
+  nothing said so. The note points to `emulate_media({device})` for narrower
+  viewports. Extension change: it reaches users with the next Store upload.
 
 ### Difetto aperto, riproducibile, senza rimedio deciso
 

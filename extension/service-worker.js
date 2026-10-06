@@ -1266,6 +1266,25 @@ async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
 
 // --- create_tab ---
 
+// Bounds reali di una finestra appena creata, confrontati con quelli chiesti.
+// Il window manager può cambiarli in silenzio: su ChromeOS una finestra di
+// 320 px nasce larga 501 (15-16/09). Senza il confronto il chiamante misura a
+// una larghezza che non ha.
+async function windowBoundsReport(windowId, requested) {
+  const asked = Object.fromEntries(Object.entries(requested).filter(([, v]) => typeof v === 'number'));
+  if (!Object.keys(asked).length) return {};
+  const w = await chrome.windows.get(windowId);
+  const actual = { left: w.left, top: w.top, width: w.width, height: w.height };
+  const differ = Object.keys(asked).filter((k) => actual[k] !== asked[k]);
+  return {
+    window_bounds: actual,
+    ...(differ.length && {
+      bounds_note: `The window manager changed ${differ.map((k) => `${k} ${asked[k]}→${actual[k]}`).join(', ')}`
+        + ' (on ChromeOS a window is at least ~500 px wide). For a narrower viewport use emulate_media({device:{width,height}}) (visual group, debugger).',
+    }),
+  };
+}
+
 async function cmdCreateTab({ url, active = true, new_window = false, left, top, width, height }) {
   if (new_window) {
     // windows.create con i bounds apre direttamente sul monitor scelto: left è
@@ -1280,9 +1299,11 @@ async function cmdCreateTab({ url, active = true, new_window = false, left, top,
     if (url && tab) {
       await waitForComplete(tab.id);
       const updated = await chrome.tabs.get(tab.id);
-      return { id: updated.id, url: updated.url, title: updated.title, window_id: win.id };
+      return { id: updated.id, url: updated.url, title: updated.title, window_id: win.id,
+        ...await windowBoundsReport(win.id, { left, top, width, height }) };
     }
-    return { id: tab?.id, url: tab?.url || 'chrome://newtab', title: tab?.title || '', window_id: win.id };
+    return { id: tab?.id, url: tab?.url || 'chrome://newtab', title: tab?.title || '', window_id: win.id,
+      ...await windowBoundsReport(win.id, { left, top, width, height }) };
   }
   const opts = { active };
   if (url) opts.url = url;
@@ -1452,6 +1473,7 @@ async function cmdMoveTab({ tab_id, window_id, new_window = false, window_type, 
       new_window: true,
       index: 0,
       same_window: before.windowId === win.id,
+      ...await windowBoundsReport(win.id, { left, top, width, height }),
     };
   }
   const moved = await chrome.tabs.move(tab_id, { windowId: window_id, index });
