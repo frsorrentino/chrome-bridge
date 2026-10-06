@@ -15,9 +15,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/observe/py.sh" "${CLAUDE_PLUGIN_ROOT}/observe/observ
   same error), then the OPTIONS block: one JSON line per option (label, description, command). Show the draft to the
   user as it is, then ask with **AskUserQuestion** — buttons, never free text — using exactly the labels and
   descriptions of the OPTIONS block, nothing else: «Send from my GitHub» (an issue in the user's name, through gh or,
-  without gh, a prefilled GitHub link they open) and «Not now» (the offer comes back in seven days). Anonymous sending
-  is coming but not available yet: never offer or promise it unless the OPTIONS block lists it. Then run ONLY the
-  command of the chosen option. What was sent is never offered again.
+  without gh, a prefilled GitHub link they open), «Send anonymously» (our service opens the issue without the user's
+  name; it appears only when the OPTIONS block lists it) and «Not now» (the offer comes back in seven days). Then run
+  ONLY the command of the chosen option. What was sent is never offered again.
 - `send --security`: the same for the observations marked `--security`, on a PRIVATE path: a GitHub private
   vulnerability report, or the address in the maintainers' SECURITY.md. The public «Send from my GitHub» option never
   appears for them.

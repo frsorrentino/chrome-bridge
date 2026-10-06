@@ -67,9 +67,12 @@ CLASSES = ("D", "L", "S", "done", "new")
 DEFAULTS = {"enabled": True, "dir": "", "max_records": 2000, "max_days": 90, "anonymizer": "", "blocklist": "",
             "propose": True, "propose_after": 3, "propose_after_days": 3, "propose_every_days": 7, "language": "", "tools": {},
             # l'invio anonimo (25/09/2026): l'endpoint del nostro sito che apre la issue con l'account di servizio, senza il
-            # nome dell'utente; vuoto = l'opzione non compare
-            "endpoint": ""}
+            # nome dell'utente; vuoto = l'opzione non compare. Con www: senza, il sito risponde 301 e il POST diventa GET
+            "endpoint": "https://www.francescosorrentino.com/api/observe/report.php"}
 PRIVACY = "https://github.com/frsorrentino/claude-observe/blob/main/PRIVACY.md"   # la nota dell'invio anonimo
+# i plugin che il nostro servizio accetta (OBSERVE_REPOS di server/report.php): una copia in un altro plugin (pixelfarm)
+# non offre un servizio che la rifiuterebbe. Un endpoint diverso, scelto dall'utente, vale per tutti
+ANON_TOOLS = {"fable-director", "claude-master", "chrome-bridge", "claude-observe", "claude-master-watch"}
 MSG = {
  "it": {
   "observe.summary": "OSSERVAZIONI {tool}: {new} nuove, {again} ricorrenti — `{cmd} list {tool}` (triage: `observe mark ID D|L|S|done`)",
@@ -942,6 +945,12 @@ def anonymizer():
     p = O.get("anonymizer") or ""
     if p:
         return expand(p) if os.path.isfile(expand(p)) else ""
+    # 06/10 (dalla revisione della directory): prima il file del plugin stesso, accanto alla copia di observe — la
+    # versione controllata dal portale, non un'altra installata; il glob nelle cache di fable-director resta solo
+    # come ultima scelta, per i plugin che non hanno un anonimizzatore loro
+    own = HERE.parent / "scripts" / "anonymizer.py"
+    if own.is_file():
+        return str(own)
     found = sorted(glob.glob(os.path.expanduser("~/.claude*/plugins/cache/*/fable-director/*/scripts/anonymizer.py")), key=os.path.getmtime)
     return found[-1] if found else ""
 
@@ -1113,6 +1122,12 @@ def draft(tool, recs, target=None, security=False):
     return title, body, hashlib.sha256(f"{head}\n{text}".encode()).hexdigest()[:10]
 
 
+def endpoint(tool):
+    """L'endpoint dell'invio anonimo per questo plugin, o "" se l'opzione non va offerta."""
+    url = str(O.get("endpoint") or "").strip()
+    return "" if url == DEFAULTS["endpoint"] and tool not in ANON_TOOLS else url
+
+
 def options(tool, t, h, security, has_gh):
     """Le scelte da porre all'utente con AskUserQuestion (tasti, mai testo libero), dopo la bozza: dal suo GitHub (mai per
     una security: quella va solo in privato), in forma anonima dal nostro endpoint (solo se observe.endpoint e'
@@ -1124,7 +1139,7 @@ def options(tool, t, h, security, has_gh):
     if not security:
         out.append({"label": M("observe.opt_own"), "description": M("observe.opt_own_desc" if has_gh else "observe.opt_own_desc_nogh", repo=repo),
                     "command": f"{base} --send {h}"})
-    if str(O.get("endpoint") or "").strip():
+    if endpoint(tool):
         out.append({"label": M("observe.opt_anon"), "description": M("observe.opt_anon_desc_security" if security else "observe.opt_anon_desc", privacy=PRIVACY),
                     "command": f"{base} --send {h} --anonymous"})
     if security:
@@ -1161,7 +1176,7 @@ def later(tool):
 def send_anonymous(tool, t, title, body, recs, security):
     """L'invio anonimo: POST JSON a observe.endpoint con la bozza anonimizzata piu' plugin, versione e i flag — niente
     altro. La issue la apre l'account di servizio del sito, senza il nome dell'utente. Torna l'URL (o l'endpoint)."""
-    url = str(O.get("endpoint") or "").strip()
+    url = endpoint(tool)
     if not url:
         raise ValueError(M("observe.no_endpoint"))
     payload = {"plugin": tool, "version": tool_version(tool, t) or None, "security": bool(security),
@@ -1214,7 +1229,7 @@ def report_security(tool, t, repo, send, anonymous=False):
     if not recs:
         print(M("observe.nothing_to_send", tool=tool))
         return 0
-    if not channel and not str(O.get("endpoint") or "").strip():
+    if not channel and not endpoint(tool):
         print(M("observe.no_security_channel", tool=tool), file=sys.stderr)
         return 2
     title, body, h = draft(tool, recs, security=True)
