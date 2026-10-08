@@ -28,6 +28,19 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.29.1 — 2026-10-08
+
+team-supervisor (formerly claude-master) is now called `supervisor`. Server
+and plugin only: the extension is unchanged and stays at 1.29.0, so the Chrome
+Web Store gets no new package.
+
+### Changed
+
+- **Error reports** (observe, synced from claude-observe 4d6ad8f): the
+  anonymous option is also offered for reports about `supervisor` and
+  `supervisor-app`, the new names of team-supervisor and its app.
+- **`server/layouts.js`**: a comment names `supervisor layout save`.
+
 ## 1.29.0 — 2026-10-06
 
 Corrections for the Anthropic plugin directory, which held 1.28.0, and a
