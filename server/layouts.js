@@ -2,8 +2,9 @@
  * window_layout: salvare e ripristinare disposizioni di finestre per nome.
  *
  * Una sola implementazione per il tool MCP (tools.js) e per la CLI (cli.js):
- * prima viveva inline nel tool e la CLI non la conosceva, e `claude-master
- * layout save` usciva con «Unknown command: window_layout».
+ * prima viveva inline nel tool e la CLI non la conosceva, e `supervisor layout
+ * save` (allora `claude-master layout save`) usciva con «Unknown command:
+ * window_layout».
  *
  * Tutto lato server, componendo GET_TABS(include_windows) e VIEWPORT_RESIZE:
  * nessun comando nuovo verso l'estensione. Gli id delle finestre non
