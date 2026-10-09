@@ -28,6 +28,25 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.29.2 — 2026-10-09
+
+Security fix. Server only: the extension is unchanged and stays at 1.29.0, so
+the Chrome Web Store gets no new package. Update the server (`npx -y
+chrome-bridge-mcp@1.29.2`, or the plugin) on every machine that runs it.
+
+### Security
+
+- **Relay handshake from web pages** (`server/ws-manager.js`): the server
+  accepted `relay_init` from any loopback connection without checking the
+  `Origin` header, and without a token by default. A web page open in any
+  browser on the same computer could connect to `ws://127.0.0.1:8765`, become a
+  relay and have commands forwarded to the extension. `relay_init` is now
+  rejected when the connection carries an `Origin` header: browsers always send
+  one, while the legitimate relays (a second chrome-bridge server, the
+  `chrome-bridge` CLI) use Node's `ws` and send none. `ext_init` is unchanged
+  (it already required a `chrome-extension://` Origin). Regression tests in
+  `test/unit/ws-manager-hardening.test.js`.
+
 ## 1.29.1 — 2026-10-08
 
 team-supervisor (formerly claude-master) is now called `supervisor`. Server

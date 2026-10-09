@@ -257,7 +257,7 @@ export class WSManager {
   /**
    * Ogni connessione DEVE identificarsi col primo messaggio:
    * - { type: 'ext_init', token? }  → estensione Chrome (Origin chrome-extension:// obbligatorio)
-   * - { type: 'relay_init' }        → relay client (solo loopback)
+   * - { type: 'relay_init' }        → relay client (solo loopback, senza Origin)
    * Connessioni mute o non valide vengono terminate.
    */
   _handleNewConnection(ws, req) {
@@ -289,6 +289,14 @@ export class WSManager {
       if (msg.type === MessageType.RELAY_INIT) {
         if (!isLoopback) {
           console.error(`[chrome-bridge] relay_init from non-loopback ${remote} — rejected`);
+          ws.terminate();
+          return;
+        }
+        // I relay legittimi (server e CLI, ws di Node) non mandano Origin; un
+        // browser lo manda sempre. Senza questo controllo una pagina web
+        // aperta sullo stesso computer diventava un relay e pilotava Chrome.
+        if (origin) {
+          console.error(`[chrome-bridge] relay_init with origin "${origin}" — rejected`);
           ws.terminate();
           return;
         }

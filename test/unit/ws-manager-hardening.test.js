@@ -128,6 +128,43 @@ test('relay_init col token corretto è accettato', async () => {
   await m.stop();
 });
 
+test('relay_init con Origin (pagina web) è rifiutato anche senza token', async () => {
+  const m = new WSManager(0, { identTimeout: 500 });
+  await m.start();
+  const port = m.wss.address().port;
+
+  for (const origin of ['https://evil.example', 'null', 'chrome-extension://abc']) {
+    const ws = await connect(port, { Origin: origin });
+    const got = [];
+    ws.on('message', (raw) => got.push(JSON.parse(raw.toString())));
+    ws.send(JSON.stringify({ type: MessageType.RELAY_INIT }));
+    const closed = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), 1000);
+      ws.on('close', () => { clearTimeout(t); resolve(true); });
+    });
+    assert.equal(closed, true, `relay_init con Origin "${origin}" deve essere terminato`);
+    assert.equal(got.some((msg) => msg.type === 'relay_init_ok'), false);
+  }
+  assert.equal(m.relayClients.size, 0);
+  await m.stop();
+});
+
+test('relay_init senza Origin e senza token è accettato', async () => {
+  const m = new WSManager(0, { identTimeout: 500 });
+  await m.start();
+  const port = m.wss.address().port;
+
+  const ws = await connect(port);
+  ws.send(JSON.stringify({ type: MessageType.RELAY_INIT }));
+  const hello = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), 1000);
+    ws.on('message', (raw) => { clearTimeout(t); resolve(JSON.parse(raw.toString())); });
+  });
+  assert.equal(hello?.type, 'relay_init_ok');
+  try { ws.terminate(); } catch {}
+  await m.stop();
+});
+
 test('ext_init da non-loopback è rifiutato col bind loopback di default', async () => {
   const m = new WSManager(0, { identTimeout: 500 });
   assert.equal(m.host, '127.0.0.1', 'default loopback');
