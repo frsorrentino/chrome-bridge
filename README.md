@@ -332,6 +332,11 @@ its own Chromium with `extension/`) · `npm run measure` (schema cost) ·
 `npm run bench:latency` (milliseconds per tool, launches its own Chromium,
 writes `docs/PERFORMANCE.md`).
 
+## Related projects
+
+- [agent-webbridge](https://github.com/jeet-dhandha/agent-webbridge) — drives several Chrome profiles at once, with parallel tabs
+- [awb-recipes](https://github.com/jeet-dhandha/awb-recipes) — community-maintained, dated per-site recipes for automating logged-in websites
+
 ## License
 
 MIT
