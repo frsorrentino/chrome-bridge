@@ -3684,7 +3684,20 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, upload_id
     func: (sel, fname, mime, b64, id, expected) => {
       const pieces = id ? window.__cbUploads?.[id] : null;
       if (id) delete window.__cbUploads?.[id];
-      const el = document.querySelector(sel);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       // Un throw qui si perderebbe (elementOutcome lo leggerebbe come «not found»): esito esplicito.
       if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { uploaded: false, error: 'Element is not an input[type=file]' };

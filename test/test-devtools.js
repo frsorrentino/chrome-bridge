@@ -1163,6 +1163,25 @@ async function testUploadLarge() {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// upload_file con ">>>" su tre shadow root annidate: fino a 1.29.2 cercava
+// con document.querySelector e rispondeva «Element not found».
+async function testUploadShadow() {
+  const { uploadBuffer } = await import('../server/upload.js');
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}upload-shadow`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  try {
+    const r = await uploadBuffer((t, p) => wsManager.sendCommand(t, p), { selector: '#l1 >>> #l2 >>> #l3 >>> input[type=file]', name: 'deep.txt', mime_type: 'text/plain', buf: Buffer.from('ciao'), tab_id });
+    const page = await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+      code: '(async () => { const f = document.getElementById("l1").shadowRoot.getElementById("l2").shadowRoot.getElementById("l3").shadowRoot.getElementById("f").files[0]; return f ? f.name + ":" + await f.text() : null; })()',
+      tab_id,
+    });
+    if (r.uploaded !== 'deep.txt' || page.result !== 'deep.txt:ciao') throw new Error(`esito ${JSON.stringify(r)}, pagina ${page.result}`);
+    ok('upload_file attraverso 3 shadow root con >>>');
+  } catch (e) { fail('upload_file attraverso 3 shadow root', e.message); }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // Copia locale della pagina di example.com com'era fino a settembre 2026: il
 // sito vero ha cambiato markup (niente h1, niente width) e i test che ci
 // contavano sono diventati rossi senza che il nostro codice cambiasse.
@@ -1188,6 +1207,12 @@ const HERO_PNG = (() => {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
 })();
+// Tre shadow root annidate, l'input file nell'ultima (come il composer di reddit).
+const UPLOAD_SHADOW_HTML = '<!doctype html><html><body><div id="l1"></div><script>'
+  + 'const r1 = document.getElementById("l1").attachShadow({ mode: "open" }); r1.innerHTML = \'<div id="l2"></div>\';'
+  + 'const r2 = r1.getElementById("l2").attachShadow({ mode: "open" }); r2.innerHTML = \'<div id="l3"></div>\';'
+  + 'const r3 = r2.getElementById("l3").attachShadow({ mode: "open" }); r3.innerHTML = \'<input type="file" id="f">\';'
+  + '</script></body></html>';
 const LCP_HTML = '<!doctype html><html><head><title>LCP</title></head><body><p>Small text</p><img src="/hero.png" width="900" height="600" alt="Hero"></body></html>';
 async function startFixture() {
   const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
@@ -1197,6 +1222,7 @@ async function startFixture() {
       setTimeout(() => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(HERO_PNG); }, 300);
       return;
     }
+    if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
     if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }
     if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -1303,6 +1329,9 @@ async function main() {
 
     // 1.28
     await testUploadLarge();
+
+    // 1.29.3
+    await testUploadShadow();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {
