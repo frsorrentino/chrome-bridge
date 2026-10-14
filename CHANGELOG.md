@@ -1,32 +1,6 @@
 # Changelog
 
-## 1.30.0 — 2026-10-14
-
-### Added
-
-- `capture_downloads` (core, 67 tools): saves the files a page builds itself
-  with no browser download and no "Save as" dialog. `arm` with `save_dir`,
-  click the Export button, `wait` returns the saved paths. It takes blob and
-  data URL links (`a[download]`, also `a.click()` on a detached anchor with an
-  immediate `revokeObjectURL`), `showSaveFilePicker` writes, and downloads the
-  page starts: those are cancelled as soon as they are created and fetched
-  again with the browser cookies (a POST export or a one-time link is reported
-  as skipped). The bytes reach the server in 4 MB pieces. Names are cleaned (no
-  path, no leading dot, no reserved characters), existing files are never
-  overwritten, `save_dir` cannot be a key folder and obeys `--write-root`, each
-  file is capped by `max_mb` (default 100, max 200). Tested on blob, data URL,
-  `showSaveFilePicker` and a page download in e2e; by hand on Linux Chromium
-  set to ask where to save, a page download stays `in_progress` with no name
-  (the dialog) when disarmed and leaves no download when armed; live on
-  Excalidraw "Save to file" (`showSaveFilePicker`) in the Chromebook's Chrome.
-
-### Changed
-
-- Server instructions, `http_request` and `manage_downloads` say how to save a
-  file: with a URL, `http_request` `save_to`; built by the page,
-  `capture_downloads`; never a click on Download waiting for the browser
-  download. `manage_downloads` stuck at `waiting_for_user` now returns a `hint`
-  with the `http_request` call to use instead.
+## Unreleased
 
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
@@ -53,6 +27,37 @@ home non si chiude finché ha compagnia, ma si può portare via da sola:
 finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.30.0 — 2026-10-14
+
+Files the page builds reach disk with no "Save as" dialog. The extension
+changes (manifest 1.30.0), so the Chrome Web Store gets a new package.
+
+### Added
+
+- `capture_downloads` (core, 67 tools): saves the files a page builds itself
+  with no browser download and no "Save as" dialog. `arm` with `save_dir`,
+  click the Export button, `wait` returns the saved paths. It takes blob and
+  data URL links (`a[download]`, also `a.click()` on a detached anchor with an
+  immediate `revokeObjectURL`), `showSaveFilePicker` writes, and downloads the
+  page starts: those are cancelled as soon as they are created and fetched
+  again with the browser cookies (a POST export or a one-time link is reported
+  as skipped). The bytes reach the server in 4 MB pieces. Names are cleaned (no
+  path, no leading dot, no reserved characters), existing files are never
+  overwritten, `save_dir` cannot be a key folder and obeys `--write-root`, each
+  file is capped by `max_mb` (default 100, max 200). Tested on blob, data URL,
+  `showSaveFilePicker` and a page download in e2e; by hand on Linux Chromium
+  set to ask where to save, a page download stays `in_progress` with no name
+  (the dialog) when disarmed and leaves no download when armed; live on
+  Excalidraw "Save to file" (`showSaveFilePicker`) in the Chromebook's Chrome.
+
+### Changed
+
+- Server instructions, `http_request` and `manage_downloads` say how to save a
+  file: with a URL, `http_request` `save_to`; built by the page,
+  `capture_downloads`; never a click on Download waiting for the browser
+  download. `manage_downloads` stuck at `waiting_for_user` now returns a `hint`
+  with the `http_request` call to use instead.
 
 ## 1.29.3 — 2026-10-14
 
