@@ -1182,6 +1182,59 @@ async function testUploadShadow() {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// 1.30: capture_downloads salva i file costruiti dalla pagina senza download di Chrome.
+async function testCaptureDownloads() {
+  const { collectCaptured } = await import('../server/capture.js');
+  const { mkdtemp, readFile, readdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const send = (t, p) => wsManager.sendCommand(t, p);
+  const dir = await mkdtemp(join(tmpdir(), 'cb-e2e-cap-'));
+  const tab = await send(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}capture`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const before = (await send(MessageType.MANAGE_DOWNLOADS, { action: 'list', limit: 50 })).downloads.length;
+  const one = async (name, click, check) => {
+    try {
+      await send(MessageType.CLICK, { selector: click, tab_id });
+      const r = await collectCaptured(send, { tab_id, dir, timeout: 8000, settle: 300 });
+      if (r.saved.length !== 1) throw new Error(JSON.stringify(r));
+      await check(r.saved[0]);
+      ok(`capture_downloads: ${name}`);
+    } catch (e) { fail(`capture_downloads: ${name}`, e.message); }
+  };
+  try {
+    const armed = await send(MessageType.CAPTURE_FILES, { op: 'arm', tab_id, max_bytes: 1024 * 1024 });
+    if (!armed.armed) throw new Error(JSON.stringify(armed));
+    await one('blob da ancora staccata, revocato subito', '#blob', async (f) => {
+      if (f.path !== join(dir, 'export.csv')) throw new Error(`percorso ${f.path}`);
+      if (await readFile(f.path, 'utf8') !== 'a,b\n1,2\n') throw new Error('contenuto');
+    });
+    await one('data URL da a[download]', '#data', async (f) => {
+      if (await readFile(f.path, 'utf8') !== 'ciao' || !f.path.endsWith('nota.txt')) throw new Error(f.path);
+    });
+    const hasPicker = (await send(MessageType.EXECUTE_JS, { code: 'typeof showSaveFilePicker', tab_id })).result === 'function';
+    if (hasPicker) {
+      await one('showSaveFilePicker', '#picker', async (f) => {
+        if (await readFile(f.path, 'utf8') !== '{"x":1}' || f.source !== 'showSaveFilePicker') throw new Error(`${f.path} ${f.source}`);
+      });
+    } else log('showSaveFilePicker assente in questo browser: caso saltato');
+    await one('download avviato dalla pagina, annullato e ripreso', '#server', async (f) => {
+      const b = await readFile(f.path);
+      if (!f.path.endsWith('dal server.bin') || b.length !== 4 || b[3] !== 255) throw new Error(`${f.path} ${b.length}`);
+      if (f.browser_copy) throw new Error(`copia anche in Download: ${f.browser_copy}`);
+    });
+    const after = (await send(MessageType.MANAGE_DOWNLOADS, { action: 'list', limit: 50 })).downloads.length;
+    if (after !== before) fail('capture_downloads: nessun download resta nella cronologia', `${before} → ${after}`);
+    else ok('capture_downloads: nessun download resta nella cronologia');
+    await send(MessageType.CAPTURE_FILES, { op: 'disarm', tab_id });
+    const files = (await readdir(dir)).sort();
+    log(`file salvati: ${files.join(', ')}`);
+  } catch (e) { fail('capture_downloads', e.message); }
+  await send(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+  await rm(dir, { recursive: true, force: true });
+}
+
 // 1.29.3: ogni tool con un selettore attraversa tre shadow root con ">>>".
 async function testShadowSelectors() {
   const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}shadow-tools`, active: true });
@@ -1290,6 +1343,18 @@ const SHADOW_TOOLS_HTML = '<!doctype html><html><body><div id="l1"></div><script
   + '<div id="box" style="height:80px;overflow:auto"><div style="height:600px"></div><p id="far">Fondo</p></div>\';'
   + '</script></body></html>';
 const LCP_HTML = '<!doctype html><html><head><title>LCP</title></head><body><p>Small text</p><img src="/hero.png" width="900" height="600" alt="Hero"></body></html>';
+// 1.30: pagina che costruisce file da sé, nei quattro modi che capture_downloads
+// prende: ancora staccata con blob e revoke immediato, ancora nel DOM con data
+// URL, showSaveFilePicker, e un download vero avviato dalla pagina.
+const CAPTURE_HTML = '<!doctype html><html><body>'
+  + '<button id="blob" onclick="const b=new Blob([\'a,b\\n1,2\\n\'],{type:\'text/csv\'});const u=window.URL.createObjectURL(b);'
+  + 'const a=document.createElement(\'a\');a.href=u;a.download=\'../../.export.csv\';a.click();window.URL.revokeObjectURL(u);">blob</button>'
+  + '<a id="data" download="nota.txt" href="data:text/plain;base64,Y2lhbw==">data</a>'
+  + '<button id="picker" onclick="(async()=>{const h=await showSaveFilePicker({suggestedName:\'picker.json\'});const w=await h.createWritable();'
+  + 'await w.write(\'{&quot;x&quot;:\');await w.write(new Blob([\'1}\']));await w.close();document.title=\'written\';})()">picker</button>'
+  + '<button id="server" onclick="location.href=\'/attachment\'">server</button>'
+  + '</body></html>';
+
 async function startFixture() {
   const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
   const http = createHttpServer((req, res) => {
@@ -1299,6 +1364,8 @@ async function startFixture() {
       return;
     }
     if (req.url === '/shadow-tools') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(SHADOW_TOOLS_HTML); return; }
+    if (req.url === '/capture') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(CAPTURE_HTML); return; }
+    if (req.url === '/attachment') { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="dal server.bin"' }); res.end(Buffer.from([0, 1, 2, 255])); return; }
     if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
     if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }
     if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
@@ -1410,6 +1477,9 @@ async function main() {
     // 1.29.3
     await testUploadShadow();
     await testShadowSelectors();
+
+    // 1.30
+    await testCaptureDownloads();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

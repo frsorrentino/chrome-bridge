@@ -173,4 +173,8 @@ out.push((await cb.extract_table({where:{id}})).rows[0]); } return out;'
   need `chrome.debugger`, which this extension deliberately doesn't hold.
 - Certificate details and DNS queries: use a checker page.
 - CAPTCHA, 2FA, passwords: the user does it in the browser; the tab stays theirs.
-- A PDF open in the viewer: download it (`manage_downloads`) and read the file.
+- A PDF open in the viewer: `http_request` with `save_to` (its URL, the browser cookies) and read the file.
+- Saving any file: never click Download and wait for the browser download, the
+  OS "Save as" dialog can open and nothing can press it. A file with a URL:
+  `http_request` `save_to`; a file the page builds (Export button, blob):
+  `capture_downloads` arm, click, wait.

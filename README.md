@@ -164,12 +164,12 @@ user-script toggle isn't available.
 
 ## Tools
 
-66 in total. `core` (43 tools, every tool used in 101 real sessions) loads by
+67 in total. `core` (44 tools, every tool used in 101 real sessions) loads by
 default; the other 23 sit in seven optional caps that the agent switches on
 mid-session with `get_status({enable: ["visual"]})`, with no restart
 (`--caps` still sets them at startup).
 
-![66 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
+![67 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
@@ -179,7 +179,7 @@ mid-session with `get_status({enable: ["visual"]})`, with no restart
 | Debugging & Network | 8 | `execute_js`, console, network log, mocking, `track_events` |
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
 | Audits | 2 | `audit` (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), `cookie_audit` |
-| State, Storage & Files | 9 | storage, fixtures, MHTML, recording, `assert` |
+| State, Storage & Files | 10 | storage, fixtures, MHTML, `capture_downloads` (exports saved with no "Save as" dialog), recording, `assert` |
 | Motion & Performance | 6 | `animations`, `frames` (long frames, CLS, INP), `perf_trace`, `screencast`, `lighthouse` and `heap_snapshot` (launch mode) |
 
 Every tool, with the notes that matter: [docs/TOOLS.md](docs/TOOLS.md).
@@ -316,7 +316,7 @@ count.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 66 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 67 tools, by group
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`

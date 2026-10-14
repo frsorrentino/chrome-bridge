@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import { runAssert } from './assertions.js';
@@ -27,6 +27,7 @@ import { fingerprintDelta } from './effect.js';
 import { analyzeTrace, traceEventsOf } from './trace-analysis.js';
 import { assembleVideo } from './video.js';
 import { uploadBuffer, MAX_UPLOAD_BYTES } from './upload.js';
+import { collectCaptured, CAPTURE_DEFAULT_MB, CAPTURE_MAX_MB } from './capture.js';
 import { cdpConnect, targetWsUrl, takeHeapSnapshot, summarizeHeap, diffHeap } from './heap.js';
 import { lighthouseArgs, runLighthouse, summarizeLighthouse } from './lighthouse.js';
 import { consoleLines, networkLines, interactivesLines, interactiveLine, linksLines } from './formatters.js';
@@ -364,6 +365,7 @@ export const TOOL_ANNOTATIONS = {
   get_storage: ro(),
   get_tabs: ro(),
   manage_downloads: rw({ open: true }),  // action=download scrive un file sul disco e va in rete
+  capture_downloads: rw({ open: true }),  // scrive file nuovi (mai sovrascritti), un download annullato si riprende dalla rete
   measure_spacing: ro(),
   animations: rw(),   // con action clicca, passa sopra, scorre o preme un tasto
   frames: rw(),
@@ -2810,7 +2812,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'manage_downloads',
     'List downloads, start one, or wait for the newest to finish. Files land in the browser Downloads folder, not on the server. '
       + 'download reports the real state: with Chrome set to ask where to save, it comes back waiting_for_user — bytes fetched, '
-      + 'nothing moves until someone picks a destination.',
+      + 'nothing moves until someone picks a destination. To save a file that has a URL use http_request with save_to instead: '
+      + 'browser cookies, bytes on disk, no dialog; a file the page builds goes through capture_downloads.',
     {
       action: z.enum(['list', 'wait_for_complete', 'download']).describe('download fetches with the browser cookies and reports the real state; wait_for_complete blocks until the newest finishes'),
       url: z.string().optional().describe('What to download (action=download); sent with the session cookies of its origin'),
@@ -2821,6 +2824,63 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     async ({ action, url, filename, timeout, limit }) => {
       if (action === 'download' && !url) throw new Error('action=download requires url');
       const data = await send(MessageType.MANAGE_DOWNLOADS, { action, url, filename, timeout, limit });
+      // Fermo sul selettore: nessun tool lo preme, la strada è un'altra.
+      if (data?.state === 'waiting_for_user') {
+        data.hint = `The save dialog needs a person. Instead: http_request {url: "${data.url ?? url}", save_to: "/absolute/path"} `
+          + 'fetches with the same cookies and writes the bytes without a dialog.';
+      }
+      return { content: [{ type: 'text', text: jsonText(data) }] };
+    }
+  );
+
+  // --- capture_downloads ---
+  // Cartella e tetto per scheda armata. I nomi li sceglie la pagina: li pulisce
+  // server/capture.js, e la cartella non può stare fra le chiavi.
+  const captures = new Map();
+  const captureTab = (tab_id) => tab_id ?? (captures.size === 1 ? captures.keys().next().value : undefined);
+  server.tool(
+    'capture_downloads',
+    'Save files the page builds itself, with no browser download and no "Save as" dialog: blob and data URL links (a[download]), '
+      + 'window.showSaveFilePicker writes, and downloads the page starts (cancelled at once, bytes fetched again with the browser cookies). '
+      + 'arm with save_dir, then click Export/Download, then wait: it returns the saved paths. A file with a URL: http_request save_to instead. '
+      + 'Names are cleaned, existing files never overwritten, size capped by max_mb.',
+    {
+      action: z.enum(['arm', 'wait', 'disarm']).describe('arm before the click; wait returns what arrived and stays armed; disarm restores the page'),
+      save_dir: z.string().optional().describe('arm: absolute directory for the files; created if missing'),
+      max_mb: z.number().optional().describe(`arm: per-file cap in MB (default ${CAPTURE_DEFAULT_MB}, max ${CAPTURE_MAX_MB}); a bigger file is skipped`),
+      timeout: z.number().optional().default(15000).describe('wait: max ms for the first file'),
+      tab_id: tabId,
+    },
+    async ({ action, save_dir, max_mb, timeout, tab_id }) => {
+      if (action === 'arm') {
+        if (!save_dir || !isAbsolute(save_dir)) throw new Error('arm requires save_dir, an absolute directory');
+        const dir = resolve(save_dir);
+        guardWrite(dir);
+        const inside = (p, root) => p === root || p.startsWith(root + sep);
+        if (SECRET_DIRS.some((d) => inside(dir, d))) throw new Error(`Refusing to write into ${dir}: a key or credential folder`);
+        await mkdir(dir, { recursive: true });
+        const real = await realpath(dir);
+        if (SECRET_DIRS.some((d) => inside(real, d))) throw new Error(`Refusing to write into ${real}: a key or credential folder`);
+        guardWrite(real);
+        const mb = Math.min(CAPTURE_MAX_MB, Math.max(1, max_mb ?? CAPTURE_DEFAULT_MB));
+        const data = await send(MessageType.CAPTURE_FILES, { op: 'arm', tab_id, max_bytes: Math.round(mb * 1024 * 1024) });
+        captures.set(data.tabId, { dir: real, mb });
+        return { content: [{ type: 'text', text: jsonText({ armed: true, tab_id: data.tabId, save_dir: real, max_mb: mb, next: 'click the Export/Download control, then capture_downloads wait' }) }] };
+      }
+      const tid = captureTab(tab_id);
+      if (action === 'disarm') {
+        const data = await send(MessageType.CAPTURE_FILES, { op: 'disarm', tab_id: tid });
+        captures.delete(data.tabId);
+        return { content: [{ type: 'text', text: jsonText({ armed: false, tab_id: data.tabId }) }] };
+      }
+      const armed = captures.get(tid);
+      if (!armed) throw new Error('Nothing armed for this tab: capture_downloads arm with save_dir first');
+      const data = await collectCaptured(send, { tab_id: tid, dir: armed.dir, timeout });
+      if (!data.saved.length && !data.skipped.length) {
+        data.hint = data.armed
+          ? 'Nothing captured: no file built by the page and no download started. Check the click hit the control; a file with a URL goes through http_request save_to.'
+          : 'The page lost the capture (reload or navigation): arm again, then click.';
+      }
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );
@@ -2846,7 +2906,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'http_request',
     'HTTP request sent from the browser, with the logged-in user\'s cookies: fetches what a server-side request gets a login page for '
       + '(invoices, authenticated JSON, exports). Text bodies inline (capped by max_length); save_to writes the bytes — the way to read a PDF, '
-      + 'since read_page returns nothing on a PDF tab.',
+      + 'since read_page returns nothing on a PDF tab, and the way to save any file that has a URL: no click on Download, '
+      + 'no browser download, no "Save as" dialog.',
     {
       url: z.string().describe('Absolute URL. Cookies are sent for its origin'),
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).optional().default('GET').describe('HEAD fetches headers only, without the body'),

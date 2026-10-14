@@ -82,6 +82,12 @@ async function main() {
       // Il 42% delle sessioni reali caricava i tool con 2+ ToolSearch (media 2,0).
       'When tools are deferred, batch every tool needed for the next workflow into ONE ToolSearch call using exact names (select:name1,name2,...); do not search one tool at a time.',
       'Missing optional tools: call get_status({enable:["group",...]}) once for all required groups (audits, visual, network, storage, dom, files, perf; "all" enables all). After tools/list_changed, use them next turn; if still deferred, batch-search their names once. No restart or user configuration needed.',
+      // 14/10/2026: nei flussi di lavoro Claude restava fermo sulla finestra
+      // «Salva con nome», di sistema e fuori portata dell'estensione. Su ChromeOS
+      // con «Chiedi dove salvare ciascun file» si apre anche con saveAs:false.
+      'Saving a file: never click a Download/Export button and wait for the browser download, the OS "Save as" dialog can open and no tool can press it. '
+        + 'A file with a URL: http_request with save_to (browser cookies, bytes written to disk, no dialog). '
+        + 'A file the page builds itself (blob, data URL, showSaveFilePicker, a download the page starts): capture_downloads arm, then click, then capture_downloads wait.',
       'A tab in a minimized, covered or background window does not render: screenshots fail, timers slow down. get_page_info reports visibility (page_hidden in a result means the same); bring the window on screen, or create_tab new_window with bounds.',
     ].join(' '),
   });

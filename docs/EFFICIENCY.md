@@ -4,7 +4,7 @@
 
 Same model (Claude Sonnet 5), same tasks, same morning and same `claude`
 version, **all runs included** — n=5 per arm and per task, 29/09/2026, Chrome
-Bridge 1.25.1 (commit `32b230c`) with its default 43 tools.
+Bridge 1.25.1 (commit `32b230c`) with its default core set (43 at the time).
 Medians, range in brackets.
 
 | Task | Chrome Bridge | Claude in Chrome | Ratio |

@@ -62,6 +62,7 @@ export const MessageType = Object.freeze({
   CLIPBOARD:             'clipboard',
   SET_GEOLOCATION:       'set_geolocation',
   MANAGE_DOWNLOADS:      'manage_downloads',
+  CAPTURE_FILES:         'capture_files',
   SAVE_PAGE:             'save_page',
   HTTP_REQUEST:          'http_request',
   SET_ZOOM:              'set_zoom',
@@ -153,6 +154,7 @@ export function getTimeout(type) {
     || type === MessageType.UPLOAD_FILE
     || type === MessageType.UPLOAD_CHUNK
     || type === MessageType.MANAGE_DOWNLOADS
+    || type === MessageType.CAPTURE_FILES
     || type === MessageType.SAVE_PAGE
     || type === MessageType.HTTP_REQUEST
     || type === MessageType.TILE_WINDOWS

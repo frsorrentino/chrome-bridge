@@ -1,6 +1,6 @@
 # Tool reference
 
-All 66 tools, by area. `core` (43 tools, every tool used in 101 real
+All 67 tools, by area. `core` (44 tools, every tool used in 101 real
 sessions) loads by default. The other 23 sit in seven optional caps, which the
 agent switches on mid-session with `get_status({enable: [...]})` (no restart)
 or you set at startup with `--caps` / `CHROME_BRIDGE_CAPS`:
@@ -125,10 +125,21 @@ The six former single audits stay available as CLI commands.
 `extract_table` filters server-side: 236 bytes to find one row among 1500,
 against 50,070 bytes for `read_page` on the same table.
 
-## State, Storage & Files (9)
+## State, Storage & Files (10)
 
 `get_storage`, `set_storage`, `session_fixture`, `http_auth`,
-`save_page` (MHTML), `manage_downloads`, `session_record`, `wait_for`, `assert`.
+`save_page` (MHTML), `manage_downloads`, `capture_downloads`, `session_record`, `wait_for`, `assert`.
+
+Saving a file never goes through the browser download: the OS "Save as" dialog
+can open (on ChromeOS even with `saveAs: false`, when "Ask where to save each
+file" is on) and no tool can press it. A file with a URL: `http_request` with
+`save_to`. A file the page builds itself (blob or data URL link,
+`showSaveFilePicker`, a download the page starts): `capture_downloads` arm with
+`save_dir`, click the Export button, `capture_downloads` wait. Page downloads are
+cancelled as soon as they are created and fetched again with the browser
+cookies: a POST export or a one-time link cannot be fetched twice and is
+reported as skipped. File names are cleaned (no path, no leading dot), existing
+files are never overwritten, each file is capped by `max_mb` (default 100, max 200).
 
 `session_record` + `replay` run a recorded flow with no model in the loop —
 the basis for CI smoke tests.

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- `capture_downloads` (core, 67 tools): saves the files a page builds itself
+  with no browser download and no "Save as" dialog. `arm` with `save_dir`,
+  click the Export button, `wait` returns the saved paths. It takes blob and
+  data URL links (`a[download]`, also `a.click()` on a detached anchor with an
+  immediate `revokeObjectURL`), `showSaveFilePicker` writes, and downloads the
+  page starts: those are cancelled as soon as they are created and fetched
+  again with the browser cookies (a POST export or a one-time link is reported
+  as skipped). The bytes reach the server in 4 MB pieces. Names are cleaned (no
+  path, no leading dot, no reserved characters), existing files are never
+  overwritten, `save_dir` cannot be a key folder and obeys `--write-root`, each
+  file is capped by `max_mb` (default 100, max 200). Tested on blob, data URL,
+  `showSaveFilePicker` and a page download in e2e; by hand on Linux Chromium
+  set to ask where to save, a page download stays `in_progress` with no name
+  (the dialog) when disarmed and leaves no download when armed; live on
+  Excalidraw "Save to file" (`showSaveFilePicker`) in the Chromebook's Chrome.
+
+### Changed
+
+- Server instructions, `http_request` and `manage_downloads` say how to save a
+  file: with a URL, `http_request` `save_to`; built by the page,
+  `capture_downloads`; never a click on Download waiting for the browser
+  download. `manage_downloads` stuck at `waiting_for_user` now returns a `hint`
+  with the `http_request` call to use instead.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
