@@ -1182,6 +1182,72 @@ async function testUploadShadow() {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// 1.29.3: ogni tool con un selettore attraversa tre shadow root con ">>>".
+async function testShadowSelectors() {
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}shadow-tools`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const D = '#l1 >>> #l2 >>> #l3 >>> ';
+  const deep = (expr) => wsManager.sendCommand(MessageType.EXECUTE_JS, {
+    code: `(() => { const r = document.getElementById("l1").shadowRoot.getElementById("l2").shadowRoot.getElementById("l3").shadowRoot; return ${expr}; })()`, tab_id,
+  }).then((d) => d.result);
+  const cases = [
+    ['modify_dom', async () => {
+      await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector: `${D}#a`, action: 'setAttribute', name: 'data-x', value: '1', tab_id });
+      return (await deep('r.getElementById("a").dataset.x')) === '1';
+    }],
+    ['scroll action=to', async () => { await wsManager.sendCommand(MessageType.SCROLL_TO, { selector: `${D}#b`, tab_id }); return true; }],
+    ['fill_form (campo e submit_selector)', async () => {
+      const d = await wsManager.sendCommand(MessageType.FILL_FORM, { fields: [{ selector: `${D}#t`, value: 'abc' }], submit_selector: `${D}#go`, tab_id });
+      return d.fields?.[0]?.success === true && d.submitted === true && (await deep('r.getElementById("t").value + "/" + r.getElementById("fm").dataset.sent')) === 'abc/1';
+    }],
+    ['read_form', async () => {
+      const d = await wsManager.sendCommand(MessageType.READ_FORM, { selector: `${D}#fm`, tab_id });
+      return !d.error && (d.controls ?? []).some((c) => c.name === 'nome');
+    }],
+    ['watch (selector e value_of)', async () => {
+      const d = await wsManager.sendCommand(MessageType.WATCH, { action: 'add', name: 'e2e-shadow', selector: `${D}#a`, value_of: `${D}#b`, interval_s: 30, expires_min: 2, tab_id });
+      await wsManager.sendCommand(MessageType.WATCH, { action: 'remove', name: 'e2e-shadow' });
+      return d.initial?.present === true && d.initial?.value === 'Beta';
+    }],
+    ['element_screenshot', async () => {
+      const d = await wsManager.sendCommand(MessageType.ELEMENT_SCREENSHOT, { selector: `${D}#a`, tab_id });
+      return typeof (d.image ?? d.data ?? d.dataUrl) === 'string';
+    }],
+    ['measure_spacing (tutti e due i selettori)', async () => {
+      const d = await wsManager.sendCommand(MessageType.MEASURE_SPACING, { selector1: `${D}#a`, selector2: `${D}#b`, tab_id });
+      return d != null;
+    }],
+    ['watch_dom', async () => {
+      // Prima un selettore illeggibile faceva fallire lo script in silenzio e
+      // il tool rispondeva senza osservare nulla: conta la mutation vista.
+      await wsManager.sendCommand(MessageType.WATCH_DOM, { selector: `${D}#a`, clear: true, tab_id });
+      await deep('r.getElementById("a").setAttribute("data-y", "2")');
+      await new Promise((r) => setTimeout(r, 200));
+      const d = await wsManager.sendCommand(MessageType.WATCH_DOM, { selector: `${D}#a`, tab_id });
+      await wsManager.sendCommand(MessageType.WATCH_DOM, { stop: true, tab_id });
+      return (d.mutations ?? []).some((m) => m.attributeName === 'data-y');
+    }],
+    ['screenshot_diff con selector', async () => {
+      await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action: 'baseline', name: 'e2e-shadow', selector: `${D}#a`, tab_id });
+      await wsManager.sendCommand(MessageType.SCREENSHOT_DIFF, { action: 'clear', name: 'e2e-shadow', tab_id });
+      return true;
+    }],
+    ['scroll until=element (selector e container)', async () => {
+      const d = await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until: 'element', selector: `${D}#far`, container: `${D}#box`, max_scrolls: 3, settle_ms: 100, tab_id });
+      return d.stopped_reason === 'element_found';
+    }],
+  ];
+  for (const [tool, run] of cases) {
+    const name = `${tool} attraverso 3 shadow root con >>>`;
+    try {
+      if (!(await run())) throw new Error('esito inatteso');
+      ok(name);
+    } catch (e) { fail(name, e.message); }
+  }
+  await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // Copia locale della pagina di example.com com'era fino a settembre 2026: il
 // sito vero ha cambiato markup (niente h1, niente width) e i test che ci
 // contavano sono diventati rossi senza che il nostro codice cambiasse.
@@ -1213,6 +1279,16 @@ const UPLOAD_SHADOW_HTML = '<!doctype html><html><body><div id="l1"></div><scrip
   + 'const r2 = r1.getElementById("l2").attachShadow({ mode: "open" }); r2.innerHTML = \'<div id="l3"></div>\';'
   + 'const r3 = r2.getElementById("l3").attachShadow({ mode: "open" }); r3.innerHTML = \'<input type="file" id="f">\';'
   + '</script></body></html>';
+// Gli stessi tre livelli, con dentro un modulo, due riquadri e un contenitore
+// che scorre: un bersaglio per ogni tool che accetta un selettore.
+const SHADOW_TOOLS_HTML = '<!doctype html><html><body><div id="l1"></div><script>'
+  + 'const r1 = document.getElementById("l1").attachShadow({ mode: "open" }); r1.innerHTML = \'<div id="l2"></div>\';'
+  + 'const r2 = r1.getElementById("l2").attachShadow({ mode: "open" }); r2.innerHTML = \'<div id="l3"></div>\';'
+  + 'const r3 = r2.getElementById("l3").attachShadow({ mode: "open" });'
+  + 'r3.innerHTML = \'<form id="fm" onsubmit="event.preventDefault(); this.dataset.sent = 1"><label>Nome <input id="t" name="nome"></label><button id="go">Invia</button></form>'
+  + '<div id="a" style="width:120px;height:40px;background:#c33">Alfa</div><div id="b" style="width:120px;height:40px;margin-top:10px;background:#33c">Beta</div>'
+  + '<div id="box" style="height:80px;overflow:auto"><div style="height:600px"></div><p id="far">Fondo</p></div>\';'
+  + '</script></body></html>';
 const LCP_HTML = '<!doctype html><html><head><title>LCP</title></head><body><p>Small text</p><img src="/hero.png" width="900" height="600" alt="Hero"></body></html>';
 async function startFixture() {
   const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
@@ -1222,6 +1298,7 @@ async function startFixture() {
       setTimeout(() => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(HERO_PNG); }, 300);
       return;
     }
+    if (req.url === '/shadow-tools') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(SHADOW_TOOLS_HTML); return; }
     if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
     if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }
     if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
@@ -1332,6 +1409,7 @@ async function main() {
 
     // 1.29.3
     await testUploadShadow();
+    await testShadowSelectors();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

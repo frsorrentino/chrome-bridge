@@ -1845,7 +1845,20 @@ async function cmdModifyDom({ selector, action, name, value, className, tab_id, 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, act, attrName, attrValue, cls) => {
-      const el = document.querySelector(sel);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       switch (act) {
         case 'setAttribute':
@@ -2080,8 +2093,21 @@ async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, ta
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, sx, sy, beh, offY) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       if (sel) {
-        const el = document.querySelector(sel);
+        const el = deepQuery(sel);
         if (!el) throw new Error(`Element not found: ${sel}`);
         const rect = el.getBoundingClientRect();
         const targetY = rect.top + window.scrollY - offY;
@@ -2180,10 +2206,23 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (flds, submitSel) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       const report = [];
       for (const { selector, value } of flds) {
         try {
-          const el = document.querySelector(selector);
+          const el = deepQuery(selector);
           if (!el) { report.push({ selector, success: false, error: 'Element not found' }); continue; }
           const tag = el.tagName.toLowerCase();
           const type = (el.type || '').toLowerCase();
@@ -2251,7 +2290,7 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
       let submit = null;
       if (submitSel) {
         const failed = report.filter((r) => !r.success).length;
-        const btn = document.querySelector(submitSel);
+        const btn = deepQuery(submitSel);
         if (failed) submit = { submitted: false, reason: `${failed} field(s) failed: not submitted` };
         else if (!btn) submit = { submitted: false, reason: `submit button not found: ${submitSel}` };
         else { btn.click(); submit = { submitted: true }; }
@@ -2551,8 +2590,21 @@ async function cmdReadForm({ selector, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       const SENSITIVE = /pass|pwd|card|cvv|cvc|secret|token|otp|pin\b/i;
-      const root = sel ? document.querySelector(sel) : document;
+      const root = sel ? deepQuery(sel) : document;
       if (!root) return { error: `No element matches ${sel}` };
       const labelOf = (el) => {
         const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
@@ -2616,10 +2668,23 @@ async function evalWatch(w) {
   const results = await chrome.scripting.executeScript({
     target: { tabId: w.tabId },
     func: (selector, text, valueOf) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       const out = { url: location.href };
-      if (selector) out.present = !!document.querySelector(selector);
+      if (selector) out.present = !!deepQuery(selector);
       if (text) out.text_found = (document.body?.innerText || '').toLowerCase().includes(String(text).toLowerCase());
-      if (valueOf) { const el = document.querySelector(valueOf); out.value = el ? (el.innerText || el.value || '').trim().slice(0, 500) : null; }
+      if (valueOf) { const el = deepQuery(valueOf); out.value = el ? (el.innerText || el.value || '').trim().slice(0, 500) : null; }
       return out;
     },
     args: [w.selector ?? null, w.text ?? null, w.value_of ?? null],
@@ -2951,7 +3016,20 @@ async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
       const res = await chrome.scripting.executeScript({
         target: { tabId },
         func: (sel) => {
-          const el = document.querySelector(sel);
+          function deepQuery(sel) {
+            if (!sel.includes('>>>')) return document.querySelector(sel);
+            const parts = sel.split('>>>').map((s) => s.trim());
+            let ctx = document;
+            for (let i = 0; i < parts.length; i++) {
+              const found = ctx.querySelector(parts[i]);
+              if (!found) return null;
+              if (i === parts.length - 1) return found;
+              if (!found.shadowRoot) return null;
+              ctx = found.shadowRoot;
+            }
+            return null;
+          }
+          const el = deepQuery(sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
           const r = el.getBoundingClientRect();
@@ -3226,8 +3304,21 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel1, sel2) => {
-      const el1 = document.querySelector(sel1);
-      const el2 = document.querySelector(sel2);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      const el1 = deepQuery(sel1);
+      const el2 = deepQuery(sel2);
       if (!el1) throw new Error(`Element not found: ${sel1}`);
       if (!el2) throw new Error(`Element not found: ${sel2}`);
 
@@ -3301,7 +3392,20 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
   const install = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, opts) => {
-      if (!document.querySelector(sel)) return { missing: true };
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      if (!deepQuery(sel)) return { missing: true };
       if (window.__chromeBridge_domWatcherHooked && window.__chromeBridge_domWatchSelector !== sel) {
         if (window.__chromeBridge_domObserver) window.__chromeBridge_domObserver.disconnect();
         window.__chromeBridge_domWatcherHooked = false;
@@ -3312,7 +3416,7 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
       window.__chromeBridge_domWatchSelector = sel;
       window.__chromeBridge_domMutations = [];
       const MAX = 1000;
-      const target = document.querySelector(sel);
+      const target = deepQuery(sel);
       const observer = new MutationObserver((mutationList) => {
         for (const m of mutationList) {
           // Ring buffer: dopo un'azione interessano le mutation RECENTI, quindi
@@ -4008,7 +4112,20 @@ async function captureForDiff(tabId, selector) {
       const res = await chrome.scripting.executeScript({
         target: { tabId },
         func: (sel) => {
-          const el = document.querySelector(sel);
+          function deepQuery(sel) {
+            if (!sel.includes('>>>')) return document.querySelector(sel);
+            const parts = sel.split('>>>').map((s) => s.trim());
+            let ctx = document;
+            for (let i = 0; i < parts.length; i++) {
+              const found = ctx.querySelector(parts[i]);
+              if (!found) return null;
+              if (i === parts.length - 1) return found;
+              if (!found.shadowRoot) return null;
+              ctx = found.shadowRoot;
+            }
+            return null;
+          }
+          const el = deepQuery(sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
           const r = el.getBoundingClientRect();
@@ -5233,6 +5350,19 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, container, m
   const run = () => chrome.scripting.executeScript({
     target: { tabId },
     func: (mode, sel, containerSel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const docEl = document.scrollingElement || document.documentElement;
       const scrollable = (el) => {
@@ -5251,7 +5381,7 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, container, m
       // scorrevole più grande, ma solo se il documento non scorre.
       let box = null;
       if (containerSel) {
-        box = document.querySelector(containerSel);
+        box = deepQuery(containerSel);
         if (!box) { resolve({ stopped_reason: 'error', error: `Container not found: ${containerSel}`, scrolls: 0 }); return; }
       } else if (docEl.scrollHeight <= innerHeight + 2
         // overflow hidden su html o body: l'utente non può scorrere il
@@ -5277,7 +5407,7 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, container, m
         const step = stepPx || s.view();
         for (scrolls = 0; scrolls < maxScrolls; scrolls++) {
           if (mode === 'element' && sel) {
-            const el = document.querySelector(sel);
+            const el = deepQuery(sel);
             if (el) {
               const r = el.getBoundingClientRect();
               const vis = r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
