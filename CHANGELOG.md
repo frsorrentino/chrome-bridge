@@ -28,6 +28,26 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.29.3 — 2026-10-14
+
+Shadow DOM selectors everywhere. The extension changes (manifest 1.29.3), so
+the Chrome Web Store gets a new package.
+
+### Fixed
+
+- **`>>>` selectors in every tool that takes one**: the server instructions say
+  DOM tools pierce shadow DOM with `>>>`, but eleven tools looked the element up
+  with a plain `document.querySelector` and answered «Element not found» (or, in
+  `watch_dom`, observed nothing without saying so). Found on reddit.com: the
+  comment composer's image input is three shadow roots deep, `query_dom` found
+  it, `upload_file` did not. They now use the same resolver as `click` and
+  `query_dom`: `upload_file`, `modify_dom`, `element_screenshot`,
+  `measure_spacing` (both selectors), `watch_dom`, `scroll` (`action=to`, and
+  `until=element` with its `container`), `fill_form` (fields and
+  `submit_selector`), `read_form`, `watch` (`selector` and `value_of`) and
+  `screenshot_diff` with `selector`. End-to-end test: one case per tool on a page
+  with three nested shadow roots.
+
 ## 1.29.2 — 2026-10-09
 
 Security fix. Server only: the extension is unchanged and stays at 1.29.0, so
