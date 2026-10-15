@@ -111,15 +111,25 @@ test('press_key: pagina stabile → nessun page_changed, nessuna anteprima', asy
   assert.ok(!sent.some((s) => s.type === MessageType.GET_INTERACTIVES));
 });
 
+// Le pause si contano dai setTimeout chiesti, non dall'orologio: con la
+// macchina carica (load 20, 15/10/2026) 120 ms di tempo reale non bastavano
+// nemmeno senza pausa, e il test cadeva senza un difetto.
+async function timeoutsDuring(fn) {
+  const orig = globalThis.setTimeout;
+  const delays = [];
+  globalThis.setTimeout = (cb, ms, ...rest) => { delays.push(ms ?? 0); return orig(cb, ms, ...rest); };
+  try { return { result: await fn(), delays }; } finally { globalThis.setTimeout = orig; }
+}
+
 test('click: l\'impronta dopo chiede settle; con settled_ms nessuna pausa fissa né seconda lettura', async () => {
   let calls = 0;
   const { handlers, sent } = build((t) => {
     if (t === MessageType.PAGE_FINGERPRINT) return calls++ === 0 ? fp() : fp({ settled_ms: 55 });
     return { clicked: true };
   });
-  const t0 = Date.now();
-  const out = JSON.parse(textOf(await handlers.get('click').handler({ selector: '#x', wait_after: 'none' })));
-  assert.ok(Date.now() - t0 < 120, 'niente 150 ms fissi');
+  const { result, delays } = await timeoutsDuring(() => handlers.get('click').handler({ selector: '#x', wait_after: 'none' }));
+  const out = JSON.parse(textOf(result));
+  assert.ok(!delays.includes(150), 'niente 150 ms fissi');
   const fps = sent.filter((s) => s.type === MessageType.PAGE_FINGERPRINT);
   assert.equal(fps.length, 2);
   assert.deepEqual(fps[1].params.settle, { quiet_ms: 50, max_ms: 250 });
@@ -128,8 +138,7 @@ test('click: l\'impronta dopo chiede settle; con settled_ms nessuna pausa fissa 
 
 test('click: estensione vecchia senza settle → pausa fissa e seconda lettura', async () => {
   const { handlers, sent } = build((t) => (t === MessageType.PAGE_FINGERPRINT ? fp() : { clicked: true }));
-  const t0 = Date.now();
-  await handlers.get('click').handler({ selector: '#x', wait_after: 'none' });
-  assert.ok(Date.now() - t0 >= 140);
+  const { delays } = await timeoutsDuring(() => handlers.get('click').handler({ selector: '#x', wait_after: 'none' }));
+  assert.ok(delays.includes(150), 'pausa fissa di 150 ms');
   assert.equal(sent.filter((s) => s.type === MessageType.PAGE_FINGERPRINT).length, 3);
 });
