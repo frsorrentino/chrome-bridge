@@ -28,6 +28,30 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.3 — 2026-10-16
+
+Server only: the extension is unchanged and stays at 1.30.2, so the Chrome Web
+Store gets no new package.
+
+### Fixed
+
+- The server now shuts down when stdin closes, not only on SIGINT or SIGTERM.
+  On Windows those signals never arrive: since Claude Code 2.1.296 the client
+  closes stdin and kills the process tree 300 ms later (before, it killed the
+  server outright). The server did not listen for the end of stdin and the
+  WebSocket kept it alive, so the cleanup never ran there: with `--launch` the
+  dedicated browser and its temporary profile were left behind. A client that
+  dies without a signal left the server running on any system. The launched
+  browser is now stopped first, inside those 300 ms. Its tabs go with it, so
+  the session's empty tabs are closed only in the user's own Chrome.
+- Server instructions: the rules that only the instructions carry now fit in
+  the first 2,048 characters. Claude Code up to 2.1.295 cut the instructions
+  there and lost the end of the "Saving a file" rule (`capture_downloads`) and
+  the whole hidden-tab rule. The three rules that repeat the tool descriptions
+  (`get_interactives` refs, `tab_id`/`frame_id` defaults, `>>>`) moved to the
+  end. A unit test keeps the total within 4,096 characters, the limit since
+  2.1.296, and the other rules within the first 2,048.
+
 ## 1.30.2 — 2026-10-15
 
 The extension changes (manifest 1.30.2), so the Chrome Web Store gets a new
