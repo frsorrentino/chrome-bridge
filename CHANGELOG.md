@@ -28,6 +28,26 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.2 — 2026-10-15
+
+The extension changes (manifest 1.30.2), so the Chrome Web Store gets a new
+package.
+
+### Fixed
+
+- `tab_action close` on a page that does not let go now answers within 5 s
+  with an explicit error, instead of 30 s of silence and a generic timeout.
+  `chrome.tabs.remove` waits for the page: with a "Leave site?" dialog open
+  (beforeunload) or the page stuck in a loop it never returned before the
+  command timeout. The error names both causes and says the close is still
+  pending: Chrome completes it if the page lets go, and `get_tabs` then reports
+  the tab as `closed_by_bridge`. The e2e test opens a page with a beforeunload
+  handler after a real click: 30 s timeout before the fix, error in 5 s after.
+- `lighthouse` on Windows: `npx` is `npx.cmd` there, and spawning it without a
+  shell failed with "npx not found". It now runs `npx-cli.js` next to
+  `node.exe` with the server's own Node, no shell; `npx.cmd` through the shell
+  is the fallback. e2e on Windows: lighthouse 13.5.0 runs (performance 100).
+
 ## 1.30.1 — 2026-10-15
 
 The extension changes (manifest 1.30.1), so the Chrome Web Store gets a new
