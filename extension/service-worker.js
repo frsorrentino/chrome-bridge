@@ -5112,7 +5112,16 @@ async function captureDownload(item) {
     const res = await fetch(url, { credentials: 'include', redirect: 'follow' });
     const declared = Number(res.headers.get('content-length') || 0);
     entry.mime = res.headers.get('content-type') || entry.mime;
-    entry.name = downloadName({ disposition: res.headers.get('content-disposition'), chromeName: item.filename, url: res.url || url });
+    let pageName = '';
+    try {
+      const probes = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true }, world: 'MAIN',
+        func: (u) => window.__cbCapture?.names.get(u) ?? '',
+        args: [item.url],
+      });
+      pageName = probes.map((r) => r.result).find(Boolean) || '';
+    } catch {}
+    entry.name = downloadName({ disposition: res.headers.get('content-disposition'), chromeName: item.filename, pageName, url: res.url || url });
     if (!res.ok) throw new Error(`refetch answered HTTP ${res.status} (a POST download or a one-time link cannot be fetched again)`);
     if (declared > max) {
       try { await res.body?.cancel(); } catch {}

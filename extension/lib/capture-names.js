@@ -3,7 +3,10 @@
  * del server (server/capture.js, che decide il nome sul disco).
  *
  * Ordine: filename* di Content-Disposition (RFC 5987, UTF-8 percent-encoded),
- * filename, il nome che Chrome aveva già scelto, l'ultimo segmento dell'URL.
+ * filename, l'attributo download dell'ancora cliccata (come in Chrome, dopo
+ * Content-Disposition), il nome che Chrome aveva già scelto, l'ultimo segmento
+ * dell'URL. A onCreated Chrome di solito non ha ancora scelto il nome: senza
+ * l'attributo, <a href="/" download="x.html"> arrivava come download.html.
  */
 export function dispositionName(header) {
   const h = String(header || '');
@@ -27,6 +30,6 @@ export function nameFromUrl(url) {
   }
 }
 
-export function downloadName({ disposition, chromeName, url }) {
-  return dispositionName(disposition) || String(chromeName || '').split(/[\\/]/).pop() || nameFromUrl(url) || '';
+export function downloadName({ disposition, chromeName, pageName, url }) {
+  return dispositionName(disposition) || String(pageName || '') || String(chromeName || '').split(/[\\/]/).pop() || nameFromUrl(url) || '';
 }

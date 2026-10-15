@@ -1194,9 +1194,9 @@ async function testCaptureDownloads() {
   const tab_id = tab.id;
   await new Promise((r) => setTimeout(r, 800));
   const before = (await send(MessageType.MANAGE_DOWNLOADS, { action: 'list', limit: 50 })).downloads.length;
-  const one = async (name, click, check) => {
+  const one = async (name, click, check, trusted = false) => {
     try {
-      await send(MessageType.CLICK, { selector: click, tab_id });
+      await send(MessageType.CLICK, { selector: click, tab_id, ...(trusted && { trusted }) });
       const r = await collectCaptured(send, { tab_id, dir, timeout: 8000, settle: 300 });
       if (r.saved.length !== 1) throw new Error(JSON.stringify(r));
       await check(r.saved[0]);
@@ -1224,6 +1224,9 @@ async function testCaptureDownloads() {
       if (!f.path.endsWith('dal server.bin') || b.length !== 4 || b[3] !== 255) throw new Error(`${f.path} ${b.length}`);
       if (f.browser_copy) throw new Error(`copia anche in Download: ${f.browser_copy}`);
     });
+    await one('download da a[download] su URL http tiene il nome della pagina', '#named', async (f) => {
+      if (!f.path.endsWith('dalla pagina.csv') || await readFile(f.path, 'utf8') !== 'x,y\n') throw new Error(f.path);
+    }, true); // un secondo download senza gesto vero Chrome lo blocca (download automatici multipli)
     const after = (await send(MessageType.MANAGE_DOWNLOADS, { action: 'list', limit: 50 })).downloads.length;
     if (after !== before) fail('capture_downloads: nessun download resta nella cronologia', `${before} → ${after}`);
     else ok('capture_downloads: nessun download resta nella cronologia');
@@ -1353,6 +1356,7 @@ const CAPTURE_HTML = '<!doctype html><html><body>'
   + '<button id="picker" onclick="(async()=>{const h=await showSaveFilePicker({suggestedName:\'picker.json\'});const w=await h.createWritable();'
   + 'await w.write(\'{&quot;x&quot;:\');await w.write(new Blob([\'1}\']));await w.close();document.title=\'written\';})()">picker</button>'
   + '<button id="server" onclick="location.href=\'/attachment\'">server</button>'
+  + '<a id="named" href="/plain" download="dalla pagina.csv">named</a>'
   + '</body></html>';
 
 async function startFixture() {
@@ -1365,6 +1369,7 @@ async function startFixture() {
     }
     if (req.url === '/shadow-tools') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(SHADOW_TOOLS_HTML); return; }
     if (req.url === '/capture') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(CAPTURE_HTML); return; }
+    if (req.url === '/plain') { res.writeHead(200, { 'content-type': 'text/csv' }); res.end('x,y\n'); return; }
     if (req.url === '/attachment') { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="dal server.bin"' }); res.end(Buffer.from([0, 1, 2, 255])); return; }
     if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
     if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }

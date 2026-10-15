@@ -25,6 +25,7 @@
     max: 0,
     items: [],
     blobs: new Map(),
+    names: new Map(),
     seq: 0,
   };
   Object.defineProperty(window, '__cbCapture', { value: st, configurable: true });
@@ -65,6 +66,16 @@
     return url;
   };
 
+  // a[download] su un URL http(s): lo scarica Chrome, e il service worker lo
+  // annulla a onCreated, quando Chrome non ha ancora scelto il nome. Qui si
+  // segna il nome dell'attributo, che il service worker chiede per quell'URL.
+  const noteName = (a) => {
+    if (st.armed && a instanceof HTMLAnchorElement && a.hasAttribute('download') && /^https?:/i.test(a.href || '')) {
+      const n = a.getAttribute('download');
+      if (n) st.names.set(a.href, n);
+    }
+  };
+
   const capturable = (a) => a instanceof HTMLAnchorElement && a.hasAttribute('download') && /^(blob|data):/i.test(a.href || '');
   const take = (a) => fromUrl(a.href, a.getAttribute('download') || '', a.href.startsWith('data:') ? 'data_url' : 'blob');
 
@@ -74,6 +85,7 @@
   window.addEventListener('click', (e) => {
     if (!st.armed || e.defaultPrevented || handled.has(e)) return;
     const a = e.composedPath().find((n) => n instanceof HTMLAnchorElement);
+    noteName(a);
     if (!capturable(a)) return;
     handled.add(e);
     e.preventDefault();
@@ -87,7 +99,10 @@
   // quelli della pagina, annulla l'azione nativa se la pagina non l'ha fatto.
   const origClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function click() {
-    if (!st.armed || !capturable(this)) return origClick.apply(this, arguments);
+    if (!st.armed || !capturable(this)) {
+      noteName(this);
+      return origClick.apply(this, arguments);
+    }
     const ev = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: window });
     let wanted = false;
     const last = (e) => {
@@ -202,5 +217,5 @@
   };
   st.drop = (id) => { st.items = st.items.filter((x) => x.id !== id); };
   st.arm = (max) => { st.armed = true; st.max = max; };
-  st.disarm = () => { st.armed = false; st.items = []; st.blobs.clear(); };
+  st.disarm = () => { st.armed = false; st.items = []; st.blobs.clear(); st.names.clear(); };
 })();

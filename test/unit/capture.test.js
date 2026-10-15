@@ -54,6 +54,16 @@ test('Content-Disposition: filename* vince su filename', () => {
   assert.equal(downloadName({ disposition: '', chromeName: '', url: 'https://x.test/exports/report%202026.csv?t=1' }), 'report 2026.csv');
 });
 
+// 15/10/2026, prova dal vivo: un download avviato da a[download] su un URL
+// http arrivava come download.html, perché a onCreated Chrome non ha ancora
+// scelto il nome. Il nome della pagina viene dopo Content-Disposition, come
+// in Chrome, e prima dell'URL.
+test('il nome di a[download] vince sull\'URL ma non su Content-Disposition', () => {
+  assert.equal(downloadName({ disposition: '', chromeName: '', pageName: 'live-page.html', url: 'https://example.com/' }), 'live-page.html');
+  assert.equal(downloadName({ disposition: '', chromeName: '', pageName: 'a.csv', url: 'https://x.test/exports/b.csv' }), 'a.csv');
+  assert.equal(downloadName({ disposition: 'attachment; filename="srv.bin"', chromeName: '', pageName: 'a.csv', url: 'https://x.test/' }), 'srv.bin');
+});
+
 // Pagina finta: due file pronti, uno troppo grande, letti a pezzi da 3 byte.
 function fakePage(files) {
   const calls = [];
