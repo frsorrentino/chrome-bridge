@@ -104,16 +104,31 @@ async function main() {
   // durante l'avvio (osservate 3 directory residue, una da 122 MB).
   let browser = null;
   const session = { tools: null };
-  const shutdown = async () => {
+  // Una sola chiusura anche quando fine di stdin, chiusura del trasporto e
+  // segnale arrivano insieme.
+  let closing = null;
+  const shutdown = () => (closing ??= (async () => {
     console.error('[chrome-bridge] Shutting down...');
-    try { await Promise.race([session.tools?.closeEmptyOwnedTabs(), new Promise((r) => setTimeout(r, 2000))]); } catch {}
-    try { if (browser) await browser.stop(); } catch {}
+    // Il browser di --launch per primo: su Windows Claude Code chiude stdin e
+    // dopo 300 ms uccide l'albero dei processi (2.1.296). Le sue schede
+    // muoiono con lui; nel Chrome dell'utente si chiudono quelle rimaste vuote.
+    if (browser) {
+      try { await browser.stop(); } catch {}
+    } else {
+      try { await Promise.race([session.tools?.closeEmptyOwnedTabs(), new Promise((r) => setTimeout(r, 2000))]); } catch {}
+    }
     try { await wsManager.stop(); } catch {}
     try { await mcpServer.close(); } catch {}
     process.exit(0);
-  };
+  })());
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // Su Windows SIGINT e SIGTERM non arrivano, e un client terminato di colpo
+  // non manda segnali: in entrambi i casi resta solo la fine di stdin. L'SDK
+  // non la ascolta, e il WebSocket teneva vivo il processo.
+  process.stdin.once('end', shutdown);
+  process.stdin.once('close', shutdown);
+  mcpServer.server.onclose = shutdown;
   process.on('uncaughtException', (err) => {
     console.error('[chrome-bridge] Uncaught exception:', err);
     shutdown().catch(() => process.exit(1));
