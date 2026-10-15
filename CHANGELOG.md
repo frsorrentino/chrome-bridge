@@ -28,6 +28,21 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.1 — 2026-10-15
+
+The extension changes (manifest 1.30.1), so the Chrome Web Store gets a new
+package.
+
+### Fixed
+
+- `capture_downloads`: a download the page starts from an `a[download]` link
+  to an http(s) URL now keeps the name in the `download` attribute. When
+  Chrome creates the download it has not chosen a name yet, so a link like
+  `<a href="/" download="report.html">` was saved as `download.html` (seen live
+  on 2026-10-15). The page hook records the attribute when the link is clicked,
+  and the name order is the same as in Chrome: Content-Disposition, then
+  `a[download]`, then the URL.
+
 ## 1.30.0 — 2026-10-14
 
 Files the page builds reach disk with no "Save as" dialog. The extension
