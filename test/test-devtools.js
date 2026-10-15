@@ -1238,6 +1238,27 @@ async function testCaptureDownloads() {
   await rm(dir, { recursive: true, force: true });
 }
 
+// 1.30.2: tab_action close su una pagina che non risponde. Il 15/10 una close
+// è rimasta muta 30 s (scheda #home del Terminale, pagina React dopo un
+// pushState): chrome.tabs.remove aspetta che la pagina lasci andare. Deve
+// tornare presto con un errore che dice perché.
+async function testCloseUnresponsive() {
+  const name = 'tab_action close con dialogo di uscita aperto: errore esplicito entro 10 s';
+  const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}hung`, active: true });
+  await new Promise((r) => setTimeout(r, 1000));
+  // Senza un gesto vero Chrome salta beforeunload e chiude subito.
+  await wsManager.sendCommand(MessageType.CLICK, { selector: '#b', trusted: true, tab_id: tab.id }).catch(() => {});
+  const t0 = Date.now();
+  try {
+    await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id: tab.id });
+    fail(name, 'la close è riuscita: la pagina di prova non era bloccata');
+  } catch (e) {
+    const ms = Date.now() - t0;
+    if (ms < 10000 && /not answering/.test(e.message)) ok(name);
+    else fail(name, `${ms} ms: ${e.message}`);
+  }
+}
+
 // 1.29.3: ogni tool con un selettore attraversa tre shadow root con ">>>".
 async function testShadowSelectors() {
   const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}shadow-tools`, active: true });
@@ -1369,6 +1390,7 @@ async function startFixture() {
     }
     if (req.url === '/shadow-tools') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(SHADOW_TOOLS_HTML); return; }
     if (req.url === '/capture') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(CAPTURE_HTML); return; }
+    if (req.url === '/hung') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><button id="b" style="width:200px;height:80px">hung</button><script>addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = ""; });</script></body></html>'); return; }
     if (req.url === '/plain') { res.writeHead(200, { 'content-type': 'text/csv' }); res.end('x,y\n'); return; }
     if (req.url === '/attachment') { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="dal server.bin"' }); res.end(Buffer.from([0, 1, 2, 255])); return; }
     if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
@@ -1485,6 +1507,7 @@ async function main() {
 
     // 1.30
     await testCaptureDownloads();
+    await testCloseUnresponsive();
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

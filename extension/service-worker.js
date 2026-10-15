@@ -1507,14 +1507,24 @@ function recordTabEnding(tabId, ending) {
   if (tabEndings.size > TAB_ENDINGS_MAX) tabEndings.delete(tabEndings.keys().next().value);
 }
 
+const CLOSE_WAIT_MS = 5000;
+
 async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
   if (!action) throw new Error('Missing required parameter: action');
   const tabId = await resolveTabId(tab_id);
 
   if (action === 'close') {
+    // chrome.tabs.remove aspetta che la pagina lasci andare: con un dialogo
+    // «Vuoi uscire?» aperto o la pagina bloccata in un ciclo resterebbe muta
+    // fino al timeout del comando (30 s, visto il 15/10). Dopo 5 s si risponde
+    // con un errore; la chiusura resta in corso e Chrome la completa quando
+    // la pagina cede (get_tabs la riporta come closed_by_bridge).
     bridgeClosing.add(tabId);
-    try { await chrome.tabs.remove(tabId); } catch (e) { bridgeClosing.delete(tabId); throw e; }
-    return { action, closed: tabId };
+    const removing = chrome.tabs.remove(tabId).then(() => true, (e) => { bridgeClosing.delete(tabId); throw e; });
+    const done = await Promise.race([removing, new Promise((r) => setTimeout(() => r(false), CLOSE_WAIT_MS))]);
+    if (done) return { action, closed: tabId };
+    removing.catch(() => {});
+    throw new Error(`Tab ${tabId} did not close within ${CLOSE_WAIT_MS / 1000} s: the page is not answering, either a "Leave site?" dialog is open (beforeunload) or the page is stuck in a loop. The close is still pending and completes if the page lets go. Look at the tab: answer the dialog, or close it by hand.`);
   }
   if (action === 'discard') {
     // La scheda resta nella barra e si ricarica al focus: il processo muore, la
