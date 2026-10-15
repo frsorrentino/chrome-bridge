@@ -9,6 +9,8 @@
  * chrome-bridge gira da Node 18: sotto si usa la 12.8.2 (Node >= 18.16).
  */
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { win32 } from 'node:path';
 
 export function lighthouseVersion(node = process.versions.node) {
   const [maj, min] = node.split('.').map(Number);
@@ -21,9 +23,24 @@ export function lighthouseArgs(url, port, outBase, { categories, formFactor = 'm
     '--quiet', ...(categories?.length ? [`--only-categories=${categories.join(',')}`] : []), ...(formFactor === 'desktop' ? ['--preset=desktop'] : [])];
 }
 
+/**
+ * Come lanciare npx. Su Windows npx è npx.cmd, che spawn senza shell non trova
+ * (ENOENT): si usa npx-cli.js accanto a node.exe con il node del server, senza
+ * shell. Se manca, npx.cmd con la shell e gli argomenti fra virgolette.
+ */
+export function npxCommand({ platform = process.platform, execPath = process.execPath, env = process.env, exists = existsSync } = {}) {
+  if (env.CHROME_BRIDGE_NPX) return { cmd: env.CHROME_BRIDGE_NPX, pre: [], shell: false };
+  if (platform !== 'win32') return { cmd: 'npx', pre: [], shell: false };
+  const cli = win32.join(win32.dirname(execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+  if (exists(cli)) return { cmd: execPath, pre: [cli], shell: false };
+  return { cmd: 'npx.cmd', pre: [], shell: true };
+}
+
 export function runLighthouse(args, { timeoutMs = 240000 } = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(process.env.CHROME_BRIDGE_NPX || 'npx', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const { cmd, pre, shell } = npxCommand();
+    const argv = [...pre, ...args].map((a) => (shell ? `"${a}"` : a));
+    const p = spawn(cmd, argv, { stdio: ['ignore', 'ignore', 'pipe'], shell });
     let err = '';
     const timer = setTimeout(() => { p.kill('SIGKILL'); reject(new Error(`Lighthouse did not finish within ${timeoutMs / 1000} s`)); }, timeoutMs);
     p.stderr.on('data', (d) => { err += d; });

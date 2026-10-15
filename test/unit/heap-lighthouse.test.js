@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { summarizeHeap, diffHeap } from '../../server/heap.js';
-import { lighthouseVersion, lighthouseArgs, summarizeLighthouse } from '../../server/lighthouse.js';
+import { lighthouseVersion, lighthouseArgs, summarizeLighthouse, npxCommand } from '../../server/lighthouse.js';
 
 // Istantanea minima nel formato di DevTools: 7 campi per nodo.
 function snapshot(nodes) {
@@ -55,4 +55,15 @@ test('lighthouse: punteggi 0-100, metriche, voci non superate per peso', () => {
   assert.deepEqual(s.metrics['largest-contentful-paint'], { value: '4.1 s', score: 40 });
   assert.deepEqual(s.failing.map((f) => f.id), ['largest-contentful-paint', 'render-blocking-resources']);
   assert.deepEqual(s.failing[1].savings, { LCP: 600 });
+});
+
+// 15/10/2026: su Windows npx è npx.cmd, e spawn('npx') senza shell dava ENOENT
+// («npx not found» nell'e2e su win). Lì si lancia npx-cli.js con il node che
+// fa girare il server: niente shell, niente quoting degli argomenti.
+test('lighthouse: su Windows npx passa da npx-cli.js accanto a node.exe', () => {
+  const win = npxCommand({ platform: 'win32', execPath: 'C:\\nodejs\\node.exe', exists: () => true });
+  assert.deepEqual(win, { cmd: 'C:\\nodejs\\node.exe', pre: ['C:\\nodejs\\node_modules\\npm\\bin\\npx-cli.js'], shell: false });
+  assert.deepEqual(npxCommand({ platform: 'win32', execPath: 'C:\\n\\node.exe', exists: () => false }), { cmd: 'npx.cmd', pre: [], shell: true });
+  assert.deepEqual(npxCommand({ platform: 'linux', execPath: '/usr/bin/node', exists: () => true }), { cmd: 'npx', pre: [], shell: false });
+  assert.deepEqual(npxCommand({ platform: 'win32', env: { CHROME_BRIDGE_NPX: 'D:\\x\\npx.exe' } }), { cmd: 'D:\\x\\npx.exe', pre: [], shell: false });
 });
