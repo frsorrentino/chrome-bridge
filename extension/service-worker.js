@@ -4821,10 +4821,25 @@ async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5'
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: async (srcSel, tgtSel, dndMode) => {
-      const src = document.querySelector(srcSel);
-      if (!src) throw new Error(`Source element not found: ${srcSel}`);
-      const tgt = document.querySelector(tgtSel);
-      if (!tgt) throw new Error(`Target element not found: ${tgtSel}`);
+      function deepQuery(sel) {
+        if (!sel.includes('>>>')) return document.querySelector(sel);
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let ctx = document;
+        for (let i = 0; i < parts.length; i++) {
+          const found = ctx.querySelector(parts[i]);
+          if (!found) return null;
+          if (i === parts.length - 1) return found;
+          if (!found.shadowRoot) return null;
+          ctx = found.shadowRoot;
+        }
+        return null;
+      }
+      // Un throw qui arrivava come result undefined e diventava {dragged:false}:
+      // un selettore ">>>" (SyntaxError per querySelector) falliva in silenzio.
+      const src = deepQuery(srcSel);
+      if (!src) return { missing: 'Source', selector: srcSel };
+      const tgt = deepQuery(tgtSel);
+      if (!tgt) return { missing: 'Target', selector: tgtSel };
       src.scrollIntoView({ block: 'center', behavior: 'instant' });
       const sr = src.getBoundingClientRect();
       const tr = tgt.getBoundingClientRect();
@@ -4867,7 +4882,9 @@ async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5'
     args: [source_selector, target_selector, mode],
     world: 'MAIN',
   });
-  return results?.[0]?.result ?? { dragged: false };
+  const out = elementOutcome(results, source_selector);
+  if (out.missing) throw new Error(`${out.missing} element not found: ${out.selector} (no element matches; check it with query_dom)`);
+  return out;
 }
 
 // --- clipboard ---

@@ -1314,6 +1314,12 @@ async function testShadowSelectors() {
       const d = await wsManager.sendCommand(MessageType.SCROLL_UNTIL, { until: 'element', selector: `${D}#far`, container: `${D}#box`, max_scrolls: 3, settle_ms: 100, tab_id });
       return d.stopped_reason === 'element_found';
     }],
+    ['drag_and_drop (sorgente e destinazione)', async () => {
+      // Prima rispondeva {dragged:false} senza errore: conta il drop arrivato.
+      await deep('(r.getElementById("b").addEventListener("drop", (e) => { e.currentTarget.dataset.dropped = "1"; }), true)');
+      const d = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector: `${D}#a`, target_selector: `${D}#b`, tab_id });
+      return d.dragged === `${D}#a` && (await deep('r.getElementById("b").dataset.dropped')) === '1';
+    }],
   ];
   for (const [tool, run] of cases) {
     const name = `${tool} attraverso 3 shadow root con >>>`;

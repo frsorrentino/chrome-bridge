@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- `drag_and_drop` resolves `>>>` selectors through shadow roots, like the
+  other element tools since 1.29.3. It used a plain `document.querySelector`,
+  which throws on `>>>`, and the error came back as `{dragged: false}` with no
+  reason. A missing source or target is now an error that names it, as the
+  1.30.4 description already said.
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
