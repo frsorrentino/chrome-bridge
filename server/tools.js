@@ -361,7 +361,7 @@ export const TOOL_ANNOTATIONS = {
   get_frames: ro(),
   get_interactives: ro(),
   get_page_info: ro(),
-  get_status: ro(),
+  get_status: rw({ idempotent: true }),  // enable accende gruppi di tool per la sessione: ro() lo negava
   get_storage: ro(),
   get_tabs: ro(),
   manage_downloads: rw({ open: true }),  // action=download scrive un file sul disco e va in rete
@@ -379,7 +379,7 @@ export const TOOL_ANNOTATIONS = {
   read_page: ro(),
   screenshot: ro(),
   wait_for: ro(),
-  watch_dom: ro(),
+  watch_dom: rw({ destructive: true }),  // installa un observer nella pagina; clear e stop cancellano le mutation raccolte
   audit: ro(),
   read_form: ro(),
   watch: rw({ idempotent: true }),
@@ -838,10 +838,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- get_status ---
   server.tool(
     'get_status',
-    'Bridge status: extension connection, server mode (primary/relay), host, port, server and extension versions, js_evaluation '
-      + '(false under --no-js), write_root and read_root, caps_active and caps_available (a tool missing from the list lives in an '
-      + 'inactive cap), session_tab_id (the implicit tab), owned_tabs (created by this session), uptime_sec. '
-      + 'enable switches caps on for this session, no restart. Optional caps: '
+    'Status of the bridge itself, not of a page: call it when a tool you expect is missing or browser commands fail '
+      + '(connected=false: the extension is not reachable). Also reports mode (primary/relay), host, port, server and '
+      + 'extension versions, js_evaluation (false under --no-js), write_root, read_root, session_tab_id (the implicit tab), '
+      + 'owned_tabs (created by this session), uptime_sec. caps_active and caps_available: a missing tool lives in an inactive cap. '
+      + 'enable is the only change it makes: it switches caps on for this session, no restart, and lists the tools added. Optional caps: '
       + `${Object.entries(TOOL_CAPS).map(([g, t]) => `${g} (${t.join(', ')})`).join('; ')}.`,
     {
       enable: z.array(z.enum(['all', ...Object.keys(TOOL_CAPS)])).optional()
@@ -895,7 +896,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- get_tabs ---
   server.tool(
     'get_tabs',
-    'List every open tab with id, url, title, active flag and mine (created by this session). Read-only. Find a tab_id when the implicit '
+    'List every open tab with id, url, title, active flag and mine (created by this session). Find a tab_id when the implicit '
       + 'target is not the one you mean. include_windows adds position, size, state and type of each window — needed before moving or tiling. '
       + 'Session tabs gone since the last call come back once in closed_session_tabs with the reason (closed, window_closed, replaced, closed_by_bridge).',
     {
@@ -934,7 +935,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- navigate ---
   server.tool(
     'navigate',
-    'Navigate a Chrome tab to a URL. Returns a preview of interactive elements with refs usable in click/type_text/hover.',
+    'Navigate a Chrome tab to a URL and wait for the load; DNS and connection errors fail the call. Without tab_id it reuses the tab '
+      + 'this session last navigated or created, else opens a new one rather than taking over the active tab. Returns a preview of '
+      + 'interactive elements with refs usable in click/type_text/hover, plus the first console errors and failed requests, if any.',
     {
       url:    z.string().describe('Absolute URL, or a path resolved against the current page'),
       tab_id: tabId,
@@ -1052,7 +1055,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'execute_js',
     'Run JavaScript in the page (MAIN world). Requires the extension\'s "Allow user scripts" toggle; errors explain setup if disabled. '
-      + 'A promise is awaited up to timeout. A cut result stays valid JSON and says truncated; save_to writes the whole result to disk.',
+      + 'Use it when no dedicated tool fits: extract or extract_table read data, query_dom inspects elements, inject_css restyles, '
+      + 'and none of them needs the toggle. A promise is awaited up to timeout. A cut result stays valid JSON and says truncated; save_to writes the whole result to disk.',
     {
       code:       z.string().describe('JS evaluated in the page; the value of the last expression is returned'),
       tab_id:     tabId,
@@ -1177,7 +1181,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'Page metadata: title, url, visibility, doctype, charset, meta tags, scripts, stylesheets, links and forms. visibility=hidden means '
       + 'the window is minimized, covered or in the background: the page does not render (screenshots fail) and its timers slow down. '
       + 'dev.server names a dev server (vite, webpack-dev-server, next, nuxt) and dev.overlay carries the compiler message when an error '
-      + 'overlay is open: read it before treating the page as valid.',
+      + 'overlay is open: read it before treating the page as valid. For the text use read_page, for specific elements query_dom, '
+      + 'for the bridge itself get_status.',
     {
       tab_id: tabId,
       frame_id: frameId,
@@ -1217,7 +1222,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- query_dom ---
   server.tool(
     'query_dom',
-    'Query DOM elements by CSS selector, returning structure, attributes, bounding rect, and computed styles.',
+    'Query DOM elements by CSS selector, returning structure, attributes, bounding rect and, with properties, computed styles. '
+      + 'Use it when you already have a selector (no match: count 0); to find one, get_interactives or find_text; '
+      + 'for the rule that set a style, get_css_styles.',
     {
       selector: z.string().describe('CSS selector; ">>>" pierces shadow DOM. Matches all, not just the first'),
       properties: z.array(z.string()).optional().describe('Computed styles to include, e.g. ["color"]'),
@@ -1306,7 +1313,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- read_console ---
   server.tool(
     'read_console',
-    'Read console messages captured since page load, incl. uncaught errors and unhandled rejections.',
+    'Read console messages captured since page load, incl. uncaught errors and unhandled rejections. '
+      + 'clear deletes the messages it returns, hence not read-only; since=cursor reads only newer ones without deleting, '
+      + 'and failed requests are in monitor_network.',
     {
       clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
       level: z.enum(['all', 'log', 'warn', 'error', 'info', 'debug']).optional().default('all').describe('all merges every level in one chronological list'),
@@ -1351,7 +1360,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- monitor_network ---
   server.tool(
     'monitor_network',
-    'Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets; source=websocket: connections and messages. format=har exports HAR 1.2.',
+    'Monitor network requests. source=page: XHR/fetch hook (installed on first call); source=browser: all requests incl. static assets; source=websocket: connections and messages. format=har exports HAR 1.2. '
+      + 'It only observes: to block, stub or rewrite requests use network_rules, to send one yourself http_request.',
     {
       clear: z.boolean().optional().default(false).describe('Clear buffer after read'),
       source: z.enum(['page', 'browser', 'websocket']).optional().default('page').describe('page: XHR/fetch only; browser: static assets too; websocket: connections and messages'),
@@ -1467,7 +1477,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- scroll ---
   server.tool(
     'scroll',
-    'Scroll. action=to: once to element/coordinates; action=until: repeatedly until element visible, network idle, or no new content (infinite scroll).',
+    'Scroll. action=to: once to element/coordinates; action=until: repeatedly until element visible, network idle, or no new content (infinite scroll). '
+      + 'It moves the tab\'s scroll position and returns it (to) or stopped_reason and steps (until); full_page_screenshot '
+      + 'scrolls by itself, wait_for waits without scrolling.',
     {
       action: z.enum(['to', 'until']).optional().default('to').describe('to jumps to a position or element; until scrolls repeatedly to load more'),
       selector: z.string().optional().describe('Target (to) or stop element (until=element)'),
@@ -1724,7 +1736,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- watch_dom ---
   server.tool(
     'watch_dom',
-    'Watch DOM mutations (MutationObserver). First call installs the watcher; later calls read accumulated mutations.',
+    'Watch DOM mutations (MutationObserver) under selector, to see what an action changed. First call installs the watcher in the '
+      + 'page; later calls return the latest mutations (type, tag, attribute, nodes added/removed), clear deletes the ones returned, '
+      + 'stop disconnects and empties the buffer. To wait for one element or text use wait_for.',
     {
       selector: z.string().optional().default('body').describe('Subtree to observe; ">>>" pierces shadow DOM'),
       attributes: z.boolean().optional().default(true).describe('Report attribute changes'),
@@ -1838,7 +1852,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       + 'composited_estimate guesses whether only transform/opacity/filter move (an estimate, not the compositor\'s answer); fade_only marks '
       + 'opacity-only fades, what prefers-reduced-motion should leave. Without duration_ms: what runs now. With duration_ms: records every '
       + 'animation that starts in the window, optionally after an action (hover, click, scroll, key), since a 150 ms transition is over '
-      + 'before a second call. Refuses on a hidden page. Pair with emulate_media reducedMotion to check the reduced version.',
+      + 'before a second call. Refuses on a hidden page. Pair with emulate_media reducedMotion to check the reduced version; '
+      + 'how smoothly they run is frames.',
     {
       scope: z.string().optional().describe('CSS selector: only animations on this element or inside it'),
       duration_ms: z.number().optional().describe('Record for this many ms (max 30000) instead of a snapshot'),
@@ -1874,7 +1889,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       + '(duration, blocking time, render and style/layout start, the scripts responsible), layout shifts with the elements that moved (CLS '
       + 'for the window only), and the slowest interaction (INP for the window, split into input delay, processing, presentation; needs trusted input, synthetic events have no interaction id). '
       + 'Optionally runs an action (click, hover, scroll, key) right after recording starts. Animations that started are counted too. '
-      + 'Compositor-only animations can stay smooth while the main thread drops frames. Refuses on a hidden page: rAF and observers stop there.',
+      + 'Compositor-only animations can stay smooth while the main thread drops frames. Refuses on a hidden page: rAF and observers stop there. '
+      + 'For load speed use perf_trace; for the settings of each animation, animations.',
     {
       duration_ms: z.number().optional().default(3000).describe('Recording window in ms (max 30000)'),
       action: motionAction,
@@ -1948,7 +1964,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       + 'function responsible, long animation frames. The raw trace goes to a JSON file (path and size in the result) that DevTools > '
       + 'Performance can load. action record (default) = start, reload unless reload: false, optional action, wait duration_ms, stop. '
       + 'start/stop bracket anything else done meanwhile. Uses chrome.debugger: Chrome shows its debugging bar while tracing; in launch '
-      + 'mode nobody sees it. Refuses on a hidden page.',
+      + 'mode nobody sees it. Refuses on a hidden page. For smoothness during an interaction use frames, for scores lighthouse.',
     {
       action: z.enum(['record', 'start', 'stop']).optional().default('record').describe('record does start → wait → stop in one call'),
       reload: z.boolean().optional().describe('Reload the page right after tracing starts (default true for record, false for start)'),
@@ -2302,7 +2318,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- find_text ---
   server.tool(
     'find_text',
-    'Find text on the page: parent selector, context, visibility, position per match. Attaches nearby interactive elements (with refs for click/type_text/hover) for the first visible match.',
+    'Find text on the page: parent selector, context, visibility, position per match. Attaches nearby interactive elements (with refs for click/type_text/hover) for the first visible match. '
+      + 'Use it when you know the words on screen but not the selector (query_dom needs one); no match returns count 0.',
     {
       text: z.string().describe('Literal text to find, not a regex'),
       case_sensitive: z.boolean().optional().default(false).describe('Match case exactly'),
@@ -2341,7 +2358,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- network_rules ---
   server.tool(
     'network_rules',
-    'Network interception, browser-wide, survives reloads until cleared: block, redirect, set/remove headers, stub a synthetic body, or record real API responses and replay them with forced errors/latency (local helper; from HTTPS pages the stub host must be trusted).',
+    'Network interception, browser-wide, survives reloads until cleared: block, redirect, set/remove headers, stub a synthetic body, or record real API responses and replay them with forced errors/latency (local helper; from HTTPS pages the stub host must be trusted). '
+      + 'It changes traffic, while monitor_network only observes it and http_request sends one request; each rule comes back as added, list shows them, clear removes them all.',
     {
       action: z.enum(['block', 'redirect', 'modify_header', 'stub', 'record', 'replay', 'list', 'clear']).describe('record saves the page\'s API responses (url_filter) as a fixture, replay serves them with overrides; list/clear'),
       name: z.string().optional().describe('Fixture name for record/replay'),
@@ -2607,7 +2625,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'watch',
     'Keep watching a page in the background — "tell me when the pipeline is green / the Approve button appears / this number changes" — '
       + 'checked every interval_s by the extension. Events are collected, not pushed: action=poll, or a script blocking on '
-      + '"chrome-bridge watch --wait <name>". Survives extension idling, not a browser restart.',
+      + '"chrome-bridge watch --wait <name>". Survives extension idling, not a browser restart. '
+      + 'poll returns one line per event (time, name, kind, url, value, previous); a change due within seconds is wait_for.',
     {
       action: z.enum(['add', 'poll', 'list', 'remove']).optional().default('add').describe('poll = events since a timestamp'),
       name: z.string().optional().describe('Watch id'),
@@ -2639,7 +2658,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'read_form',
     'Read a form as the user filled it — label, type, value, checked/selected, required-but-empty, browser validity — to check it against the '
-      + 'project\'s documents before an irreversible Submit. Password and card values come back [redacted]. Read-only, on request.',
+      + 'project\'s documents before an irreversible Submit. Password and card values come back [redacted]. Read-only, on request; '
+      + 'to change values use fill_form.',
     {
       selector: z.string().optional().describe('The form or container; omitted = every visible control on the page'),
       tab_id: tabId,
@@ -2657,7 +2677,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'audit',
     'One-call page audit, pick the kinds: accessibility, keyboard (tab order and focus issues), SEO, security headers, broken links, '
       + 'Core Web Vitals, unused CSS, resources (which plugin/theme/module/host slows the page), cache (is the CDN serving the new version). '
-      + 'A summary line per kind; with save_to the full Markdown report with every finding. Read-only.',
+      + 'A summary line per kind; with save_to the full Markdown report with every finding. Read-only. '
+      + 'For one deep look at load speed use perf_trace, for Lighthouse scores lighthouse.',
     {
       kinds: z.array(z.enum(AUDIT_KINDS)).optional().default(DEFAULT_KINDS).describe('Default skips keyboard, css (slow, approximate), resources and cache'),
       save_to: saveToField('the full Markdown report'),
@@ -2684,8 +2705,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- find_setting ---
   server.tool(
     'find_setting',
-    'Where is a setting in an unknown admin panel: follows the panel\'s menu links (same origin) until a page contains the keyword and '
-      + 'reports the menu path. Navigates the tab, leaves it on the page found, stops at max_pages.',
+    'Where is a setting in an unknown admin panel: follows the panel\'s menu links (same origin) until a page contains the keyword. '
+      + 'Returns the URL, the menu path (Settings › Media) and the matching text; when nothing matches, how many pages it tried. '
+      + 'Navigates the tab and leaves it on the last page visited, at most max_pages.',
     {
       keyword: z.string().describe('What you are looking for, e.g. "webp", "cron", "maintenance mode"'),
       max_pages: z.number().optional().default(25).describe('Pages visited at most'),
@@ -2736,10 +2758,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- extract_table ---
   server.tool(
     'extract_table',
-    'Read a real <table> as JSON: thead cells become keys, each row an object. Read-only. '
+    'Read a real <table> as JSON: thead cells become keys, each row an object. '
       + 'Only for tabular markup — `where` filters rows server-side, so one matching row out of 1500 '
       + 'costs a few hundred bytes instead of the whole document. `row_count` is the table total, '
-      + '`match_count` how many rows passed the filter.',
+      + '`match_count` how many rows passed the filter. No table at index is an error saying how many the selector found; '
+      + 'for cards and lists use extract.',
     {
       selector: z.string().optional().default('table').describe('The table to read; ">>>" pierces shadow DOM'),
       index: z.number().optional().default(0).describe('Which table to take when the selector matches several, 0-based'),
@@ -2760,7 +2783,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- drag_and_drop ---
   server.tool(
     'drag_and_drop',
-    'Drag an element onto another. html5 = DragEvent+DataTransfer; pointer = pointer/mouse events (sortable libraries).',
+    'Drag an element onto another. html5 = DragEvent+DataTransfer; pointer = pointer/mouse events (sortable libraries). '
+      + 'It scrolls the source into view and returns once the events are sent, without knowing whether the app accepted the drop '
+      + '(check with assert or query_dom); a missing element is an error.',
     {
       source_selector: z.string().describe('Element to drag; ">>>" pierces shadow DOM'),
       target_selector: z.string().describe('Drop target; ">>>" pierces shadow DOM'),
@@ -2777,8 +2802,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- clipboard ---
   server.tool(
     'clipboard',
-    'Read or write the system clipboard (text). Activates the tab first. '
-    + 'write overwrites whatever the user had copied, which is not recoverable.',
+    'Read or write the system clipboard (text). Activates the tab and focuses its window first. '
+    + 'write overwrites whatever the user had copied, which is not recoverable. '
+    + 'To fill a field use type_text instead of write and paste; read checks what a Copy button copied, and an empty clipboard returns text "".',
     {
       action: z.enum(['read', 'write']).describe('write takes text; read returns the current clipboard contents'),
       text: z.string().optional().describe('For write'),
@@ -2793,7 +2819,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- set_geolocation ---
   server.tool(
     'set_geolocation',
-    'Override navigator.geolocation with fixed coordinates (page-level patch). reset restores native.',
+    'Override navigator.geolocation with fixed coordinates (page-level patch). reset restores native. '
+      + 'For location-based pages (store locators, delivery zones): it answers without a permission prompt, and a reload or '
+      + 'navigation drops it, so call it after navigate.',
     {
       latitude: z.number().optional().describe('Decimal degrees, -90 to 90'),
       longitude: z.number().optional().describe('Decimal degrees, -180 to 180'),
@@ -2888,7 +2916,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- save_page ---
   server.tool(
     'save_page',
-    'Save the full page (DOM, styles, images) as an MHTML archive file on the server filesystem.',
+    'Save the full page (DOM, styles, images) as an MHTML archive file on the server filesystem. '
+      + 'An offline copy Chrome reopens as it looked, for evidence or a later comparison (for an image use screenshot, for the text '
+      + 'read_page); it overwrites output_path and returns path and size.',
     {
       output_path: z.string().describe('Absolute file path to write (e.g. /tmp/page.mhtml)'),
       tab_id: tabId,
@@ -2991,7 +3021,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'tile_windows',
     'Tile Chrome windows over one monitor in equal parts with no gap. Only Chrome windows. The monitor is the one of a '
       + 'window already on it, whose work area is read from a page there: at least one target needs a scriptable tab '
-      + '(not chrome://). Maximized windows are restored first, since maximized ignores bounds.',
+      + '(not chrome://). Maximized windows are restored first, since maximized ignores bounds. '
+      + 'To restore a saved arrangement use window_layout; to move one tab into another window, move_tab.',
     {
       window_ids: z.array(z.number()).optional().describe('Windows to tile; omitted = every normal window on the reference monitor'),
       reference_window_id: z.number().optional().describe('Window whose monitor is used; omitted = the focused one'),
@@ -3114,7 +3145,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- get_interactives ---
   server.tool(
     'get_interactives',
-    'List actionable elements (buttons, links, inputs, [role], [onclick]) with ready-to-use CSS selector, label, position, flags. Prefer this over dumping HTML to discover selectors.',
+    'List actionable elements (buttons, links, inputs, [role], [onclick]) with ready-to-use CSS selector, label, position, flags. Prefer this over dumping HTML to discover selectors. '
+      + 'Document order, cut at limit (count equal to limit: there may be more), each with a ref (n1, n2…) for click, type_text and hover.',
     {
       scope: z.string().optional().describe('Limit search (CSS selector)'),
       limit: z.number().optional().default(100).describe('Max elements returned; raise it on a dense page'),
@@ -3163,7 +3195,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'extract',
     'Read repeated non-tabular structures — product cards, list items, search results — as one record per item: '
       + 'item_selector matches the repeating block, fields map output names to selectors relative to it. '
-      + 'Read-only, deterministic, parsed server-side from the main-document HTML.',
+      + 'Read-only, deterministic, parsed server-side from the main-document HTML. Default output: total and shown, '
+      + 'then one tab-separated row per item under the field names; a field with no match is empty (null in json).',
     {
       item_selector: z.string().describe('CSS selector matching each item'),
       fields: z.record(z.string(), z.object({
@@ -3207,7 +3240,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- assert ---
   server.tool(
     'assert',
-    'Assert a page condition, polling until timeout: element exists/visible (optionally with count or containing text), text on page, tab url/title. Patterns: substring, or "/…/" for regex. Recorded flows replay it as a test.',
+    'Assert a page condition, polling until timeout: element exists/visible (optionally with count or containing text), text on page, tab url/title. Patterns: substring, or "/…/" for regex. Recorded flows replay it as a test. '
+      + 'Unlike wait_for, which returns found: false, a failure is an error naming what did not match; success returns passed and waited_ms.',
     {
       selector: z.string().optional().describe('Element the assertion is about; ">>>" pierces shadow DOM'),
       state: z.enum(['attached', 'visible']).optional().default('attached').describe('attached means present in the DOM, visible also requires a rendered box'),
@@ -3237,7 +3271,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   // --- session_record ---
   server.tool(
     'session_record',
-    'Record the commands of this session as a replayable jsonl (chrome-bridge replay --file <path>); observe what the user does in a tab ("watch how I do it") into the same format plus a readable procedure, never recording sensitive values; export a recording as a Playwright test for CI. Replays target the tab they navigate.',
+    'Record the commands of this session as a replayable jsonl (chrome-bridge replay --file <path>); observe what the user does in a tab ("watch how I do it") into the same format plus a readable procedure, never recording sensitive values; export a recording as a Playwright test for CI. Replays target the tab they navigate. '
+      + 'Use it for a flow to repeat or a procedure to hand over; for one check now, assert.',
     {
       action: z.enum(['start', 'stop', 'status', 'list', 'export', 'observe']).describe('start records this session; observe records what the USER does; stop writes the file; export makes a Playwright test'),
       name: z.string().optional().describe('Required for start, observe and export (recording name, or a .jsonl path)'),

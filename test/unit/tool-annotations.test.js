@@ -53,7 +53,7 @@ const READ_ONLY = [
   'read_page', 'get_tabs', 'query_dom', 'get_css_styles', 'screenshot', 'get_page_info',
   'audit', 'extract_table', 'find_text',
   'get_interactives', 'get_frames',
-  'get_status', 'get_storage',
+  'get_storage',
   'measure_spacing', 'element_screenshot', 'full_page_screenshot',
 ];
 
@@ -82,6 +82,18 @@ test('i tool di sola osservazione dichiarano readOnlyHint true', () => {
     assert.ok(t, `tool "${name}" non registrato: aggiorna la lista READ_ONLY`);
     assert.equal(t.annotations?.readOnlyHint, true, `${name} non scrive nulla, va marcato read-only`);
   }
+});
+
+// get_status({enable}) accende gruppi di tool per la sessione e watch_dom
+// installa un observer nella pagina: con ro() Glama leggeva le annotations
+// come una contraddizione con la descrizione (Behavior 2/5).
+test('get_status e watch_dom non si dichiarano di sola lettura', () => {
+  for (const name of ['get_status', 'watch_dom']) {
+    const t = byName.get(name);
+    assert.ok(t, `tool "${name}" non registrato`);
+    assert.equal(t.annotations?.readOnlyHint, false, `${name} cambia lo stato della sessione o della pagina`);
+  }
+  assert.equal(byName.get('get_status').annotations.idempotentHint, true, 'riaccendere un gruppo già acceso non cambia niente');
 });
 
 test('nessun tool è insieme read-only e distruttivo', () => {
