@@ -28,6 +28,33 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.4 — 2026-10-17
+
+Server only: the extension is unchanged and stays at 1.30.2, so the Chrome Web
+Store gets no new package. No tool is added, removed or renamed.
+
+### Changed
+
+- `get_status` and `watch_dom` no longer declare `readOnlyHint`.
+  `get_status({enable})` switches tool groups on for the session, and
+  `watch_dom` installs an observer in the page whose buffer `clear` and `stop`
+  delete. Glama's Tool Definition Quality Score rated `get_status` 3.4/5, the
+  only B among the 67 tools, because the read-only hint contradicted its own
+  description. `get_status` stays idempotent; `watch_dom` is now marked
+  destructive, like `read_console`, whose `clear` works the same way.
+- 29 tool descriptions changed, each by one sentence at most: when to use the
+  tool instead of a neighbour, what it returns, how it fails. The tools that
+  read the DOM (`get_page_info`, `query_dom`, `find_text`, `get_interactives`,
+  `extract`, `extract_table`, `read_form`) and the performance tools
+  (`frames`, `perf_trace`, `animations`, `audit`) now name the sibling to use
+  instead. `assert` says a failure is an error, unlike `wait_for`; `navigate`
+  says it waits for the load, fails on DNS and connection errors and opens a
+  new tab rather than taking over the active one; `drag_and_drop` says it
+  cannot tell whether the app accepted the drop. `get_status` now opens with
+  its purpose and when to call it.
+- Cost: `tools/list` grows from 29,797 to 31,105 bytes for the 22 tools loaded
+  in every session (+4.4%), and from 90,326 to 93,985 bytes for all 67.
+
 ## 1.30.3 — 2026-10-16
 
 Server only: the extension is unchanged and stays at 1.30.2, so the Chrome Web
