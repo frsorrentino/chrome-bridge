@@ -2,14 +2,6 @@
 
 ## Unreleased
 
-### Fixed
-
-- `drag_and_drop` resolves `>>>` selectors through shadow roots, like the
-  other element tools since 1.29.3. It used a plain `document.querySelector`,
-  which throws on `>>>`, and the error came back as `{dragged: false}` with no
-  reason. A missing source or target is now an error that names it, as the
-  1.30.4 description already said.
-
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
@@ -35,6 +27,20 @@ home non si chiude finché ha compagnia, ma si può portare via da sola:
 finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.30.5 — 2026-10-17
+
+The extension changes (manifest 1.30.5), so the Chrome Web Store gets a new
+package.
+
+### Fixed
+
+- `drag_and_drop` resolves `>>>` selectors through shadow roots, like the
+  other element tools since 1.29.3. It used a plain `document.querySelector`,
+  which throws on `>>>`, and the error came back as `{dragged: false}` with no
+  reason. A missing source or target is now an error that names it, as the
+  1.30.4 description already said. The e2e test drags an element onto another
+  three shadow roots deep: it fails with the old extension and passes now.
 
 ## 1.30.4 — 2026-10-17
 
