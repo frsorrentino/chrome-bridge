@@ -28,6 +28,19 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.6 — 2026-10-23
+
+Server only: the extension does not change (manifest stays 1.30.5), so no new
+Chrome Web Store package.
+
+### Changed
+
+- When the extension is not connected, the error ends with its Chrome Web
+  Store page, directly and through a relay, and `get_status` adds
+  `extension_install` with the same link while `connected` is false. Store
+  search rarely finds the extension: the agent can now give the user the
+  direct link instead of a hint to go looking for it.
+
 ## 1.30.5 — 2026-10-17
 
 The extension changes (manifest 1.30.5), so the Chrome Web Store gets a new
