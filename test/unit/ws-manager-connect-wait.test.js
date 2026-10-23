@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { WSManager } from '../../server/ws-manager.js';
+import { EXTENSION_STORE_URL } from '../../server/protocol.js';
 
 async function started(opts) {
   const m = new WSManager(0, { identTimeout: 500, ...opts });
@@ -49,6 +50,15 @@ test('senza estensione fallisce allo scadere, con l\'attesa scritta nel messaggi
     const t0 = Date.now();
     await assert.rejects(m.sendCommand('get_tabs'), /Chrome extension not connected \(server primary on 127\.0\.0\.1:\d+, waited 0s\)/);
     assert.ok(Date.now() - t0 >= 280, 'non rifiuta subito');
+  } finally {
+    await m.stop();
+  }
+});
+
+test('senza estensione il messaggio dà il link al Chrome Web Store', async () => {
+  const { m } = await started({ connectWait: 100 });
+  try {
+    await assert.rejects(m.sendCommand('get_tabs'), (e) => e.message.includes(EXTENSION_STORE_URL));
   } finally {
     await m.stop();
   }

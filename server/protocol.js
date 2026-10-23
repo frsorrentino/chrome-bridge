@@ -4,6 +4,10 @@
 
 import { randomBytes } from 'node:crypto';
 
+// Pagina dell'estensione sul Chrome Web Store: la ricerca dello store la trova
+// di rado, quindi chi dice «estensione non connessa» dà il link diretto.
+export const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb';
+
 // Tipi di messaggi WebSocket
 export const MessageType = Object.freeze({
   // Comandi (server → extension)

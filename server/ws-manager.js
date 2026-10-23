@@ -14,7 +14,7 @@
  */
 
 import WebSocket, { WebSocketServer } from 'ws';
-import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType, VERSION } from './protocol.js';
+import { DEFAULT_PORT, PING_INTERVAL_MS, IDENT_TIMEOUT_MS, PENDING_RELAY_TTL_MS, getTimeout, createCommand, MessageType, VERSION, EXTENSION_STORE_URL } from './protocol.js';
 
 /** Quanto tenere in vita l'attesa di risposta per un comando arrivato da un relay. */
 export function relayExpiry(msg) {
@@ -134,7 +134,7 @@ export class WSManager {
           `Chrome extension not connected (server ${this.mode} on ${this.host}:${this.port}`
           + `${this.mode === 'relay' ? ', reached through another chrome-bridge instance' : ''}`
           + `, waited ${Math.round(this.connectWaitMs / 1000)}s)`
-          + ` — ${this.notConnectedHint || 'open Chrome, check the chrome-bridge extension is enabled and its port matches'}`,
+          + ` — ${this.notConnectedHint || `open Chrome, check the chrome-bridge extension is enabled and its port matches (not installed yet: ${EXTENSION_STORE_URL})`}`,
         );
       }
       return this._send(type, params);
@@ -454,7 +454,7 @@ export class WSManager {
         ws.send(JSON.stringify({
           id: msg.id,
           type: MessageType.ERROR,
-          error: 'Chrome extension not connected',
+          error: `Chrome extension not connected — install or enable it: ${EXTENSION_STORE_URL}`,
         }));
         return;
       }

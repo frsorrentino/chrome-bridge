@@ -13,7 +13,7 @@ import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import { runAssert } from './assertions.js';
 import { ensureStubServer, addStub, clearStubs, listStubs, stubHost } from './stub-server.js';
-import { MessageType, VERSION } from './protocol.js';
+import { MessageType, VERSION, EXTENSION_STORE_URL } from './protocol.js';
 import { checkLinksBatch } from './link-checker.js';
 import { toHar } from './har.js';
 import { decodeTrackingRequests, trackingLines } from './trackers.js';
@@ -839,7 +839,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'get_status',
     'Status of the bridge itself, not of a page: call it when a tool you expect is missing or browser commands fail '
-      + '(connected=false: the extension is not reachable). Also reports mode (primary/relay), host, port, server and '
+      + '(connected=false: the extension is not reachable, extension_install gives its Chrome Web Store link). Also reports mode (primary/relay), host, port, server and '
       + 'extension versions, js_evaluation (false under --no-js), write_root, read_root, session_tab_id (the implicit tab), '
       + 'owned_tabs (created by this session), uptime_sec. caps_active and caps_available: a missing tool lives in an inactive cap. '
       + 'enable is the only change it makes: it switches caps on for this session, no restart, and lists the tools added. Optional caps: '
@@ -869,6 +869,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           type: 'text',
           text: jsonText({
             connected: wsManager.isConnected(),
+            // Senza estensione l'agente ha il link da dare all'utente.
+            ...(!wsManager.isConnected() && { extension_install: EXTENSION_STORE_URL }),
             mode: wsManager.mode,
             host: wsManager.host,
             port: wsManager.port,
