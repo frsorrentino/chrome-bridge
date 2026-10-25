@@ -28,6 +28,25 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.30.7 — 2026-10-25
+
+Server only: the extension does not change (manifest stays 1.30.5), so no new
+Chrome Web Store package.
+
+### Changed
+
+- The npm package ships `npm-shrinkwrap.json`: `npx chrome-bridge-mcp@1.30.7`
+  installs the exact dependency tree that was tested, with registry sources
+  and hashes, instead of resolving the semver ranges at install time. This is
+  what the Claude plugin directory asks of a plugin that launches its server
+  through `npx`.
+- `package-lock.json` is regenerated from `package.json` (it still carried
+  version 1.26.0). Dependencies move within their ranges:
+  `@modelcontextprotocol/sdk` 1.27.1 → 1.32.2, `node-html-parser` 9.0.0 →
+  9.0.5, `ws` 8.21.0 → 8.22.0. The two lockfiles are identical; with both
+  present, npm writes only the shrinkwrap, so copy it over the lock after an
+  update.
+
 ## 1.30.6 — 2026-10-23
 
 Server only: the extension does not change (manifest stays 1.30.5), so no new
