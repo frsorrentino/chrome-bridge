@@ -44,6 +44,9 @@ function parseSecurity() {
   };
 }
 
+const SHUTDOWN_DEADLINE_MS = 10000;
+const PARENT_CHECK_MS = 1000;
+
 function parseCaps() {
   const i = process.argv.indexOf('--caps');
   if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
@@ -78,6 +81,9 @@ async function main() {
   // segnale arrivano insieme.
   let closing = null;
   const shutdown = () => (closing ??= (async () => {
+    // Uno shutdown bloccato non deve tenere vivo il processo: dopo la
+    // scadenza, o al secondo segnale, si esce comunque.
+    setTimeout(forceExit, SHUTDOWN_DEADLINE_MS);
     console.error('[chrome-bridge] Shutting down...');
     // Il browser di --launch per primo: su Windows Claude Code chiude stdin e
     // dopo 300 ms uccide l'albero dei processi (2.1.296). Le sue schede
@@ -91,14 +97,38 @@ async function main() {
     try { await mcpServer.close(); } catch {}
     process.exit(0);
   })());
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  const forceExit = () => {
+    if (browser) { try { process.kill(browser.pid, 'SIGKILL'); } catch {} }
+    process.exit(1);
+  };
+  const onSignal = () => (closing ? forceExit() : shutdown());
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  // Client sparito: stdout e stderr restano pipe senza lettore e ogni
+  // scrittura dà EPIPE. Senza questi ascoltatori l'errore arrivava a
+  // uncaughtException, che riscriveva su stderr: un ciclo di errori che non
+  // lasciava girare l'event loop, neanche per SIGTERM (28/10/2026: un server
+  // --launch orfano da 2 h al 46% di CPU, chiuso solo con SIGKILL).
+  process.stdout.on('error', shutdown);
+  process.stderr.on('error', shutdown);
   // Su Windows SIGINT e SIGTERM non arrivano, e un client terminato di colpo
   // non manda segnali: in entrambi i casi resta solo la fine di stdin. L'SDK
   // non la ascolta, e il WebSocket teneva vivo il processo.
   process.stdin.once('end', shutdown);
   process.stdin.once('close', shutdown);
   mcpServer.server.onclose = shutdown;
+  // Prima di mcpServer.connect() nessuno legge stdin e la sua fine non
+  // arriva; un client che muore durante l'avvio a freddo di Chrome lascia un
+  // orfano adottato da init (o da systemd, su Crostini). Il cambio di padre
+  // lo rivela anche quando stdin resta aperto in un altro processo.
+  if (LAUNCH) {
+    const parent = process.ppid;
+    const parentGone = () => {
+      if (process.ppid !== parent) return true;
+      try { process.kill(parent, 0); return false; } catch (e) { return e.code !== 'EPERM'; }
+    };
+    setInterval(() => { if (parentGone()) shutdown(); }, PARENT_CHECK_MS).unref();
+  }
   process.on('uncaughtException', (err) => {
     console.error('[chrome-bridge] Uncaught exception:', err);
     shutdown().catch(() => process.exit(1));
