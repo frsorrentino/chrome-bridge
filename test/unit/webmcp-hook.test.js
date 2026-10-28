@@ -208,3 +208,14 @@ test('strumento registrato prima del gancio: la chiamata di un altro agente via 
   assert.equal(r.status, 'ok');
   assert.deepEqual(h.calls(5).map((c) => c.caller), ['other', 'chrome-bridge']);
 });
+
+test('come Chrome: risultato in stringa JSON decodificato, AbortError dello strumento letto come timeout', async () => {
+  const mc = fakeModelContext();
+  const h = load({ mc });
+  mc.registerTool({ name: 'json_text', description: 'Answers a JSON string', execute: async () => '{"sent":true}' });
+  mc.registerTool({ name: 'abortable', description: 'Rejects on abort', execute: (_i, { signal }) => new Promise((_, rej) => { signal.addEventListener('abort', () => rej(new Error('signal is aborted without reason'))); }) });
+  assert.deepEqual((await h.call('json_text', {})).result, { sent: true });
+  const r = await h.call('abortable', {}, { timeout: 50 });
+  assert.equal(r.status, 'timeout');
+  assert.match(r.error, /timed out after 50 ms/);
+});

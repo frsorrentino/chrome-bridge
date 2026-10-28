@@ -283,11 +283,14 @@
       } else {
         throw new Error('this WebMCP version has no executeTool and the tool was registered before chrome-bridge could see it');
       }
-      const out = await Promise.race([run, timedOut]);
+      let out = await Promise.race([run, timedOut]);
+      // executeTool di Chrome restituisce il risultato come stringa JSON.
+      if (typeof out === 'string') { try { out = JSON.parse(out); } catch {} }
       settle(entry, t0, out);
       return { status: 'ok', result: entry.output, ms: entry.ms };
     } catch (err) {
-      settle(entry, t0, undefined, err);
+      // Chrome rifiuta con l'AbortError del segnale prima del nostro timer.
+      settle(entry, t0, undefined, ac.signal.aborted && !err?.timeout ? Object.assign(new Error(`timed out after ${timeout} ms`), { timeout: true }) : err);
       return { status: entry.status, error: entry.error, ms: entry.ms };
     } finally {
       clearTimeout(timer);
