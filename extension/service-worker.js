@@ -50,7 +50,7 @@ async function _applyInstrumentation() {
     const isReg = existing.some((s) => s.id === INSTRUMENTATION_ID);
     // network-hook.js dalla 1.25.0: la registrazione persiste agli
     // aggiornamenti, quindi un elenco vecchio va riscritto, non solo creato.
-    const JS = ['console-capture.js', 'network-hook.js', 'page-instrumentation.js'];
+    const JS = ['console-capture.js', 'network-hook.js', 'page-instrumentation.js', 'webmcp-hook.js'];
     const stale = isReg && JSON.stringify(existing.find((s) => s.id === INSTRUMENTATION_ID)?.js ?? []) !== JSON.stringify(JS);
     if (instrument && stale) {
       await chrome.scripting.updateContentScripts([{ id: INSTRUMENTATION_ID, js: JS }]);
@@ -553,6 +553,8 @@ async function executeCommand(msg) {
       return await cmdGetResponseHeaders(params);
     case 'get_interactives':
       return await cmdGetInteractives(params);
+    case 'webmcp':
+      return await cmdWebmcp(params);
     case 'wait_for_function':
       return await cmdWaitForFunction(params);
     case 'scroll_until':
@@ -5537,6 +5539,48 @@ async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 10
     }
     await new Promise((res) => setTimeout(res, intv));
   }
+}
+
+// --- webmcp ---
+// Gli strumenti WebMCP vivono in window.__cbWebmcp (webmcp-hook.js, MAIN
+// world). Con la strumentazione spenta il gancio non c'è: si inietta qui, e
+// vede comunque tutto ciò che getTools elenca.
+
+async function ensureWebmcpHook(target) {
+  const [{ result } = {}] = await chrome.scripting.executeScript({ target, world: 'MAIN', func: () => Boolean(window.__cbWebmcp) });
+  if (!result) await chrome.scripting.executeScript({ target, files: ['webmcp-hook.js'], world: 'MAIN' });
+}
+
+async function cmdWebmcp({ action = 'list', name, input = {}, timeout = 30000, confirm = false, limit = 20, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+  await ensureWebmcpHook(target);
+  const run = async (func, args = []) => (await chrome.scripting.executeScript({ target, world: 'MAIN', func, args }))[0]?.result;
+  if (action === 'summary') return await run(() => window.__cbWebmcp.summary());
+  if (action === 'list') {
+    const data = await run(() => window.__cbWebmcp.list());
+    return limit > 0 && data ? { ...data, recent_calls: await run((l) => window.__cbWebmcp.calls(l), [limit]) } : data;
+  }
+  if (action !== 'call') throw new Error(`Unknown webmcp action: ${action}`);
+  if (!name) throw new Error('Missing required parameter: name');
+
+  // Una chiamata può portare a un'altra pagina (un form inviato, un redirect):
+  // la risposta dice dove. È il caso aperto dell'explainer (issue #135).
+  const before = (await chrome.tabs.get(tabId)).url;
+  let res;
+  try {
+    res = await run((n, i, o) => window.__cbWebmcp.call(n, i, o), [name, input, { timeout, confirmed: confirm === true }]);
+  } catch (err) {
+    res = { status: 'navigated', note: `the page went away during the call (${err.message})` };
+  }
+  if (res == null) res = { status: 'navigated', note: 'the page went away before the tool answered' };
+  if (['ok', 'error', 'timeout', 'navigated'].includes(res.status)) {
+    await new Promise((r) => setTimeout(r, 300));
+    let tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'loading') { await waitForComplete(tabId, 4000); tab = await chrome.tabs.get(tabId); }
+    if (tab.url !== before) res.navigated_to = tab.url;
+  }
+  return res;
 }
 
 // --- scroll_until ---

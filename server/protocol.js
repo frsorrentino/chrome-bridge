@@ -75,6 +75,7 @@ export const MessageType = Object.freeze({
   GET_INTERACTIVES:      'get_interactives',
   WAIT_FOR_FUNCTION:     'wait_for_function',
   SCROLL_UNTIL:          'scroll_until',
+  WEBMCP:                'webmcp',
   DISMISS_OVERLAYS:      'dismiss_overlays',
   KEYBOARD_WALK:         'keyboard_walk',
   HANDOFF:               'handoff',

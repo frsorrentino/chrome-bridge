@@ -28,6 +28,32 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.31.0 — 2026-10-28
+
+Extension changes: new page hook `webmcp-hook.js`, manifest 1.31.0.
+
+### Added
+
+- WebMCP: a page can declare its actions as tools for agents, with
+  `document.modelContext.registerTool` or `<form toolname>`. Two new core
+  tools (69 in total, core 46):
+  - `webmcp_tools` lists the declared tools (name, description, input schema,
+    origin, imperative or declarative) and, with `calls`, the call log of the
+    page: chrome-bridge's calls and the browser agent's, with input, output,
+    status and duration.
+  - `webmcp_call` runs one with a timeout and an AbortSignal. A call that
+    leads to another page returns `navigated_to` and the refs of the new page.
+    Sensitive tools (buy, pay, send, delete, a POST form) answer
+    `needs_confirmation` until the call carries `confirm: true`.
+- `navigate` and `get_interactives` add one `webmcp:` line when the page
+  declares tools: the agent can run the declared action instead of the clicks.
+  Nothing is added on pages without tools.
+- `get_status` reports `webmcp.active` for the session tab and, when off, how
+  to enable it (`chrome://flags/#enable-webmcp-testing` or the origin trial).
+
+The hook never creates `document.modelContext`: with WebMCP off, feature
+detection on the page sees the browser as it is.
+
 ## 1.30.7 — 2026-10-25
 
 Server only: the extension does not change (manifest stays 1.30.5), so no new

@@ -1,7 +1,7 @@
 # Tool reference
 
-All 67 tools, by area. `core` (44 tools, every tool used in 101 real
-sessions) loads by default. The other 23 sit in seven optional caps, which the
+All 69 tools, by area. `core` (46 tools: every tool used in 101 real
+sessions, plus the two WebMCP tools) loads by default. The other 23 sit in seven optional caps, which the
 agent switches on mid-session with `get_status({enable: [...]})` (no restart)
 or you set at startup with `--caps` / `CHROME_BRIDGE_CAPS`:
 
@@ -87,6 +87,30 @@ capturing again. `save_to` still decides where the file goes.
 `track_events` (GA4/Meta/Ads/TikTok beacons decoded from the browser log).
 
 `execute_js` needs **Allow user scripts** enabled in the extension details.
+
+## WebMCP (2)
+
+`webmcp_tools`, `webmcp_call`.
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) lets a page declare its
+actions as tools for agents: `document.modelContext.registerTool` (imperative)
+or `<form toolname tooldescription>` (declarative). Chrome has it behind
+`chrome://flags/#enable-webmcp-testing` or the origin trial (Chrome 149+).
+When the page declares tools, `navigate` and `get_interactives` add a `webmcp:`
+line with their names, and `get_status` says whether WebMCP is active.
+
+- `webmcp_tools` lists name, description, input schema, origin and kind, and
+  with `calls` the call log of the page, whoever the caller (chrome-bridge or
+  the browser agent): input, output, status, ms.
+- `webmcp_call` runs one tool with a timeout and an AbortSignal, and returns
+  the result and `navigated_to` when the call led to another page.
+  Sensitive tools (buy, pay, send, delete, a POST form) answer
+  `needs_confirmation` until the call carries `confirm: true`, which the agent
+  sets only after asking the user. A GET form (search, filters) is not
+  sensitive.
+
+With WebMCP off, form tools are still listed, as plain forms that `fill_form`
+drives; `webmcp_call` answers `inactive`.
 
 ## Visual & Responsive (5)
 

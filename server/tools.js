@@ -315,6 +315,10 @@ const SUBMIT_SETTLE_MS = 2000;
 const SUBMIT_POLL_MS = 250;
 const SUBMIT_TEXT_MAX = 800;
 
+// WebMCP (W3C Web Machine Learning CG): in Chrome dietro flag o origin trial.
+const WEBMCP_ENABLE = 'chrome://flags/#enable-webmcp-testing (Chrome 149+), or the site joins the WebMCP origin trial';
+const WEBMCP_TIMEOUT_MAX = 120000;
+
 const waitAfter = z.enum(['none', 'navigation', 'networkidle']).optional().default('none')
   .describe('Settle before returning: navigation waits for a page load, networkidle for quiet traffic');
 
@@ -387,6 +391,7 @@ export const TOOL_ANNOTATIONS = {
   track_events: ro(),
   cookie_audit: rw({ idempotent: true }),
   find_setting: rw({ idempotent: true }),
+  webmcp_tools: ro(),
 
   // --- interazione con la pagina ---
   click: rw({ open: true }),          // un click può navigare
@@ -420,6 +425,7 @@ export const TOOL_ANNOTATIONS = {
 
   // --- codice arbitrario ---
   execute_js: rw({ destructive: true, open: true }),
+  webmcp_call: rw({ destructive: true, open: true }),  // esegue codice della pagina: può comprare, inviare, navigare
 
   // http_request non è read-only: un POST cambia lo stato del server remoto, e
   // con save_to scrive un file. destructive perché sovrascrive save_to senza
@@ -835,13 +841,36 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     } catch { return null; } finally { recordSuppressed -= 1; }
   }
 
+  // Strumenti WebMCP della pagina in una riga, solo se ce ne sono: l'agente
+  // usa l'azione dichiarata al posto di tanti clic. Best-effort come
+  // pageProblems: su errore o pagina senza strumenti, niente.
+  async function webmcpSummary(tab_id) {
+    recordSuppressed += 1;
+    try {
+      const d = await send(MessageType.WEBMCP, { action: 'summary', tab_id });
+      return typeof d?.active === 'boolean' ? d : null;
+    } catch { return null; } finally { recordSuppressed -= 1; }
+  }
+  async function webmcpHint(tab_id) {
+    const d = await webmcpSummary(tab_id);
+    if (!d?.tools?.length) return null;
+    const shown = d.tools.slice(0, 8).map((t) => {
+      const tags = [t.kind === 'declarative' && 'form', t.sensitive && 'sensitive'].filter(Boolean);
+      return tags.length ? `${t.name} (${tags.join(', ')})` : t.name;
+    }).join(', ') + (d.tools.length > 8 ? `, +${d.tools.length - 8}` : '');
+    return d.active
+      ? `webmcp: the page declares ${d.tools.length} tool(s): ${shown}. webmcp_call runs one in a single step instead of clicks; webmcp_tools gives the schemas`
+      : `webmcp: the page declares ${d.tools.length} form tool(s): ${shown}, but WebMCP is off in this Chrome; fill_form drives the form (enable: ${WEBMCP_ENABLE})`;
+  }
+
   // --- get_status ---
   server.tool(
     'get_status',
     'Status of the bridge itself, not of a page: call it when a tool you expect is missing or browser commands fail '
       + '(connected=false: the extension is not reachable, extension_install gives its Chrome Web Store link). Also reports mode (primary/relay), host, port, server and '
       + 'extension versions, js_evaluation (false under --no-js), write_root, read_root, session_tab_id (the implicit tab), '
-      + 'owned_tabs (created by this session), uptime_sec. caps_active and caps_available: a missing tool lives in an inactive cap. '
+      + 'owned_tabs (created by this session), uptime_sec, webmcp (whether WebMCP is active in the session tab, and how to enable it). '
+      + 'caps_active and caps_available: a missing tool lives in an inactive cap. '
       + 'enable is the only change it makes: it switches caps on for this session, no restart, and lists the tools added. Optional caps: '
       + `${Object.entries(TOOL_CAPS).map(([g, t]) => `${g} (${t.join(', ')})`).join('; ')}.`,
     {
@@ -864,6 +893,11 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
           if (!activeCaps.includes(g)) activeCaps.push(g);
         }
       }
+      // Lo stato di WebMCP si legge da una pagina: flag e origin trial
+      // valgono per il browser o per il sito. Al più 2 s, poi si omette.
+      const webmcp = wsManager.isConnected()
+        ? await Promise.race([webmcpSummary(), new Promise((r) => setTimeout(r, 2000, null))])
+        : null;
       return {
         content: [{
           type: 'text',
@@ -888,6 +922,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
             session_tab_id: sessionTabId,
             owned_tabs: [...ownedTabs],
             uptime_sec: Math.round((Date.now() - startedAt) / 1000),
+            ...(webmcp && { webmcp: { active: webmcp.active, ...(!webmcp.active && { enable: WEBMCP_ENABLE }) } }),
             ...(enabledNow && { enabled: enabledNow }),
           }),
         }],
@@ -939,7 +974,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
     'navigate',
     'Navigate a Chrome tab to a URL and wait for the load; DNS and connection errors fail the call. Without tab_id it reuses the tab '
       + 'this session last navigated or created, else opens a new one rather than taking over the active tab. Returns a preview of '
-      + 'interactive elements with refs usable in click/type_text/hover, plus the first console errors and failed requests, if any.',
+      + 'interactive elements with refs usable in click/type_text/hover, plus the first console errors and failed requests, if any, '
+      + 'and the WebMCP tools the page declares.',
     {
       url:    z.string().describe('Absolute URL, or a path resolved against the current page'),
       tab_id: tabId,
@@ -952,11 +988,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // Il tab navigato diventa il default di sessione per i comandi successivi
       if (data?.tabId != null) sessionTabId = data.tabId;
       resetRefs(data?.tabId ?? tab_id);
-      const [preview, problems] = await Promise.all([interactivesPreview(data?.tabId ?? tab_id), pageProblems(data?.tabId ?? tab_id)]);
+      const [preview, problems, webmcp] = await Promise.all([
+        interactivesPreview(data?.tabId ?? tab_id), pageProblems(data?.tabId ?? tab_id), webmcpHint(data?.tabId ?? tab_id),
+      ]);
       return {
         content: [{
           type: 'text',
-          text: jsonText(data) + (problems ? `\n${problems}` : '') + (preview ? `\n${preview}` : ''),
+          text: jsonText(data) + (problems ? `\n${problems}` : '') + (webmcp ? `\n${webmcp}` : '') + (preview ? `\n${preview}` : ''),
         }],
       };
     }
@@ -3148,7 +3186,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
   server.tool(
     'get_interactives',
     'List actionable elements (buttons, links, inputs, [role], [onclick]) with ready-to-use CSS selector, label, position, flags. Prefer this over dumping HTML to discover selectors. '
-      + 'Document order, cut at limit (count equal to limit: there may be more), each with a ref (n1, n2…) for click, type_text and hover.',
+      + 'Document order, cut at limit (count equal to limit: there may be more), each with a ref (n1, n2…) for click, type_text and hover. '
+      + 'The full list also names the WebMCP tools the page declares, if any.',
     {
       scope: z.string().optional().describe('Limit search (CSS selector)'),
       limit: z.number().optional().default(100).describe('Max elements returned; raise it on a dense page'),
@@ -3160,7 +3199,10 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       tab_id: tabId,
     },
     async ({ scope, limit, visible_only, format, since, frame_id, tab_id }) => {
-      const data = await send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id });
+      const [data, webmcp] = await Promise.all([
+        send(MessageType.GET_INTERACTIVES, { scope, limit, visible_only, frame_id, tab_id }),
+        since ? null : webmcpHint(tab_id),
+      ]);
       const elements = data?.elements ?? [];
       // Ref stabili per selettore e frame, memorizzati per click/type_text/hover
       assignRefs(tab_id, elements, frame_id);
@@ -3168,7 +3210,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       if ((format ?? 'lines') === 'json') {
         const body = diff
           ? { count: data?.count ?? elements.length, since, added: diff.added, changed: diff.changed, removed: diff.removed }
-          : { ...data, ...(note && { since_note: note }) };
+          : { ...data, ...(note && { since_note: note }), ...(webmcp && { webmcp }) };
         return { content: [{ type: 'text', text: jsonText({ ...body, cursor }) }] };
       }
       const cursorLine = `\ncursor=${cursor} (pass as since to get only what changed)`;
@@ -3186,9 +3228,60 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return {
         content: [{
           type: 'text',
-          text: truncateText(interactivesLines(data) + (note ? `\nnote: ${note}` : ''), DEFAULT_MAX_OUTPUT) + cursorLine,
+          text: truncateText(interactivesLines(data) + (note ? `\nnote: ${note}` : ''), DEFAULT_MAX_OUTPUT) + cursorLine + (webmcp ? `\n${webmcp}` : ''),
         }],
       };
+    }
+  );
+
+  // --- webmcp_tools ---
+  server.tool(
+    'webmcp_tools',
+    'List the WebMCP tools the page declares for agents: name, description, input_schema, origin, kind (imperative = registered '
+      + 'with document.modelContext.registerTool; declarative = a <form toolname>), sensitive (why webmcp_call wants confirm) and how '
+      + 'many times each was called. active=false: WebMCP is off in this Chrome and only form tools are visible, as plain forms. '
+      + 'calls adds the call log of the page, any caller (chrome-bridge or the browser agent): input, output, status, ms.',
+    {
+      calls: z.number().int().min(0).max(100).optional().default(0)
+        .describe('Also return the last N calls from the log; 0 = tools only'),
+      frame_id: frameId,
+      tab_id: tabId,
+    },
+    async ({ calls, frame_id, tab_id }) => {
+      const data = await send(MessageType.WEBMCP, { action: 'list', limit: calls ?? 0, frame_id, tab_id });
+      const body = { ...data, ...(data && !data.active && { enable: WEBMCP_ENABLE }) };
+      return { content: [{ type: 'text', text: jsonText(body) }] };
+    }
+  );
+
+  // --- webmcp_call ---
+  server.tool(
+    'webmcp_call',
+    'Run a WebMCP tool the page declares (see webmcp_tools or the webmcp line of navigate): one call instead of the clicks and '
+      + 'fields it replaces. Returns status (ok, error, timeout, not_found, inactive, needs_confirmation), the tool result and ms; '
+      + 'navigated_to when the call led to another page. A sensitive tool (buy, pay, send, delete, a POST form) is not run '
+      + 'without confirm:true: on needs_confirmation ask the user, then repeat with confirm.',
+    {
+      name: z.string().describe('Tool name as listed by webmcp_tools'),
+      input: z.record(z.string(), z.any()).optional().default({})
+        .describe('Arguments matching the tool input_schema'),
+      confirm: z.boolean().optional().default(false)
+        .describe('true only after the user approved this sensitive action'),
+      timeout: z.number().int().min(1000).max(WEBMCP_TIMEOUT_MAX).optional().default(30000)
+        .describe('Abort the tool after this many ms'),
+      frame_id: frameId,
+      tab_id: tabId,
+    },
+    async ({ name, input, confirm, timeout, frame_id, tab_id }) => {
+      const data = await send(MessageType.WEBMCP, { action: 'call', name, input: input ?? {}, confirm: confirm === true, timeout, frame_id, tab_id });
+      if (data?.status === 'needs_confirmation') data.next = 'ask the user; if they approve, repeat the call with confirm:true';
+      if (data?.status === 'inactive') data.enable = WEBMCP_ENABLE;
+      const text = jsonText(data);
+      if (!data?.navigated_to) return { content: [{ type: 'text', text }] };
+      // Pagina nuova: i ref vecchi non valgono più, quelli nuovi li dà la preview.
+      resetRefs(tab_id);
+      const preview = await interactivesPreview(tab_id);
+      return { content: [{ type: 'text', text: preview ? `${text}\n${preview}` : text }] };
     }
   );
 

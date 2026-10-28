@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMCP test shop</title>
+<script>
+// document.modelContext secondo l'explainer WebMCP (registerTool, getTools,
+// executeTool, toolchange), solo dove il browser non lo ha: con il flag
+// chrome://flags/#enable-webmcp-testing acceso la pagina usa quello vero.
+(() => {
+  if ('modelContext' in document) return;
+  const tools = new Map();
+  const events = new EventTarget();
+  const changed = () => events.dispatchEvent(new Event('toolchange'));
+  const formTools = () => [...document.querySelectorAll('form[toolname]')];
+  const registered = (name, description, inputSchema) => ({ name, description, inputSchema: JSON.stringify(inputSchema ?? {}), origin: location.origin, window });
+
+  async function runForm(form, input, signal) {
+    for (const [k, v] of Object.entries(input ?? {})) {
+      const el = form.elements[k];
+      if (el) el.value = String(v);
+    }
+    form.dispatchEvent(new Event('toolactivated', { bubbles: true }));
+    if (!form.hasAttribute('toolautosubmit')) return { status: 'awaiting_user', note: 'the form is filled; the user submits it' };
+    let answer = null;
+    const ev = new SubmitEvent('submit', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'agentInvoked', { value: true });
+    ev.respondWith = (p) => { answer = Promise.resolve(p); };
+    form.dispatchEvent(ev);
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+    if (ev.defaultPrevented) return answer ? await answer : null;
+    // Nessun respondWith: invio vero, la pagina cambia.
+    setTimeout(() => form.submit(), 0);
+    return { submitted: true };
+  }
+
+  const mc = {
+    registerTool(tool, { signal } = {}) {
+      if (tools.has(tool.name)) throw new DOMException(`${tool.name} already registered`, 'InvalidStateError');
+      tools.set(tool.name, tool);
+      signal?.addEventListener('abort', () => { tools.delete(tool.name); changed(); });
+      changed();
+    },
+    async getTools() {
+      return [
+        ...[...tools.values()].map((t) => ({ ...registered(t.name, t.description, t.inputSchema), annotations: t.annotations })),
+        ...formTools().map((f) => registered(f.getAttribute('toolname'), f.getAttribute('tooldescription'), null)),
+      ];
+    },
+    async executeTool(rt, input, { signal } = {}) {
+      const form = formTools().find((f) => f.getAttribute('toolname') === rt.name);
+      if (form) return runForm(form, input, signal);
+      const t = tools.get(rt.name);
+      if (!t) throw new DOMException(`${rt.name} is not registered`, 'NotFoundError');
+      return t.execute(input, { signal, requestUserInteraction: async (fn) => fn() });
+    },
+    addEventListener: (...a) => events.addEventListener(...a),
+    removeEventListener: (...a) => events.removeEventListener(...a),
+  };
+  document.modelContext = mc;
+})();
+</script>
+<style>
+  body { font: 16px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  form { border: 1px solid #bbb; padding: 1rem; margin: 1rem 0; }
+  label { display: block; margin: .4rem 0; }
+</style>
+</head>
+<body>
+<h1>WebMCP test shop</h1>
+<p id="cart">Cart: 0 items</p>
+<p id="result"></p>
+
+<form toolname="search_catalog" tooldescription="Search the catalogue by keyword" method="get" action="" toolautosubmit>
+  <label for="q">Keyword</label>
+  <input id="q" name="q" type="search" required toolparamdescription="Words to look for">
+  <label for="sort">Sort</label>
+  <select id="sort" name="sort"><option value="price">price</option><option value="new">new</option></select>
+  <button type="submit">Search</button>
+</form>
+
+<form id="contact" toolname="contact_us" tooldescription="Send a message to the shop" method="post" action="" toolautosubmit>
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" required>
+  <label for="message">Message</label>
+  <textarea id="message" name="message" toolparamdescription="What to tell the shop"></textarea>
+  <button type="submit">Send</button>
+</form>
+
+<button id="agent" type="button">Browser agent adds a mug</button>
+
+<script>
+const products = [{ sku: 'MUG-1', name: 'Blue mug', price: 9 }, { sku: 'TEA-2', name: 'Green tea', price: 6 }];
+let cart = [];
+const showCart = () => { document.getElementById('cart').textContent = `Cart: ${cart.length} items`; };
+const mc = document.modelContext;
+
+mc.registerTool({
+  name: 'search_products',
+  description: 'Find products by name',
+  inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+  annotations: { readOnlyHint: true },
+  execute: async ({ query }) => ({ products: products.filter((p) => p.name.toLowerCase().includes(String(query).toLowerCase())) }),
+});
+mc.registerTool({
+  name: 'add_to_cart',
+  description: 'Put a product in the cart',
+  inputSchema: { type: 'object', properties: { sku: { type: 'string' }, qty: { type: 'number' } }, required: ['sku'] },
+  execute: async ({ sku, qty = 1 }) => {
+    if (!products.some((p) => p.sku === sku)) throw new Error(`unknown sku ${sku}`);
+    for (let i = 0; i < qty; i++) cart.push(sku);
+    showCart();
+    return { cart: cart.length };
+  },
+});
+mc.registerTool({
+  name: 'checkout',
+  description: 'Pay for the cart and place the order',
+  inputSchema: { type: 'object', properties: {} },
+  execute: async () => {
+    const order = 1000 + cart.length;
+    setTimeout(() => { location.href = `${location.pathname}?ordered=${order}`; }, 50);
+    return { order };
+  },
+});
+mc.registerTool({
+  name: 'slow_lookup',
+  description: 'A lookup that never answers',
+  inputSchema: { type: 'object', properties: {} },
+  annotations: { readOnlyHint: true },
+  execute: (_input, { signal } = {}) => new Promise((_, reject) => {
+    signal?.addEventListener('abort', () => { document.getElementById('result').textContent = 'slow_lookup aborted'; reject(new DOMException('aborted', 'AbortError')); });
+  }),
+});
+
+// Il form POST risponde all'agente con respondWith, senza ricaricare.
+document.getElementById('contact').addEventListener('submit', (e) => {
+  if (!e.agentInvoked) return;
+  e.preventDefault();
+  e.respondWith(Promise.resolve({ sent: true, to: 'shop' }));
+  document.getElementById('result').textContent = 'message sent';
+});
+
+// Un agente del browser che non è chrome-bridge: deve finire nel registro.
+document.getElementById('agent').addEventListener('click', async () => {
+  const rt = (await mc.getTools()).find((t) => t.name === 'add_to_cart');
+  await mc.executeTool(rt, { sku: 'MUG-1' });
+});
+
+// Uno strumento che arriva dopo: toolchange.
+setTimeout(() => mc.registerTool({ name: 'order_status', description: 'Status of an order', inputSchema: { type: 'object', properties: { order: { type: 'number' } } }, annotations: { readOnlyHint: true }, execute: async ({ order }) => ({ order, status: 'shipped' }) }), 200);
+
+const ordered = new URLSearchParams(location.search).get('ordered');
+if (ordered) document.getElementById('result').textContent = `order ${ordered} placed`;
+</script>
+</body>
+</html>

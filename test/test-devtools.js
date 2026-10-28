@@ -1182,6 +1182,84 @@ async function testUploadShadow() {
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
+// 1.31: strumenti WebMCP della pagina, su un document.modelContext finto
+// (stessa forma dell'explainer) e due form dichiarativi.
+async function testWebmcp() {
+  const send = (t, p) => wsManager.sendCommand(t, p);
+  const tab = await send(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}webmcp`, active: true });
+  const tab_id = tab.id;
+  await new Promise((r) => setTimeout(r, 800));
+  const call = (name, input = {}, extra = {}) => send(MessageType.WEBMCP, { action: 'call', name, input, tab_id, ...extra });
+  const check = async (name, fn) => {
+    try { await fn(); ok(`webmcp: ${name}`); } catch (e) { fail(`webmcp: ${name}`, e.message); }
+  };
+  try {
+    await check('elenco imperativi e dichiarativi, sensibili segnati', async () => {
+      const { active, tools } = await send(MessageType.WEBMCP, { action: 'list', tab_id });
+      const by = Object.fromEntries(tools.map((t) => [t.name, t]));
+      const want = ['search_products', 'add_to_cart', 'checkout', 'slow_lookup', 'order_status', 'search_catalog', 'contact_us'];
+      if (!active || want.some((n) => !by[n])) throw new Error(JSON.stringify(tools.map((t) => t.name)));
+      if (!by.search_products.read_only || by.search_products.sensitive) throw new Error(JSON.stringify(by.search_products));
+      if (!by.checkout.sensitive || !by.contact_us.sensitive || by.search_catalog.sensitive) throw new Error('sensibilità');
+      if (by.search_catalog.kind !== 'declarative' || by.search_catalog.input_schema.required?.[0] !== 'q') throw new Error(JSON.stringify(by.search_catalog));
+    });
+    await check('chiamata imperativa', async () => {
+      const r = await call('search_products', { query: 'mug' });
+      if (r.status !== 'ok' || r.result.products?.[0]?.sku !== 'MUG-1' || r.navigated_to) throw new Error(JSON.stringify(r));
+    });
+    await check('azione sensibile senza conferma non parte', async () => {
+      const r = await call('checkout');
+      if (r.status !== 'needs_confirmation') throw new Error(JSON.stringify(r));
+    });
+    await check('form POST con respondWith, confermato', async () => {
+      const r = await call('contact_us', { email: 'a@b.test', message: 'hi' }, { confirm: true });
+      if (r.status !== 'ok' || r.result?.sent !== true || r.navigated_to) throw new Error(JSON.stringify(r));
+    });
+    await check('timeout con AbortSignal', async () => {
+      const r = await call('slow_lookup', {}, { timeout: 1500 });
+      const txt = (await send(MessageType.EXECUTE_JS, { code: 'document.getElementById("result").textContent', tab_id })).result;
+      if (r.status !== 'timeout' || txt !== 'slow_lookup aborted') throw new Error(`${JSON.stringify(r)} ${txt}`);
+    });
+    await check('chiamata di un altro agente nel registro', async () => {
+      await send(MessageType.CLICK, { selector: '#agent', tab_id });
+      await new Promise((r) => setTimeout(r, 300));
+      const { recent_calls: log } = await send(MessageType.WEBMCP, { action: 'list', limit: 20, tab_id });
+      const other = log.find((c) => c.tool === 'add_to_cart' && c.caller === 'other');
+      const mine = log.filter((c) => c.caller === 'chrome-bridge').map((c) => c.tool);
+      if (!other || other.status !== 'ok') throw new Error(JSON.stringify(log));
+      if (mine.join() !== 'search_products,contact_us,slow_lookup') throw new Error(mine.join());
+    });
+    await check('chiamata che naviga: navigated_to', async () => {
+      const r = await call('checkout', {}, { confirm: true });
+      if (r.status !== 'ok' || !/ordered=1001/.test(r.navigated_to ?? '')) throw new Error(JSON.stringify(r));
+    });
+    await check('form GET dichiarativo senza conferma, naviga', async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      const r = await call('search_catalog', { q: 'tea', sort: 'new' });
+      if (!/q=tea/.test(r.navigated_to ?? '')) throw new Error(JSON.stringify(r));
+    });
+    // Attraverso i tool MCP veri: la riga di navigate e lo stato.
+    const handlers = new Map();
+    registerTools({ tool: (n, _d, _s, ...rest) => handlers.set(n, rest[rest.length - 1]) }, wsManager, 'all', {});
+    const text = async (name, args) => (await handlers.get(name)(args)).content[0].text;
+    await check('navigate riporta gli strumenti della pagina', async () => {
+      const t = await text('navigate', { url: `${FIXTURE_URL}webmcp`, tab_id });
+      const line = t.split('\n').find((l) => l.startsWith('webmcp:')) ?? '';
+      // order_status arriva 200 ms dopo il load: 6 o 7 secondo i tempi.
+      if (!/declares [67] tool\(s\): search_products, add_to_cart, checkout \(sensitive\)/.test(line) || !/contact_us \(form, sensitive\)/.test(line)) throw new Error(line || t.slice(0, 300));
+    });
+    await check('get_status: webmcp attivo', async () => {
+      const st = JSON.parse(await text('get_status', {}));
+      if (st.webmcp?.active !== true) throw new Error(JSON.stringify(st.webmcp));
+    });
+    await check('navigate su pagina senza strumenti: nessuna riga', async () => {
+      const t = await text('navigate', { url: FIXTURE_URL, tab_id });
+      if (/webmcp/.test(t)) throw new Error(t.slice(0, 300));
+    });
+  } catch (e) { fail('webmcp', e.message); }
+  await send(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
+}
+
 // 1.30: capture_downloads salva i file costruiti dalla pagina senza download di Chrome.
 async function testCaptureDownloads() {
   const { collectCaptured } = await import('../server/capture.js');
@@ -1386,6 +1464,9 @@ const CAPTURE_HTML = '<!doctype html><html><body>'
   + '<a id="named" href="/plain" download="dalla pagina.csv">named</a>'
   + '</body></html>';
 
+// Negozio finto con document.modelContext secondo l'explainer WebMCP.
+const WEBMCP_HTML = readFileSync(new URL('./fixtures/webmcp-mock.html', import.meta.url), 'utf8');
+
 async function startFixture() {
   const motionHtml = readFileSync(new URL('../bench/motion.html', import.meta.url), 'utf8');
   const http = createHttpServer((req, res) => {
@@ -1401,6 +1482,7 @@ async function startFixture() {
     if (req.url === '/attachment') { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="dal server.bin"' }); res.end(Buffer.from([0, 1, 2, 255])); return; }
     if (req.url === '/upload-shadow') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(UPLOAD_SHADOW_HTML); return; }
     if (req.url === '/upload') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><body><input type="file" id="f"></body></html>'); return; }
+    if (req.url.startsWith('/webmcp')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(WEBMCP_HTML); return; }
     if (req.url === '/lcp') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(LCP_HTML); return; }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(req.url === '/motion' ? motionHtml : EXAMPLE_HTML);
@@ -1433,87 +1515,94 @@ async function main() {
     const withTab = (params = {}) => ({ ...params, tab_id: testTabId });
 
     console.log('Running tests:\n');
+    // CHROME_BRIDGE_E2E_ONLY=webmcp: solo il blocco WebMCP, senza l'intera suite.
+    suite: {
+      if (process.env.CHROME_BRIDGE_E2E_ONLY === 'webmcp') { await testWebmcp(); break suite; }
 
-    // Original 8 tests
-    await testGetPageInfo(testTabId);
-    await testGetStorage(testTabId);
-    await testGetPerformance(testTabId);
-    await testQueryDom(testTabId);
-    await testModifyDom(testTabId);
-    await testInjectCss(testTabId);
-    await testReadConsole(testTabId);
-    await testMonitorNetwork(testTabId);
-    await testNetworkFromLoad();
-    await testConsoleCursor(testTabId);
+      // Original 8 tests
+      await testGetPageInfo(testTabId);
+      await testGetStorage(testTabId);
+      await testGetPerformance(testTabId);
+      await testQueryDom(testTabId);
+      await testModifyDom(testTabId);
+      await testInjectCss(testTabId);
+      await testReadConsole(testTabId);
+      await testMonitorNetwork(testTabId);
+      await testNetworkFromLoad();
+      await testConsoleCursor(testTabId);
 
-    // New 12 tests
-    await testWaitForElement(testTabId);
-    await testWaitForElementTimeout(testTabId);
-    await testWaitForFunction(testTabId);
-    await testScrollTo(testTabId);
-    await testSetStorage(testTabId);
-    await testFillForm(testTabId);
-    await testViewportResize(testTabId);
-    await testFullPageScreenshot(testTabId);
-    await testHighlightElements(testTabId);
-    await testAccessibilityAudit(testTabId);
-    await testCollectLinks(testTabId);
-    await testMeasureSpacing(testTabId);
-    await testWatchDom(testTabId);
-    await testEmulateMedia(testTabId);
-    await testHover(testTabId);
-    await testPressKey(testTabId);
+      // New 12 tests
+      await testWaitForElement(testTabId);
+      await testWaitForElementTimeout(testTabId);
+      await testWaitForFunction(testTabId);
+      await testScrollTo(testTabId);
+      await testSetStorage(testTabId);
+      await testFillForm(testTabId);
+      await testViewportResize(testTabId);
+      await testFullPageScreenshot(testTabId);
+      await testHighlightElements(testTabId);
+      await testAccessibilityAudit(testTabId);
+      await testCollectLinks(testTabId);
+      await testMeasureSpacing(testTabId);
+      await testWatchDom(testTabId);
+      await testEmulateMedia(testTabId);
+      await testHover(testTabId);
+      await testPressKey(testTabId);
 
-    // 1.16.0
-    await testReadForm(testTabId);
-    await testKeyboardWalk(testTabId);
-    await testListAssetsAndTiming(testTabId);
-    await testDiffFromFile(testTabId);
-    await testWatch(testTabId);
-    await testObserve(testTabId);
-    await testHandoffTimeout(testTabId);
+      // 1.16.0
+      await testReadForm(testTabId);
+      await testKeyboardWalk(testTabId);
+      await testListAssetsAndTiming(testTabId);
+      await testDiffFromFile(testTabId);
+      await testWatch(testTabId);
+      await testObserve(testTabId);
+      await testHandoffTimeout(testTabId);
 
-    // Unreleased
-    await testPageFingerprintClickEffect(testTabId);
-    await testTypeTextReadback(testTabId);
-    await testHandoffAskViaBanner(testTabId);
-    await testHandoffMultiPick(testTabId);
+      // Unreleased
+      await testPageFingerprintClickEffect(testTabId);
+      await testTypeTextReadback(testTabId);
+      await testHandoffAskViaBanner(testTabId);
+      await testHandoffMultiPick(testTabId);
 
-    // 1.19.0 (osservazioni dal campo, docs/osservazioni-campo-2026-09.md)
-    await testFindTextSplitLabel(testTabId);
-    await testScrollUntilInnerContainer(testTabId);
-    await testWaitForTextHiddenWindow();
+      // 1.19.0 (osservazioni dal campo, docs/osservazioni-campo-2026-09.md)
+      await testFindTextSplitLabel(testTabId);
+      await testScrollUntilInnerContainer(testTabId);
+      await testWaitForTextHiddenWindow();
 
-    // 1.20.0
-    await testGetInteractivesLabels(testTabId);
+      // 1.20.0
+      await testGetInteractivesLabels(testTabId);
 
-    // 1.21.0
-    await testGetCssStyles(testTabId);
+      // 1.21.0
+      await testGetCssStyles(testTabId);
 
-    // 1.23.4
-    await testElementCommandsNoMatch(testTabId);
-    await testToolsNoMatch(testTabId);
+      // 1.23.4
+      await testElementCommandsNoMatch(testTabId);
+      await testToolsNoMatch(testTabId);
 
-    // 1.26.0
-    await testTrustedInput(testTabId);
-    await testNavigateConnectionRefused(testTabId);
+      // 1.26.0
+      await testTrustedInput(testTabId);
+      await testNavigateConnectionRefused(testTabId);
 
-    // 1.27.0
-    await testMotion();
-    await testPerfTrace();
-    await testScreencast();
-    await testLaunchOnlyTools(browser);
+      // 1.27.0
+      await testMotion();
+      await testPerfTrace();
+      await testScreencast();
+      await testLaunchOnlyTools(browser);
 
-    // 1.28
-    await testUploadLarge();
+      // 1.28
+      await testUploadLarge();
 
-    // 1.29.3
-    await testUploadShadow();
-    await testShadowSelectors();
+      // 1.29.3
+      await testUploadShadow();
+      await testShadowSelectors();
 
-    // 1.30
-    await testCaptureDownloads();
-    await testCloseUnresponsive();
+      // 1.30
+      await testCaptureDownloads();
+      await testCloseUnresponsive();
+
+      // 1.31
+      await testWebmcp();
+    }
 
     console.log(`\n=== Results: ${passed}/${passed + failed} passed ===`);
     if (failed > 0) {

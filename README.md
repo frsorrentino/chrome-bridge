@@ -164,12 +164,12 @@ user-script toggle isn't available.
 
 ## Tools
 
-67 in total. `core` (44 tools, every tool used in 101 real sessions) loads by
-default; the other 23 sit in seven optional caps that the agent switches on
+69 in total. `core` (46 tools: every tool used in 101 real sessions, plus the
+two WebMCP tools) loads by default; the other 23 sit in seven optional caps that the agent switches on
 mid-session with `get_status({enable: ["visual"]})`, with no restart
 (`--caps` still sets them at startup).
 
-![67 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
+![69 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
@@ -316,7 +316,7 @@ count.
 
 ## Documentation
 
-- [docs/TOOLS.md](docs/TOOLS.md) — all 67 tools, by group
+- [docs/TOOLS.md](docs/TOOLS.md) — all 69 tools, by group
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`
