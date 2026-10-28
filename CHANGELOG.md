@@ -28,6 +28,31 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.31.2 — 2026-10-28
+
+Server only: the extension is unchanged and the manifest stays 1.31.1.
+
+### Fixed
+
+- A `--launch` server whose MCP client died no longer stays alive as an
+  orphan. One was found after 2 hours at 46% CPU with no browser left, and
+  SIGTERM did not stop it. Once the client was gone, stdout and stderr were
+  pipes with no reader. The first log line raised EPIPE, the
+  `uncaughtException` handler logged it again, and the loop of errors kept the
+  event loop from serving even SIGTERM. A write error on stdout or stderr now
+  shuts the server down.
+- In `--launch` the server also shuts down when its parent process goes away,
+  checked once a second. Before the MCP transport connects nobody reads stdin,
+  so a client that died during the cold start of the browser sent no
+  end-of-file. The check also covers a stdin kept open by another process.
+- Shutdown always ends: a second SIGINT or SIGTERM, or 10 seconds without
+  finishing, kills the launched browser and exits.
+
+Test `launch_exits_without_client`: the parent dies during startup with stderr
+in a pipe, then with stderr on a file and stdin held open. Both cases fail on
+1.31.1 and pass now. Idle with no extension connected the server uses about
+0.1% CPU.
+
 ## 1.31.1 — 2026-10-28
 
 Extension changes: `webmcp-hook.js`, manifest 1.31.1.
