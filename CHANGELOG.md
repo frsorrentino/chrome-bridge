@@ -28,6 +28,25 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.31.1 — 2026-10-28
+
+Extension changes: `webmcp-hook.js`, manifest 1.31.1.
+
+### Fixed
+
+Found with the real flag on (`chrome://flags/#enable-webmcp-testing`):
+
+- `webmcp_call` reports `timeout` when the tool rejects on the abort signal:
+  Chrome rejects with the signal's AbortError before chrome-bridge's own
+  timer, and the call came back as `error`.
+- Chrome's `executeTool` returns the tool result as a JSON string:
+  `webmcp_call` decodes it, so `result` is the object the tool returned.
+
+Checked on Chrome with the flag: native `ModelContext`, imperative and
+declarative tools listed with schemas and annotations, a POST form answered
+through `respondWith`, a GET form that navigates, calls from the page logged
+once with the right caller.
+
 ## 1.31.0 — 2026-10-28
 
 Extension changes: new page hook `webmcp-hook.js`, manifest 1.31.0.
