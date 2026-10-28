@@ -8,48 +8,48 @@
   <rect width="1200" height="630" fill="url(#bg4)"/>
 
   <!-- titolo -->
-  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">66 tools. One browser.</text>
-  <text x="70" y="152" fill="#9db7d8" font-size="26">From clicking a button to tracing a page — eight groups, 43 tools loaded by default.</text>
+  <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">69 tools. One browser.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">From clicking a button to tracing a page — nine groups, 46 in the default set.</text>
 
 
-  <!-- griglia gruppi: riga 1 -->
+  <!-- griglia gruppi: 3 × 3 -->
   <g>
-    <rect x="70" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="95" y="270" fill="#38bdf8" font-size="46" font-weight="800">13</text>
-    <text x="95" y="305" fill="#e6edf3" font-size="21" font-weight="700">Navigation</text>
-    <text x="95" y="328" fill="#8b98a9" font-size="16">tabs, windows, screenshots</text>
-    <rect x="340" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="365" y="270" fill="#38bdf8" font-size="46" font-weight="800">11</text>
-    <text x="365" y="305" fill="#e6edf3" font-size="21" font-weight="700">Interaction</text>
-    <text x="365" y="328" fill="#8b98a9" font-size="16">click, forms, upload, dialogs</text>
-    <rect x="610" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="635" y="270" fill="#38bdf8" font-size="46" font-weight="800">12</text>
-    <text x="635" y="305" fill="#e6edf3" font-size="21" font-weight="700">DOM &amp; Inspection</text>
-    <text x="635" y="328" fill="#8b98a9" font-size="16">read, extract, query, CSS</text>
-    <rect x="880" y="210" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="905" y="270" fill="#38bdf8" font-size="46" font-weight="800">8</text>
-    <text x="905" y="305" fill="#e6edf3" font-size="21" font-weight="700">Debug &amp; Network</text>
-    <text x="905" y="328" fill="#8b98a9" font-size="16">console, network, mocking</text>
-  </g>
-
-  <!-- griglia gruppi: riga 2 -->
-  <g>
-    <rect x="70" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="95" y="420" fill="#38bdf8" font-size="46" font-weight="800">5</text>
-    <text x="95" y="455" fill="#e6edf3" font-size="19" font-weight="700">Visual &amp; Responsive</text>
-    <text x="95" y="478" fill="#8b98a9" font-size="16">pixel diff, viewport, media</text>
-    <rect x="340" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="365" y="420" fill="#38bdf8" font-size="46" font-weight="800">2</text>
-    <text x="365" y="455" fill="#e6edf3" font-size="21" font-weight="700">Audits</text>
-    <text x="365" y="478" fill="#8b98a9" font-size="16">a11y, SEO, security, links</text>
-    <rect x="610" y="360" width="250" height="130" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
-    <text x="635" y="420" fill="#38bdf8" font-size="46" font-weight="800">9</text>
-    <text x="635" y="455" fill="#e6edf3" font-size="21" font-weight="700">State &amp; Files</text>
-    <text x="635" y="478" fill="#8b98a9" font-size="16">storage, fixtures, recording</text>
-    <rect x="880" y="360" width="250" height="130" rx="16" fill="#1d4ed8"/>
-    <text x="905" y="420" fill="#ffffff" font-size="46" font-weight="800">6</text>
-    <text x="905" y="455" fill="#ffffff" font-size="19" font-weight="700">Motion &amp; Performance</text>
-    <text x="905" y="478" fill="#cfe6ff" font-size="16">animations, traces, video</text>
+    <rect x="70" y="190" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="130" y="254" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">13</text>
+    <text x="178" y="232" fill="#e6edf3" font-size="20" font-weight="700">Navigation</text>
+    <text x="178" y="258" fill="#8b98a9" font-size="16">tabs, windows, screenshots</text>
+    <rect x="430" y="190" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="490" y="254" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">11</text>
+    <text x="538" y="232" fill="#e6edf3" font-size="20" font-weight="700">Interaction</text>
+    <text x="538" y="258" fill="#8b98a9" font-size="16">click, forms, upload, dialogs</text>
+    <rect x="790" y="190" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="850" y="254" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">12</text>
+    <text x="898" y="232" fill="#e6edf3" font-size="20" font-weight="700">DOM &amp; Inspection</text>
+    <text x="898" y="258" fill="#8b98a9" font-size="16">read, extract, query, CSS</text>
+    <rect x="70" y="300" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="130" y="364" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">8</text>
+    <text x="178" y="342" fill="#e6edf3" font-size="20" font-weight="700">Debug &amp; Network</text>
+    <text x="178" y="368" fill="#8b98a9" font-size="16">console, network, mocking</text>
+    <rect x="430" y="300" width="340" height="96" rx="16" fill="#1d4ed8"/>
+    <text x="490" y="364" fill="#ffffff" font-size="44" font-weight="800" text-anchor="middle">2</text>
+    <text x="538" y="342" fill="#ffffff" font-size="20" font-weight="700">WebMCP</text>
+    <text x="538" y="368" fill="#cfe6ff" font-size="16">tools the page declares</text>
+    <rect x="790" y="300" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="850" y="364" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">5</text>
+    <text x="898" y="342" fill="#e6edf3" font-size="20" font-weight="700">Visual &amp; Responsive</text>
+    <text x="898" y="368" fill="#8b98a9" font-size="16">pixel diff, viewport, media</text>
+    <rect x="70" y="410" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="130" y="474" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">2</text>
+    <text x="178" y="452" fill="#e6edf3" font-size="20" font-weight="700">Audits</text>
+    <text x="178" y="478" fill="#8b98a9" font-size="16">a11y, SEO, security, links</text>
+    <rect x="430" y="410" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="490" y="474" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">10</text>
+    <text x="538" y="452" fill="#e6edf3" font-size="20" font-weight="700">State &amp; Files</text>
+    <text x="538" y="478" fill="#8b98a9" font-size="16">storage, recording, files</text>
+    <rect x="790" y="410" width="340" height="96" rx="16" fill="#16283f" stroke="#24405e" stroke-width="2"/>
+    <text x="850" y="474" fill="#38bdf8" font-size="44" font-weight="800" text-anchor="middle">6</text>
+    <text x="898" y="452" fill="#e6edf3" font-size="20" font-weight="700">Motion &amp; Performance</text>
+    <text x="898" y="478" fill="#8b98a9" font-size="16">animations, traces, video</text>
   </g>
 
   <!-- tagline -->

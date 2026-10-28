@@ -9,7 +9,7 @@
 
   <!-- titolo -->
   <text x="70" y="105" fill="#ffffff" font-size="52" font-weight="800">Some jobs never touch the model at all.</text>
-  <text x="70" y="152" fill="#9db7d8" font-size="26">The same 63 tools also run from your shell — filter with grep before anything costs a token.</text>
+  <text x="70" y="152" fill="#9db7d8" font-size="26">The same 69 tools also run from your shell — filter with grep before anything costs a token.</text>
 
   <!-- nodo di partenza -->
   <circle cx="150" cy="330" r="46" fill="#1d4ed8"/>

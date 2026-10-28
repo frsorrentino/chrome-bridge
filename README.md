@@ -4,120 +4,158 @@
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Node 18+](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![Chrome 135+](https://img.shields.io/badge/chrome-%E2%89%A5135-blue) ![Tests](https://img.shields.io/badge/tests-388%20unit%20%2B%2041%20e2e-brightgreen) [![Chrome Web Store](https://img.shields.io/badge/web%20store-published-blue)](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb) [![Chrome Bridge MCP on mcprush](https://mcprush.com/badge/chrome-bridge-mcp/score.svg)](https://mcprush.com/to/chrome-bridge-mcp?ref=badge)
 
-**Claude Code borrows a tab from the Chrome you are already using — signed in,
-with your extensions and your cookies — works in it, and hands it back. What
-only a person can do (a login, a 2FA code, a CAPTCHA, a choice) comes back to
-you through `handoff`: a banner in the page, you act, the agent continues.**
+**Claude Code drives the Chrome you are already using — signed in, with your
+extensions and your cookies. 69 tools: navigation, forms, DOM inspection,
+network mocking, visual regression, audits, performance traces and the
+WebMCP tools a page declares. Self-hosted, local-only, no paid plan, works on
+ChromeOS.**
 
-Measured against the official browser extension (paired runs, 29/09/2026, n=5
-per task, same model): filling a form, 4.7× fewer turns and 2.8× lower cost;
-finding one row in a 1,500-row table, 2.3× fewer turns and 3.4× lower cost;
-debugging a broken page, 9.3× fewer turns and 4.3× lower cost. 15 correct
-answers out of 15, against 12 ([bench/RESULTS.md](bench/RESULTS.md)). ~3× the toolset and no paid plan. 60
-web-development tools (navigation, DOM inspection, visual regression, audits,
-network mocking) over a local WebSocket bridge, plus a headless instance for
-CI. Self-hosted, local-only. Works on ChromeOS.
+Measured against the official Claude in Chrome extension on the same tasks
+(paired runs, 17/10/2026, Claude Code 2.1.302, n=5 per task, medians):
 
-![The same form filled in 3 turns instead of 14 — 4.7× fewer turns on the form, 2.8-4.3× lower cost on form, 1,500-row table and debugging (paired runs, 29/09/2026, n=5)](assets/readme/card1-race.png)
+| Task | Chrome Bridge | Claude in Chrome | Fewer turns | Lower cost |
+|---|---|---|---:|---:|
+| Fill a form | 3 turns · $0.043 | 15 turns · $0.236 | **5.0×** | **5.5×** |
+| Find one row in a 1,500-row table | 3 turns · $0.039 | 6 turns · $0.154 | **2.0×** | **3.9×** |
+| Debug a broken page | 6 turns · $0.091 | 31 turns · $0.559 | **5.2×** | **6.1×** |
+
+15 correct answers out of 15, against 14. Method, every run and the caveats in
+[docs/EFFICIENCY.md](docs/EFFICIENCY.md).
 
 ## Quickstart
 
-**Requires** Node.js 18+ and Chrome 135+.
+1. In a Claude Code session:
+   ```
+   /plugin install chrome-bridge --marketplace frsorrentino/chrome-bridge
+   ```
+   From a shell, the same: `claude plugin install chrome-bridge --marketplace frsorrentino/chrome-bridge`.
+2. Add the extension from the [Chrome Web
+   Store](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb).
+3. Restart Claude Code.
+
+Then ask for something like *"open localhost:3000, run an accessibility audit
+and find the Sign Up button"*: Claude Code calls `navigate`, `audit` and
+`find_text`. Because `navigate` already returns element refs,
+`click(ref="n1")` follows with no discovery turn in between.
+
+For `execute_js`, enable **Allow user scripts** in `chrome://extensions` →
+Chrome Bridge → Details.
+
+The plugin registers the MCP server from npm together with the recipes skill.
+Requires Node.js 18+ and Chrome 135+.
+
+<details>
+<summary>Older Claude Code, from source, Windows, Chrome 135-137, one path only</summary>
+
+**Older Claude Code.** The one-command install needs Claude Code 2.1.275+ in a
+session and 2.1.292+ from a shell. Before that, add the marketplace first:
+`/plugin marketplace add frsorrentino/chrome-bridge`, then
+`/plugin install chrome-bridge@chrome-bridge` (from a shell:
+`claude plugin marketplace add frsorrentino/chrome-bridge`, then
+`claude plugin install chrome-bridge@chrome-bridge`).
+
+**From source:**
 
 ```bash
 git clone https://github.com/frsorrentino/chrome-bridge.git
 cd chrome-bridge && ./install.sh
 ```
 
-1. Open `chrome://extensions`, enable **Developer mode**, click **Load
-   unpacked**, select the `extension/` folder.
-2. Restart Claude Code.
-
-Then ask for something like *"open localhost:3000, run an accessibility audit
-and find the Sign Up button"*: Claude Code calls `navigate`,
-`audit` and `find_text`. Because `navigate` already returns
-element refs, `click(ref="n1")` follows with no discovery turn in between.
-
-> **On ChromeOS/Crostini** install from the [Chrome Web
-> Store](https://chromewebstore.google.com/detail/chrome-bridge-for-claude/bioknpaeahidbelaljjohjofiloeodmb)
-> instead: an unpacked extension is dropped on every reboot, because the
-> container isn't mounted when Chrome starts.
-
-> **On Windows** `install.sh` does not run from PowerShell or cmd. Use the
-> plugin path below (`claude plugin marketplace add frsorrentino/chrome-bridge`,
-> then `claude plugin install chrome-bridge@chrome-bridge`) with the extension
-> from the Web Store, or run `install.sh` from Git Bash. The plugin's error
-> log hooks run in Git Bash, as Claude Code runs every hook, and need Python
-> 3.8+ as `python3`, `python` or `py` (the Microsoft Store `python3` alias is
-> skipped); without Python they stay silent and the tools work the same. For
-> launch mode see `CHROME_BRIDGE_BROWSER` below: Google Chrome cannot load the
-> extension there, Microsoft Edge can.
-
-`install.sh` registers the MCP server with `--scope user`. To do it by hand:
+Then open `chrome://extensions`, enable **Developer mode**, click **Load
+unpacked**, select the `extension/` folder, and restart Claude Code.
+`install.sh` registers the MCP server with `--scope user`; by hand:
 `claude mcp add --scope user chrome-bridge node /path/to/server/index.js`.
-For `execute_js`, enable **Allow user scripts** in `chrome://extensions` →
-Chrome Bridge → Details (on Chrome 135-137, enable Developer Mode instead).
+On ChromeOS/Crostini use the Web Store extension instead: an unpacked one is
+dropped on every reboot, because the container isn't mounted when Chrome
+starts.
 
-**As a plugin, without a clone:** inside a Claude Code session,
-`/plugin install chrome-bridge --marketplace frsorrentino/chrome-bridge`
-(one command, Claude Code 2.1.275+; on older versions `/plugin marketplace add
-frsorrentino/chrome-bridge` then `/plugin install chrome-bridge@chrome-bridge`).
-From a shell, `claude plugin install` has no `--marketplace` option: run
-`claude plugin marketplace add frsorrentino/chrome-bridge`, then
-`claude plugin install chrome-bridge@chrome-bridge`. Either way the plugin
-registers the MCP server from npm (all capabilities) together with the recipes
-skill; clients that read [Agent Plugins 1.0](https://agent-plugins.org) get the
-same from `plugin.json` + `mcp.json`. The extension still comes from the Web
-Store or `extension/`. Pick one path: the plugin and `install.sh` would
-register the same server twice, and so would a plugin added from the
-[Anthropic directory](https://claude.ai/directory) on claude.ai (it reaches
-Claude Code as `chrome-bridge@synced`) next to a marketplace install. In
-claude.ai chat the plugin loads only the recipes skill: the tools need Claude
-Code, or Cowork running on your computer, where the local MCP server can start.
+**Windows.** `install.sh` does not run from PowerShell or cmd: use the plugin
+with the Web Store extension, or run `install.sh` from Git Bash. The plugin's
+error log hooks run in Git Bash, as Claude Code runs every hook, and need
+Python 3.8+ as `python3`, `python` or `py` (the Microsoft Store `python3` alias
+is skipped); without Python they stay silent and the tools work the same. For
+launch mode see `CHROME_BRIDGE_BROWSER` below: Google Chrome cannot load the
+extension there, Microsoft Edge can.
+
+**Chrome 135-137.** `execute_js` needs Developer Mode instead of the **Allow
+user scripts** toggle.
+
+**One path only.** The plugin and `install.sh` would register the same server
+twice, and so would a plugin added from the [Anthropic
+directory](https://claude.ai/directory) on claude.ai (it reaches Claude Code as
+`chrome-bridge@synced`) next to a marketplace install. In claude.ai chat the
+plugin loads only the recipes skill: the tools need Claude Code, or Cowork
+running on your computer, where the local MCP server can start. Clients that
+read [Agent Plugins 1.0](https://agent-plugins.org) get the same from
+`plugin.json` + `mcp.json`.
+
+</details>
+
+![The same form filled in 3 turns instead of 15 — 5× fewer turns on the form, 3.9-6.1× lower cost on form, 1,500-row table and debugging (paired runs, 17/10/2026, n=5)](assets/readme/card1-race.png)
+
+## Why it takes fewer turns
+
+- **Refs, not screenshots.** `navigate` returns the page's interactive
+  elements as short refs (`n1`, `n2`…), so the next call is the click, not a
+  screenshot and a coordinate guess.
+- **One call for a whole form.** `fill_form` fills N fields and submits in the
+  same call.
+- **Filtering on the server.** `extract_table` with `where` and `columns`
+  returns the matching rows of a 1,500-row table, not the table.
+- **Debugging starts with the answer.** `navigate` reports the first console
+  error mapped to its source line and the failed requests with their status;
+  `get_css_styles` names the rule behind a style and flags undefined CSS
+  variables.
+- **Deferred loading.** 22 tools stay in context; the rest of the 46 in the
+  default set wait behind Claude Code's tool search (2.1.285+), and loading
+  one mid-session does not invalidate the prompt cache. The 23 tools in seven
+  optional groups switch on mid-session with `get_status({enable: [...]})`,
+  no restart.
 
 ## Your browser, your login
 
 No blank profile, no debugging port, no cloud browser. The extension runs in
 your Chrome, so every site you are signed into is already open to the agent:
-webmail, the hosting panel, a client's back office, a staging site behind
-basic auth. Tabs the agent opens are marked as its own and closed when the
-session ends; your tabs stay yours.
+webmail, the hosting panel, a back office, a staging site behind basic auth.
+Tabs the agent opens are marked as its own and closed when the session ends;
+your tabs stay yours. Several Claude Code sessions share the same browser: the
+second one becomes a relay on the first one's bridge.
 
-When a page asks for something only you can give, the agent does not guess and
-never types credentials. `handoff` shows a banner in the page with what it
-needs — "complete the login with your 2FA, then press Done", "click the button
-you mean" — waits for you, and continues from where you left it, redirects
-included. It can also ask a question in the banner and read your typed reply,
-or let you pick one or more elements on the page.
+**WebMCP.** When a page declares its own tools through
+[WebMCP](https://github.com/webmachinelearning/webmcp), `navigate` and
+`get_interactives` say so in one line, `webmcp_tools` lists them and
+`webmcp_call` runs one, with a timeout. Needs the WebMCP flag or origin trial
+in Chrome; `get_status` reports whether it is on.
 
-## Why Chrome Bridge?
+**Limits you can set.** `upload_file` refuses keys and credentials
+(`~/.ssh`, `.env*`, `*.pem`, …) and `--read-root` fences it to one directory;
+`--write-root` fences every path the model writes; `--no-js` removes arbitrary
+JavaScript. The agent never types credentials: for a login, a 2FA code or a
+choice, `handoff` shows a banner in the page and waits for you.
+
+## Compared
 
 | | Chrome Bridge | Claude in Chrome | Chrome DevTools MCP | Playwright MCP |
 |---|---|---|---|---|
 | **ChromeOS / Crostini** | **Yes** (real host) | No | Container only | Container only |
-| **Tools** | **60** (43 core) | 22 | 29 default (56 with flags) | 24 core (71 total) |
+| **Tools** | **69** (46 default, 22 always loaded) | 22 | 29 default (56 with flags) | 24 core (71 total) |
 | **Requires paid plan** | **No** | Yes (Pro+) | No | No |
+| **WebMCP (tools the page declares)** | **Yes** | No | Yes | Yes |
 | **Network mocking** | **Yes** (stub/headers) | No | No | Yes |
 | **Visual regression** | **Yes** (`screenshot_diff`) | No | No | No |
 | **Audits (a11y/SEO/sec)** | **Yes** (one call, report on disk) | No | Lighthouse | No |
+| **Performance trace** | **Yes** (`perf_trace`, `lighthouse`) | No | Yes | Playwright trace only |
+| **Screen recording** | **Yes** (`screencast`, mp4/webm) | Yes (GIF) | Partial | Yes (video) |
+| **Heap snapshot** | **Yes** (launch mode) | No | Yes | No |
+| **Breakpoints** | No | No | **Yes** | No |
 | **Headless / CI** | **Yes** | No | Yes | Yes |
-| **GIF / video** | No | **Yes** | Partial | No |
-| **Breakpoints / heap** | No | No | **Yes** | No |
 
 Codex for Chrome (OpenAI, May 2026) sits in the Claude in Chrome column: an
 official extension with the `debugger` permission, macOS and Windows only,
 the ChatGPT app required. Claude in Chrome documents Linux desktop since
-September 2026; ChromeOS and WSL stay out. Competitor figures measured on
-2026-09-01 and 2026-09-11 (`docs/analisi-2026-09-11-concorrenti.md`).
-
-It wins on **round trips** — short element refs instead of the
-screenshot-and-click loop, `fill_form` filling N fields in one call — and, on
-big pages, on **payload**: table filtering is done server-side. On the form, per single turn it actually costs
-slightly *more*.
-
-The full benchmark — method, every raw run including the unfavourable ones, and
-what the harness can't measure — is in
-[docs/EFFICIENCY.md](docs/EFFICIENCY.md).
+September 2026; ChromeOS and WSL stay out. Competitor tool counts measured on
+2026-09-01 and 2026-09-11 (`docs/analisi-2026-09-11-concorrenti.md`); WebMCP, recording and
+tracing rows checked in their documentation on 2026-10-28.
 
 ![Claude checks its own work: console errors, pixel diffs, network mocking and audits](assets/readme/card5-devloop.png)
 
@@ -165,11 +203,12 @@ user-script toggle isn't available.
 ## Tools
 
 69 in total. `core` (46 tools: every tool used in 101 real sessions, plus the
-two WebMCP tools) loads by default; the other 23 sit in seven optional caps that the agent switches on
-mid-session with `get_status({enable: ["visual"]})`, with no restart
-(`--caps` still sets them at startup).
+two WebMCP tools) loads by default, 22 of them always in context; the other 23
+sit in seven optional caps that the agent switches on mid-session with
+`get_status({enable: ["visual"]})`, with no restart (`--caps` still sets them
+at startup).
 
-![69 tools in eight groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
+![69 tools in nine groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
 
 | Group | N | What's in it |
 |---|---|---|
@@ -177,6 +216,7 @@ mid-session with `get_status({enable: ["visual"]})`, with no restart
 | Interaction | 11 | `click`, `fill_form`, `upload_file`, dialogs, clipboard |
 | DOM & Inspection | 12 | `read_page`, `extract`, `extract_table`, `query_dom`, `get_css_styles`, `watch_dom` |
 | Debugging & Network | 8 | `execute_js`, console, network log, mocking, `track_events` |
+| WebMCP | 2 | `webmcp_tools`, `webmcp_call`: the tools a page declares |
 | Visual & Responsive | 5 | `screenshot_diff`, viewport and zoom, media emulation |
 | Audits | 2 | `audit` (a11y, keyboard, SEO, security, links, vitals, css, resources, cache in one call), `cookie_audit` |
 | State, Storage & Files | 10 | storage, fixtures, MHTML, `capture_downloads` (exports saved with no "Save as" dialog), recording, `assert` |
@@ -199,7 +239,8 @@ executes commands through Chrome APIs. User scripts (`execute_js`) run via
 
 ## Configuration and security
 
-Environment variables, each with a matching CLI flag:
+<details>
+<summary>Environment variables, each with a matching CLI flag</summary>
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -213,6 +254,8 @@ Environment variables, each with a matching CLI flag:
 | `CHROME_BRIDGE_BROWSER` | unset | Launch mode only: the browser binary, e.g. `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Unset: the first of Chromium, Edge, Brave, Google Chrome found in the standard paths (on Linux Chromium, then Google Chrome). Google Chrome 137+ cannot load the extension |
 | `CHROME_BRIDGE_OBSERVE` | unset | `off` stops the local error log below. The plugin sets `hook`: its hooks keep the log and the server stays out of it |
 | `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
+
+</details>
 
 The bridge binds loopback, accepts extension connections only from a
 `chrome-extension://` origin, and — when a token is set — requires it on both
@@ -296,6 +339,9 @@ count.
 
 ## Troubleshooting
 
+<details>
+<summary>Symptoms and fixes</summary>
+
 | Symptom | Cause / fix |
 |---|---|
 | `Chrome extension not connected` | Extension disabled, or its port differs from the server's. The error names the actual host/port; check them in the popup (⚙). |
@@ -314,11 +360,14 @@ count.
 | `claude mcp get` shows no command, arguments or environment | Expected with the plugin: since Claude Code 2.1.285 it hides them for stdio servers that plugins provide (variable names stay). `get_status` reports the server and extension versions, mode, host, port and caps; `/mcp` shows the connection. |
 | Popup says «In attesa: un altro browser è collegato», `get_status` lists `refused_browsers` | Two browsers with the extension reach the same port. The one already connected keeps the bridge; the other retries every 15 s and takes over when the first disconnects. `get_status` → `browser` names the connected one. Before this, the last one to connect took over silently. |
 
+</details>
+
 ## Documentation
 
 - [docs/TOOLS.md](docs/TOOLS.md) — all 69 tools, by group
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) — what the bridge gets past and what it does not, one dated state per wall
 - [docs/EFFICIENCY.md](docs/EFFICIENCY.md) — the benchmark and the design behind it
+- [docs/misure/2026-10-token-cache-vs-claude-in-chrome.md](docs/misure/2026-10-token-cache-vs-claude-in-chrome.md) — the 17/10 paired set and the prompt-cache breakdown (Italian)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — latency per tool on the real path, `npm run bench:latency`
 - [bench/RESULTS.md](bench/RESULTS.md) — raw runs and inclusion rule
 - [CHANGELOG.md](CHANGELOG.md)

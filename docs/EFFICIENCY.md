@@ -2,6 +2,31 @@
 
 ## The benchmark
 
+### Latest set: 17/10/2026, Claude Code 2.1.302
+
+Same model (Claude Sonnet 5), same tasks, arms alternated run by run, **all
+runs included** — n=5 per arm and per task, Chrome Bridge at commit `ae8606c`
+with its default core set. Medians, range in brackets.
+
+| Task | Chrome Bridge | Claude in Chrome | Ratio |
+| :--- | :--- | :--- | :--- |
+| **Form fill** | 3 turns (3) / $0.043 | 15 turns (14-15) / $0.236 | **5.00× turns, 5.48× cost** |
+| **1500-row table lookup** | 3 turns (3-4) / $0.039 | 6 turns (5-7) / $0.154 | **2.00× turns, 3.94× cost** |
+| **Debug a broken page** | 6 turns (4-8) / $0.091 | 31 turns (21-39) / $0.559 | **5.17× turns, 6.14× cost** |
+
+Correct answers: 15/15 for Chrome Bridge, 14/15 for Claude in Chrome.
+
+Part of the cost ratio is not design: on Claude Code 2.1.302 Claude in Chrome
+rewrites about 19k tokens of prompt cache at its first tool search (15 runs out
+of 15), Chrome Bridge never does (0 of 15). Should Claude Code change that, the
+cost ratio would fall towards 2-4×; the turn counts would not move. Method,
+cache breakdown and raw figures, in Italian:
+[misure/2026-10-token-cache-vs-claude-in-chrome.md](misure/2026-10-token-cache-vs-claude-in-chrome.md).
+Absolute costs are lower than on 29/09 for both arms: these runs were on a
+machine whose startup hooks keep the session prompt cacheable.
+
+### Previous set: 29/09/2026
+
 Same model (Claude Sonnet 5), same tasks, same morning and same `claude`
 version, **all runs included** — n=5 per arm and per task, 29/09/2026, Chrome
 Bridge 1.25.1 (commit `32b230c`) with its default core set (43 at the time).
