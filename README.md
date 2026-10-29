@@ -106,10 +106,10 @@ read [Agent Plugins 1.0](https://agent-plugins.org) get the same from
   error mapped to its source line and the failed requests with their status;
   `get_css_styles` names the rule behind a style and flags undefined CSS
   variables.
-- **Deferred loading.** 22 tools stay in context; the rest of the 46 in the
+- **Deferred loading.** 22 stay in context; the rest of the 46 in the
   default set wait behind Claude Code's tool search (2.1.285+), and loading
-  one mid-session does not invalidate the prompt cache. The 23 tools in seven
-  optional groups switch on mid-session with `get_status({enable: [...]})`,
+  one mid-session does not invalidate the prompt cache. The other 23, in seven
+  optional groups, switch on mid-session with `get_status({enable: [...]})`,
   no restart.
 
 ## Your browser, your login

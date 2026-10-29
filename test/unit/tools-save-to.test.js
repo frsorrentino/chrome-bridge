@@ -84,3 +84,49 @@ test('screenshot con save_to scrive il PNG e non manda l\'immagine al modello', 
     await rm(path, { force: true });
   }
 });
+
+// Dalle note di claude-observe (ottobre): save_to in una cartella che non c'è
+// ancora dava ENOENT (http_request ×8, execute_js ×2), e save_to uguale a una
+// cartella dava EISDIR dopo aver già fatto lo screenshot (×4). Un turno perso
+// per un mkdir o per un nome di file.
+test('save_to crea le cartelle che mancano', async () => {
+  const dir = out('nuova');
+  const path = join(dir, 'a', 'b', 'res.txt');
+  try {
+    const handlers = build({ result: 'ciao' });
+    const res = await handlers.get('execute_js').handler({ code: '1', save_to: path });
+    assert.equal(await readFile(path, 'utf8'), 'ciao');
+    assert.match(res.content[0].text, /res\.txt/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('http_request con save_to crea le cartelle che mancano', async () => {
+  const dir = out('scarico');
+  const path = join(dir, 'sotto', 'file.bin');
+  try {
+    const handlers = build({ status: 200, headers: {}, body_b64: Buffer.from('xyz').toString('base64') });
+    await handlers.get('http_request').handler({ url: 'https://example.com/f.bin', save_to: path });
+    assert.equal(await readFile(path, 'utf8'), 'xyz');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('save_to che è una cartella: il file va dentro, con un nome generato', async () => {
+  const { mkdir, readdir } = await import('node:fs/promises');
+  const dir = out('cartella');
+  await mkdir(dir, { recursive: true });
+  try {
+    const handlers = build({ data: Buffer.from('png').toString('base64'), mimeType: 'image/png' });
+    const res = await handlers.get('screenshot').handler({ save_to: dir });
+    const files = await readdir(dir);
+    assert.equal(files.length, 1, `nella cartella: ${files}`);
+    assert.match(files[0], /\.png$/);
+    assert.equal(await readFile(join(dir, files[0]), 'utf8'), 'png');
+    assert.ok(res.content[0].text.includes(files[0]), 'la risposta non dice il nome scelto');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

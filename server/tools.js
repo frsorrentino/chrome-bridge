@@ -242,14 +242,20 @@ const MIME_BY_EXT = {
  * @returns {Promise<object|null>} risultato dell'attesa, o null se none
  */
 async function applyWaitAfter(send, wait_after, tab_id, since_url) {
-  if (wait_after === 'navigation') {
-    // since_url: l'URL prima dell'azione. Una navigazione veloce può essere già
-    // finita quando l'attesa parte: senza, l'estensione aspettava 5 s un
-    // 'loading' che non arrivava più e rispondeva «No navigation started».
-    return await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id, ...(since_url && { since_url }) });
-  }
-  if (wait_after === 'networkidle') {
-    return await send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
+  try {
+    if (wait_after === 'navigation') {
+      // since_url: l'URL prima dell'azione. Una navigazione veloce può essere già
+      // finita quando l'attesa parte: senza, l'estensione aspettava 5 s un
+      // 'loading' che non arrivava più e rispondeva «No navigation started».
+      return await send(MessageType.WAIT_FOR_NAVIGATION, { timeout: 15000, tab_id, ...(since_url && { since_url }) });
+    }
+    if (wait_after === 'networkidle') {
+      return await send(MessageType.WAIT_FOR_NETWORK_IDLE, { idle_ms: 500, timeout: 15000, tab_id });
+    }
+  } catch (err) {
+    // L'azione è già avvenuta: un errore qui faceva leggere al modello un click
+    // fallito, e lo ripeteva (nota di claude-observe del 21/10).
+    return { done: false, error: err?.message ?? String(err), note: 'the action itself ran; only the wait failed: do not repeat it, check the page instead' };
   }
   return null;
 }
@@ -302,9 +308,23 @@ const DEFER_META = { 'anthropic/alwaysLoad': false };
 const saveToField = (what) => z.string().optional()
   .describe(`Absolute path: write ${what} there and return the path instead of the content`);
 
-async function savedSummary(path, bytes, extra = {}) {
-  await writeFile(path, bytes);
-  return { content: [{ type: 'text', text: jsonText({ saved: path, bytes: bytes.length, ...extra }) }] };
+// save_to scritto così com'è dava ENOENT con una cartella da creare e EISDIR
+// con una cartella esistente, a lavoro già fatto (note di claude-observe,
+// ottobre). Le cartelle mancanti si creano; una cartella riceve un file con un
+// nome generato. Torna il percorso davvero scritto.
+async function writeSaved(path, bytes, ext = '') {
+  let target = path;
+  if (/[\\/]$/.test(String(path)) || (await stat(path).catch(() => null))?.isDirectory()) {
+    target = join(path, `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${ext}`);
+  }
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, bytes);
+  return target;
+}
+
+async function savedSummary(path, bytes, extra = {}, ext = '') {
+  const saved = await writeSaved(path, bytes, ext);
+  return { content: [{ type: 'text', text: jsonText({ saved, bytes: bytes.length, ...extra }) }] };
 }
 
 const selectorField = (extra = '') => z.string()
@@ -597,7 +617,15 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       // fallisce fino al prossimo navigate. Un solo ritentativo sulla tab
       // attiva salva un turno intero al modello.
       const gone = /No tab with id|No active tab|No tab found/i.test(err?.message ?? '');
-      if (!gone || !implicitTab) throw err;
+      if (!gone) throw err;
+      // tab_id esplicito di una scheda chiusa: il messaggio nudo faceva
+      // ritentare lo stesso id (note di claude-observe, ottobre).
+      if (!implicitTab) {
+        if (/No tab with id/i.test(err.message) && !/get_tabs/.test(err.message)) {
+          err.message = `${err.message.replace(/\.$/, '')} — the tab was closed or replaced: get_tabs lists the open ones and why this one ended; omit tab_id for the active tab`;
+        }
+        throw err;
+      }
       sessionTabId = null;
       const { tab_id: _drop, ...retry } = params;
       const data = await wsManager.sendCommand(type, retry);
@@ -1061,7 +1089,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       }
       const data = await send(MessageType.SCREENSHOT, { tab_id });
       const b64 = data?.image ?? data?.data;
-      if (save_to && b64) return savedSummary(save_to, Buffer.from(b64, 'base64'), { mimeType: 'image/png' });
+      if (save_to && b64) return savedSummary(save_to, Buffer.from(b64, 'base64'), { mimeType: 'image/png' }, '.png');
       // data.image è base64 PNG. data.viewport (CSS px) è il sistema di
       // riferimento di element_screenshot.region: senza, il modello non sa
       // mappare ciò che vede sull'immagine ridotta a ≤1568px.
@@ -1111,7 +1139,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       if (save_to) {
         const value = data?.result;
         const isString = typeof value === 'string';
-        return savedSummary(save_to, Buffer.from(isString ? value : JSON.stringify(value ?? null), 'utf8'), { format: isString ? 'text' : 'json' });
+        return savedSummary(save_to, Buffer.from(isString ? value : JSON.stringify(value ?? null), 'utf8'), { format: isString ? 'text' : 'json' }, isString ? '.txt' : '.json');
       }
       return { content: [{ type: 'text', text: jsResultText(data, max_length ?? DEFAULT_MAX_OUTPUT) }] };
     }
@@ -1205,7 +1233,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       guardWrite(save_to);
       const data = await send(MessageType.READ_PAGE, { mode, tab_id, frame_id });
       const text = typeof data === 'string' ? data : JSON.stringify(data);
-      if (save_to) return savedSummary(save_to, Buffer.from(text, 'utf8'), { mode: mode ?? 'text' });
+      if (save_to) return savedSummary(save_to, Buffer.from(text, 'utf8'), { mode: mode ?? 'text' }, mode === 'html' ? '.html' : mode === 'markdown' ? '.md' : '.txt');
       return {
         content: [{
           type: 'text',
@@ -2733,8 +2761,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const summary = summarizeAudit(results);
       let text = `audit ${info?.url ?? ''}\n${summary.lines.join('\n')}`;
       if (save_to) {
-        await writeFile(save_to, auditReport({ url: info?.url, title: info?.title, results, summary }));
-        text += `\nreport: ${save_to}`;
+        text += `\nreport: ${await writeSaved(save_to, auditReport({ url: info?.url, title: info?.title, results, summary }), '.md')}`;
       } else {
         text += '\n(pass save_to for the full report with every finding)';
       }
@@ -2993,12 +3020,12 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       if (save_to) {
         // Il base64 non deve mai raggiungere il modello: un PDF di 300 kB sono
         // ~100k token di rumore per un contenuto che va letto da file.
-        await writeFile(save_to, Buffer.from(data.body_b64 ?? '', 'base64'));
+        const saved = await writeSaved(save_to, Buffer.from(data.body_b64 ?? '', 'base64'), extname(new URL(data.url ?? url).pathname) || '.bin');
         return {
           content: [{
             type: 'text',
             text: jsonText({
-              saved: save_to,
+              saved,
               status: data.status,
               ok: data.ok,
               content_type: data.content_type,
@@ -3322,7 +3349,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         }
         return row;
       });
-      if (save_to) return savedSummary(save_to, Buffer.from(JSON.stringify({ total: nodes.length, shown: items.length, items }), 'utf8'), { total: nodes.length, shown: items.length });
+      if (save_to) return savedSummary(save_to, Buffer.from(JSON.stringify({ total: nodes.length, shown: items.length, items }), 'utf8'), { total: nodes.length, shown: items.length }, '.json');
       if ((format ?? 'lines') === 'json') {
         return { content: [{ type: 'text', text: truncateText(JSON.stringify({ total: nodes.length, shown: items.length, items }), max_length, 'max_items or max_length') }] };
       }

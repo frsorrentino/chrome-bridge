@@ -142,3 +142,31 @@ test('click: estensione vecchia senza settle → pausa fissa e seconda lettura',
   assert.ok(delays.includes(150), 'pausa fissa di 150 ms');
   assert.equal(sent.filter((s) => s.type === MessageType.PAGE_FINGERPRINT).length, 3);
 });
+
+// Nota di claude-observe del 21/10: click con wait_after=networkidle, la rete
+// non si ferma mai e il tool rispondeva con l'errore dell'attesa dopo 61 s.
+// Il click però era avvenuto: un modello che legge «errore» lo ripete, e un
+// secondo click su «Invia» o «Paga» è un'azione doppia.
+test('click: se fallisce solo wait_after il click resta riuscito e lo dice', async () => {
+  const { handlers, sent } = build((t) => {
+    if (t === MessageType.PAGE_FINGERPRINT) return fp();
+    if (t === MessageType.CLICK) return { clicked: true, tagName: 'BUTTON' };
+    if (t === MessageType.WAIT_FOR_NETWORK_IDLE) throw new Error('Command wait_for_network_idle timed out after 60000ms (tab 7)');
+    throw new Error(`unexpected ${t}`);
+  });
+  const out = JSON.parse(textOf(await handlers.get('click').handler({ selector: '#paga', wait_after: 'networkidle' })));
+  assert.equal(out.clicked, true);
+  assert.equal(out.wait_after?.done, false);
+  assert.match(out.wait_after?.error ?? '', /timed out/);
+  assert.match(out.wait_after?.note ?? '', /do not repeat/i);
+  assert.equal(sent.filter((s) => s.type === MessageType.CLICK).length, 1);
+});
+
+// Note di claude-observe (navigate ×10, tab_action ×3, screenshot ×3 e altre):
+// un tab_id di una scheda già chiusa dava «No tab with id: N.» e nient'altro;
+// il modello riprovava lo stesso id. Il messaggio ora dice cosa fare.
+test('tab_id di una scheda chiusa: l\'errore indica get_tabs', async () => {
+  const { handlers } = build(() => { throw new Error('No tab with id: 483601807.'); });
+  await assert.rejects(handlers.get('tab_action').handler({ action: 'reload', tab_id: 483601807 }),
+    (e) => /No tab with id: 483601807/.test(e.message) && /get_tabs/.test(e.message) && /closed/.test(e.message));
+});

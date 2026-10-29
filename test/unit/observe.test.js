@@ -298,7 +298,7 @@ test('il wrapper dei tool passa all\'osservatore gli errori, e l\'errore arriva 
   await assert.rejects(handlers.get('navigate')({ url: 'https://a.it' }), /No tab with id: 5/);
   assert.equal(seen.length, 1);
   assert.equal(seen[0][0], 'navigate');
-  assert.equal(seen[0][2], 'No tab with id: 5.');
+  assert.match(seen[0][2], /^No tab with id: 5/);
 });
 
 // Preflight della release (npm test gira prima del tag): la copia del plugin
