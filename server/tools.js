@@ -671,6 +671,9 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
         reg.bySel.set(selKey(frame, e.selector), ref);
         reg.byRef.set(ref, { selector: e.selector, frame });
       }
+      // Quel che il modello ha visto per ultimo con questo ref: il controllo
+      // STALE_REF lo confronta con la pagina prima di agire.
+      if (e.tag) Object.assign(reg.byRef.get(ref), { tag: String(e.tag).toLowerCase(), text: e.text ?? '' });
       e.ref = ref;
     }
     while (reg.byRef.size > REFS_MAX) {
@@ -743,6 +746,47 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return { selector: entry.selector, frame_id: entry.frame || frame_id };
     }
     throw new Error('Either selector or ref is required');
+  }
+
+  // STALE_REF: fra get_interactives e l'azione la pagina può cambiare, e lo
+  // stesso selettore trovare un altro elemento (una riga tolta da una lista:
+  // "li:nth-of-type(2)" è ora la successiva). Prima di agire per ref si
+  // rilegge l'elemento: assente, tag diverso o etichetta che non c'è più vuol
+  // dire scaduto, e l'azione non parte. L'etichetta si controlla solo dove
+  // viene dall'elemento stesso (testo o attributi): un campo con <label for>
+  // o aria-labelledby la prende da fuori e lì conta il tag. Se la rilettura
+  // fallisce (chrome://, estensione vecchia) si agisce come prima.
+  const FIELD_TAGS = new Set(['input', 'select', 'textarea']);
+  const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  async function assertFresh(ref, target, tab_id) {
+    const entry = interactivesRefs.get(refsKey(tab_id))?.byRef.get(ref);
+    if (!entry?.tag) return;
+    let el;
+    try {
+      const r = await send(MessageType.QUERY_DOM, { selector: target.selector, limit: 1, tab_id, frame_id: target.frame_id });
+      if (!r || !Array.isArray(r.elements)) return;
+      el = r.elements[0];
+    } catch {
+      return;
+    }
+    const seen = `${entry.tag}${entry.text ? ` «${entry.text}»` : ''}`;
+    const stale = (now) => new Error(`STALE_REF: ref ${ref} was ${seen}, but the page changed and ${now}. Nothing was done: run get_interactives again and use the new ref`);
+    if (!el) throw stale('its selector no longer matches anything');
+    const tag = norm(el.tagName);
+    if (tag !== entry.tag) throw stale(`its selector now finds a <${tag}>`);
+    const attrs = el.attributes ?? {};
+    const label = norm(entry.text).slice(0, 40);
+    if (label.length < 2 || FIELD_TAGS.has(tag) || attrs['aria-labelledby'] != null) return;
+    if (!norm(`${el.textContent ?? ''} ${Object.values(attrs).join(' ')}`).includes(label)) {
+      throw stale(`its selector now finds ${el.textContent ? `«${String(el.textContent).trim().slice(0, 60)}»` : 'another element'}`);
+    }
+  }
+
+  // resolveTarget più il controllo STALE_REF quando il bersaglio è un ref.
+  async function freshTarget(selector, ref, tab_id, frame_id) {
+    const t = resolveTarget(selector, ref, tab_id, frame_id);
+    if (!selector && ref) await assertFresh(ref, t, tab_id);
+    return t;
   }
 
   // Impronta della pagina per il delta post-azione (page_changed): DOM in
@@ -1164,7 +1208,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, force, button, count, trusted, wait_after, tab_id, frame_id }) => {
-      const { selector: target, frame_id: frame } = resolveTarget(selector, ref, tab_id, frame_id);
+      const { selector: target, frame_id: frame } = await freshTarget(selector, ref, tab_id, frame_id);
       const before = await tabSnapshot(tab_id);
       const data = await send(MessageType.CLICK, { selector: target, force, button: button ?? 'left', count: count ?? 1, ...(trusted && { trusted: true }), frame_id: frame, tab_id });
       // Niente attesa se il click non è andato a buon fine (es. elemento occluso)
@@ -1200,7 +1244,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, text, mode, wait_after, tab_id, frame_id }) => {
-      const { selector: target, frame_id: frame } = resolveTarget(selector, ref, tab_id, frame_id);
+      const { selector: target, frame_id: frame } = await freshTarget(selector, ref, tab_id, frame_id);
       const data = await send(MessageType.TYPE_TEXT, { selector: target, text, mode, tab_id, frame_id: frame });
       const waited = await applyWaitAfter(send, wait_after, tab_id);
       const out = waited ? { ...data, wait_after: waited } : data;
@@ -1634,13 +1678,13 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       const refFrames = new Set(fields.filter((f) => f.ref).map((f) => resolveTarget(undefined, f.ref, tab_id, frame_id).frame_id ?? 0));
       if (refFrames.size > 1) throw new Error(`fill_form: the refs come from frames ${[...refFrames].join(', ')}; one call fills one frame`);
       if (frame_id == null && refFrames.size === 1) { const [f0] = refFrames; if (f0) frame_id = f0; }
-      const resolved = fields.map((f) => {
-        const { selector } = resolveTarget(f.ref ? undefined : f.selector, f.ref, tab_id, frame_id);
+      const resolved = await Promise.all(fields.map(async (f) => {
+        const { selector } = await freshTarget(f.ref ? undefined : f.selector, f.ref, tab_id, frame_id);
         const value = f.value ?? (typeof f.checked === 'boolean' ? String(f.checked) : undefined);
         if (value === undefined) throw new Error(`fill_form: field ${f.ref ?? f.selector} needs value or checked`);
         return { selector, value };
-      });
-      const submitSel = submit_ref ? resolveTarget(undefined, submit_ref, tab_id, frame_id).selector : submit_selector;
+      }));
+      const submitSel = submit_ref ? (await freshTarget(undefined, submit_ref, tab_id, frame_id)).selector : submit_selector;
       const [before, textBefore] = await Promise.all([tabSnapshot(tab_id), submitSel ? pageText(tab_id, frame_id) : null]);
       const data = await send(MessageType.FILL_FORM, { fields: resolved, submit_selector: submitSel, tab_id, frame_id });
       const waited = await applyWaitAfter(send, wait_after, tab_id, before?.url);
@@ -2246,7 +2290,7 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       frame_id: frameId,
     },
     async ({ selector, ref, trusted, tab_id, frame_id }) => {
-      const t = resolveTarget(selector, ref, tab_id, frame_id);
+      const t = await freshTarget(selector, ref, tab_id, frame_id);
       const data = await send(MessageType.HOVER, { selector: t.selector, ...(trusted && { trusted: true }), tab_id, frame_id: t.frame_id });
       return {
         content: [{
