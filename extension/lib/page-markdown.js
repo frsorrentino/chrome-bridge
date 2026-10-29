@@ -23,6 +23,10 @@ export function buildMarkdown(doc) {
 
   const attr = (el, name) => (el.getAttribute ? el.getAttribute(name) : null);
   const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+  // childNodes e querySelectorAll sono NodeList nel browser: niente map,
+  // filter né some. Senza la copia in array il markdown tornava vuoto su ogni
+  // pagina dalla 1.11.0 (test nodelist_markdown).
+  const list = (l) => Array.from(l || []);
 
   // Dimensioni: il rect è la verità quando c'è un layout, ma su un'immagine non
   // ancora disposta (o in test) restano solo gli attributi.
@@ -54,7 +58,7 @@ export function buildMarkdown(doc) {
       }
       return '';
     }
-    const kids = (node.childNodes || []).map(inline).join('');
+    const kids = list(node.childNodes).map(inline).join('');
     if (tag === 'A') {
       const href = attr(node, 'href');
       const label = clean(kids);
@@ -70,19 +74,19 @@ export function buildMarkdown(doc) {
     return kids;
   };
 
-  const cellsOf = (row) => (row.childNodes || [])
+  const cellsOf = (row) => list(row.childNodes)
     .filter((n) => n.nodeType === 1 && (n.tagName === 'TD' || n.tagName === 'TH'))
     .map((c) => clean(c.textContent).replace(/\|/g, '\\|'));
 
   const renderTable = (table) => {
-    const rows = (table.querySelectorAll ? table.querySelectorAll('tr') : []) || [];
+    const rows = list(table.querySelectorAll ? table.querySelectorAll('tr') : []);
     if (!rows.length) return;
     const all = rows.map(cellsOf).filter((r) => r.length);
     if (!all.length) return;
 
     // Gli header veri, non un segnaposto: la prima riga se contiene th,
     // altrimenti colonne numerate.
-    const firstHasTh = (rows[0].childNodes || []).some((n) => n.nodeType === 1 && n.tagName === 'TH');
+    const firstHasTh = list(rows[0].childNodes).some((n) => n.nodeType === 1 && n.tagName === 'TH');
     const header = firstHasTh ? all[0] : all[0].map((_, i) => `col${i + 1}`);
     const body = firstHasTh ? all.slice(1) : all;
     const width = header.length;
@@ -139,7 +143,7 @@ export function buildMarkdown(doc) {
 
   // Sommario delle immagini grandi: dice al modello se vale la pena chiedere
   // uno screenshot, al costo di una riga.
-  const imgs = (d.body?.querySelectorAll ? d.body.querySelectorAll('img') : []) || [];
+  const imgs = list(d.body?.querySelectorAll ? d.body.querySelectorAll('img') : []);
   const significant = imgs.filter((img) => { const { w, h } = sizeOf(img); return w >= 100 && h >= 100; });
   if (significant.length) {
     out.push(`_${significant.length} image(s) at least 100x100 on this page — take a screenshot if the visual matters._`, '');

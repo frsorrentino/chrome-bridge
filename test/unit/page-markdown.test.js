@@ -81,3 +81,47 @@ test('script e style non entrano nel testo', () => {
   assert.doesNotMatch(md, /var x=1/);
   assert.doesNotMatch(md, /color:red/);
 });
+
+// nodelist_markdown: nel browser querySelectorAll e childNodes restituiscono
+// NodeList, che ha forEach e l'iterazione ma non map, filter né some. Dalla
+// 1.11.0 buildMarkdown li chiamava come array: in Chrome l'eccezione faceva
+// tornare read_page mode=markdown vuoto su ogni pagina (canary del benchmark
+// axi, 29/10/2026). fakeDoc usa array veri e non se ne accorgeva: qui le
+// liste sono NodeList finte, solo indice, length, item e iteratore.
+function nodeList(items) {
+  const list = { length: items.length, item: (i) => items[i] ?? null, forEach: (fn) => items.forEach(fn), [Symbol.iterator]: () => items[Symbol.iterator]() };
+  items.forEach((x, i) => { list[i] = x; });
+  return list;
+}
+function nodeListDoc(html, { title = 'T' } = {}) {
+  const root = parse(html);
+  const adapt = (node) => {
+    if (node.nodeType === 3) return { nodeType: 3, textContent: node.rawText };
+    return {
+      nodeType: 1,
+      tagName: (node.rawTagName || '').toUpperCase(),
+      childNodes: nodeList(node.childNodes.map(adapt)),
+      textContent: node.textContent,
+      getAttribute: (n) => node.getAttribute(n) ?? null,
+      querySelector: (sel) => { const f = node.querySelector(sel); return f ? adapt(f) : null; },
+      querySelectorAll: (sel) => nodeList(node.querySelectorAll(sel).map(adapt)),
+    };
+  };
+  return { title, body: adapt(root) };
+}
+
+test('nodelist_markdown: con NodeList vere il markdown non è vuoto', () => {
+  const md = buildMarkdown(nodeListDoc(
+    '<h1>Titolo</h1><p>Testo con <a href="/x">un link</a> e <b>grassetto</b>.</p>'
+    + '<img src="a.png" width="200" height="150" alt="foto">'
+    + '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table><ul><li>uno</li></ul>',
+    { title: 'Pagina' },
+  ));
+  assert.match(md, /^# Pagina/);
+  assert.match(md, /# Titolo/);
+  assert.match(md, /\[un link\]\(\/x\)/);
+  assert.match(md, /\*\*grassetto\*\*/);
+  assert.match(md, /\| A \| B \|/);
+  assert.match(md, /- uno/);
+  assert.match(md, /1 image\(s\)/);
+});
