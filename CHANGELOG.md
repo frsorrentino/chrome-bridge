@@ -28,6 +28,27 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.0 — 2026-10-29
+
+Server only: the extension is unchanged and the manifest stays 1.31.1.
+
+### Added
+
+- `STALE_REF`: before `click`, `type_text`, `hover` or `fill_form` act on a
+  ref, the server reads the element again and compares it with what the
+  model saw when the ref was issued. If the selector now finds nothing, an
+  element with another tag, or an element whose own text and attributes no
+  longer carry the label, the action does not run and the error says to run
+  `get_interactives` again. Before, a row removed from a list made
+  `li:nth-of-type(2)` the next row, and the click landed on it without any
+  error. Fields labelled from outside (`<label for>`, `aria-labelledby`) are
+  checked by tag only. When the element cannot be read (a `chrome://` page,
+  an old extension) the action runs as before. Actions by selector are not
+  checked and cost no extra call. Idea from the chrome-devtools-axi
+  analysis; unlike AXI the refs carry no generation prefix, because
+  chrome-bridge refs stay stable across snapshots and the check is per
+  element, not per page.
+
 ## 1.31.3 — 2026-10-29
 
 Server and plugin only: the extension is unchanged and the manifest stays

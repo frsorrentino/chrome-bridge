@@ -8,7 +8,7 @@
         "--prefix",
         "${PLUGIN_DATA}",
         "-y",
-        "chrome-bridge-mcp@1.31.3"
+        "chrome-bridge-mcp@1.32.0"
       ]
     }
   }
