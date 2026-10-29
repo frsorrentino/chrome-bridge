@@ -28,6 +28,37 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.31.3 — 2026-10-29
+
+Server and plugin only: the extension is unchanged and the manifest stays
+1.31.1. The 128 local claude-observe notes recorded since September were
+triaged; these are the defects of ours among them.
+
+### Fixed
+
+- `save_to` creates the folders it needs. A path in a folder that did not
+  exist yet failed with ENOENT after the work was done (`http_request` 8
+  times, `execute_js` 2). A `save_to` that is an existing folder, or ends
+  with `/`, now receives a file with a generated name and the right
+  extension, instead of EISDIR after the screenshot was already taken
+  (4 times, the last on 1.31.1). The result names the file written.
+- A failed `wait_after` no longer turns a successful click, `type_text` or
+  `fill_form` into an error. A click with `wait_after: networkidle` on a page
+  whose network never went quiet answered with the wait's timeout after 61 s,
+  and a model that reads an error repeats the click. The result now keeps
+  the action's outcome and reports `wait_after: {done: false, error, note}`.
+- A `tab_id` of a tab that no longer exists answers with what to do:
+  `get_tabs` lists the open tabs and why that one ended, or omit `tab_id`.
+  The bare «No tab with id: N.» made models retry the same id (20 notes
+  across `navigate`, `tab_action`, `screenshot`, `click`, `read_form`,
+  `read_console`).
+
+### Changed
+
+- claude-observe synced to 43fd22b: «Always anonymous» sending with a single
+  yes, off by default and revocable; the offer comes back on a repeated
+  error; reported errors get «fixed in X».
+
 ## 1.31.2 — 2026-10-28
 
 Server only: the extension is unchanged and the manifest stays 1.31.1.
