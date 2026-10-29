@@ -28,6 +28,22 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.1 — 2026-10-29
+
+Extension and server: the manifest goes to 1.32.1.
+
+### Fixed
+
+- `read_page` with `mode: "markdown"` returned an empty result on every real
+  page since 1.11.0. The converter runs inside the page and called `map`,
+  `filter` and `some` on `childNodes` and `querySelectorAll` results. In the
+  browser those are NodeLists, which have none of them, so the script threw
+  and the tool answered with nothing. The unit tests built the page from
+  plain arrays and never saw it. The lists are now copied into arrays, and
+  test `nodelist_markdown` builds the page from NodeList-like objects. Live
+  check on Wikipedia, GitHub and example.com: 0 characters on 1.32.0, the
+  page as markdown on 1.32.1. Found by the canary run of the axi benchmark.
+
 ## 1.32.0 — 2026-10-29
 
 Server only: the extension is unchanged and the manifest stays 1.31.1.
