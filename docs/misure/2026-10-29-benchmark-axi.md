@@ -6,9 +6,6 @@ Esito: sulla stessa macchina chrome-bridge 1.32.1 risolve tutti i 14 compiti
 La 1.32.0 perdeva due run su github_issue_investigation per il markdown vuoto
 di read_page, corretto nella 1.32.1.
 
-Documento locale, non pubblicato: numeri, README e post solo con un altro ok di
-Franz.
-
 ## Numeri
 
 Medie a compito. Tutte e tre le serie sono girate su win (Windows, Chrome
@@ -53,7 +50,7 @@ Per compito: token input in migliaia, costo, turni, riuscite.
   le trascrizioni contano 111 chiamate ToolSearch, 1,6 a run. Nella 1.32.1
   non sono state contate.
 - github_repo_stars resta il compito peggiore: 316k token e 10,7 turni contro
-  124k e 4,0 di axi. Va studiato prima di pubblicare un confronto.
+  124k e 4,0 di axi. È il prossimo da studiare.
 - La 1.32.0 aveva 23 letture markdown vuote: read_page `format: markdown`
   restituiva 0 caratteri su ogni pagina reale dalla 1.11.0. Con la 1.32.1
   github_issue_investigation passa da 409k token, 13 turni e 3/5 a 157k,
