@@ -23,8 +23,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/observe/py.sh" "${CLAUDE_PLUGIN_ROOT}/observe/observ
   appears for them.
 - `list [--all]`, `show ID`, `mark ID D|L|S|done` (D our defect, L someone else's limit, S the site's behaviour),
   `export chrome-bridge`.
+- `anonymous off`: turns «Always anonymous» off, so every report asks for the user's yes again (`anonymous status`
+  shows it; it is turned on only by choosing «Always anonymous»).
+- `stats`: the local count of offers shown, choices and reports sent; it never leaves the computer.
 - `add chrome-bridge "what happened" [--error "…"] [--workaround "…"] [--class D|L|S] [--security] [--severity high]`, or
   `add --on ID …` to enrich a record the hook wrote. `--security`: a read or write outside the perimeter, a secret
   exposed, code run that was not asked for, data leaving the computer. `--severity high`: a defect of ours that blocks
   the work (data lost, a wrong command run, a session lost). You set these flags yourself from what you saw; never ask
   the user to classify. Never put secrets, passwords, tokens or a client's personal data in the text.
+
+<!-- plugin-specific: sync.py keeps what is written between this line and the next marker -->
+<!-- end plugin-specific -->

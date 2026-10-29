@@ -65,7 +65,8 @@ VERBS = {"arm", "list", "show", "add", "mark", "export", "report", "hook", "stat
          "open", "close", "check"}
 CLASSES = ("D", "L", "S", "done", "new")
 DEFAULTS = {"enabled": True, "dir": "", "max_records": 2000, "max_days": 90, "anonymizer": "", "blocklist": "",
-            "propose": True, "propose_after": 3, "propose_after_days": 3, "propose_every_days": 7, "language": "", "tools": {},
+            "propose": True, "propose_after": 3, "propose_after_days": 3, "propose_every_days": 7, "propose_repeat": 3,
+            "language": "", "tools": {},
             # l'invio anonimo (25/09/2026): l'endpoint del nostro sito che apre la issue con l'account di servizio, senza il
             # nome dell'utente; vuoto = l'opzione non compare. Con www: senza, il sito risponde 301 e il POST diventa GET
             "endpoint": "https://www.francescosorrentino.com/api/observe/report.php"}
@@ -102,6 +103,18 @@ MSG = {
   "observe.opt_private_desc_nogh": "Apre la pagina «Report a vulnerability» di {repo} nel browser, con il testo da incollare: la vedono solo i maintainer",
   "observe.opt_contact": "Manda all'indirizzo dei maintainer",
   "observe.opt_contact_desc": "Il testo va a {contact} (SECURITY.md), mai in una issue pubblica",
+  "observe.opt_always": "Sempre in forma anonima",
+  "observe.opt_always_desc": "Invia questa in forma anonima e, da ora, gli errori nuovi partono allo stesso modo senza chiedere: solo gli errori, mai le note. Si spegne con /{tool}:observe anonymous off",
+  "observe.always_on": "«Sempre in forma anonima» acceso per {tool}: gli errori nuovi partono in forma anonima senza chiedere, solo gli errori e mai le note. Si spegne con /{tool}:observe anonymous off",
+  "observe.always_off": "«Sempre in forma anonima» spento per {tool}: ogni invio torna a chiedere il tuo sì",
+  "observe.always_status": "«Sempre in forma anonima» per {tool}: {state}",
+  "observe.auto_line": "invio in forma anonima di {n} errori su {tool} («Sempre in forma anonima» è acceso; si spegne con /{tool}:observe anonymous off)",
+  "observe.repeat_line": "lo stesso errore di {tool} è tornato {n} volte in questa sessione: /{tool}:observe send per segnalarlo",
+  "observe.repeat_ctx": "Lo stesso errore di {tool} è tornato {n} volte in questa sessione. In un momento naturale proponi all'utente di segnalarlo: `{cmd} report {tool}` prepara la bozza anonimizzata; mostragliela com'è e chiedi un solo sì.",
+  "observe.fixed_notice": "ERRORE SEGNALATO CORRETTO {tool}: l'errore che l'utente ha segnalato («{call}») è corretto in {tool} {fixed}; {have}. Diglielo in una riga.",
+  "observe.fixed_have_old": "qui c'è la {have}: aggiorna {tool}",
+  "observe.fixed_have_ok": "la versione installata ({have}) lo contiene già",
+  "observe.usage_anonymous": "uso: {cmd} anonymous [off|status] [STRUMENTO]  (si accende solo con la scelta «Sempre in forma anonima»)",
   "observe.opt_later": "Non ora",
   "observe.opt_later_desc": "La proposta torna fra {days} giorni",
   "observe.later": "va bene: la proposta per {tool} torna fra {days} giorni",
@@ -159,6 +172,18 @@ MSG = {
   "observe.opt_private_desc_nogh": "Opens the “Report a vulnerability” page of {repo} in the browser, with the text to paste: only the maintainers see it",
   "observe.opt_contact": "Send to the maintainers' address",
   "observe.opt_contact_desc": "The text goes to {contact} (SECURITY.md), never a public issue",
+  "observe.opt_always": "Always anonymous",
+  "observe.opt_always_desc": "Sends this one anonymously and, from now on, new errors go out the same way without asking: errors only, never notes. Turn it off with /{tool}:observe anonymous off",
+  "observe.always_on": "«Always anonymous» is on for {tool}: new errors go out anonymously without asking, errors only and never notes. Turn it off with /{tool}:observe anonymous off",
+  "observe.always_off": "«Always anonymous» is off for {tool}: every report asks for your yes again",
+  "observe.always_status": "«Always anonymous» for {tool}: {state}",
+  "observe.auto_line": "sending {n} errors on {tool} anonymously («Always anonymous» is on; turn it off with /{tool}:observe anonymous off)",
+  "observe.repeat_line": "the same {tool} error came back {n} times in this session: /{tool}:observe send to report it",
+  "observe.repeat_ctx": "The same {tool} error came back {n} times in this session. At a natural moment offer the user to report it: `{cmd} report {tool}` prepares the anonymized draft; show it as it is and ask for a single yes.",
+  "observe.fixed_notice": "REPORTED ERROR FIXED {tool}: the error the user reported («{call}») is fixed in {tool} {fixed}; {have}. Tell the user in one line.",
+  "observe.fixed_have_old": "this machine has {have}: update {tool}",
+  "observe.fixed_have_ok": "the installed version ({have}) already has it",
+  "observe.usage_anonymous": "usage: {cmd} anonymous [off|status] [TOOL]  (it is turned on only by choosing «Always anonymous»)",
   "observe.opt_later": "Not now",
   "observe.opt_later_desc": "The offer comes back in {days} days",
   "observe.later": "fine: the offer for {tool} comes back in {days} days",
@@ -196,10 +221,14 @@ def expand(p):
     return os.path.expandvars(os.path.expanduser(str(p or "")))
 
 
+def config_path():
+    path = os.environ.get("CLAUDE_OBSERVE_CONFIG") or expand("${XDG_CONFIG_HOME:-~/.config}/claude-observe/config.json")
+    return path.replace("${XDG_CONFIG_HOME:-~/.config}", os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
+
+
 def load_config():
     """~/.config/claude-observe/config.json (o CLAUDE_OBSERVE_CONFIG): uguale per tutte le copie, di tutti i plugin."""
-    path = os.environ.get("CLAUDE_OBSERVE_CONFIG") or expand("${XDG_CONFIG_HOME:-~/.config}/claude-observe/config.json")
-    path = path.replace("${XDG_CONFIG_HOME:-~/.config}", os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"))
+    path = config_path()
     cfg = dict(DEFAULTS)
     try:
         cfg.update(json.load(open(path, encoding="utf-8")) or {})
@@ -250,6 +279,65 @@ def M(key, **kw):
 
 def tools():
     return {TOOL["name"]: TOOL} if TOOL.get("name") and TOOL.get("enabled", True) else {}
+
+
+# «Sempre in forma anonima» (28/10/2026): un si' solo dell'utente, scelto fra le opzioni della domanda, salvato nella
+# config sotto tools.<nome>.always_anonymous; spento di default, si spegne con `anonymous off`. Vale per gli errori
+# scritti dall'hook, mai per le note a mano (testo libero) ne' per le security, che restano sul percorso privato
+def consent(tool):
+    return bool(((O.get("tools") or {}).get(tool) or {}).get("always_anonymous")) and bool(endpoint(tool))
+
+
+def set_consent(tool, on):
+    path = Path(config_path())
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        cfg = {}
+    entry = cfg.setdefault("tools", {}).setdefault(tool, {})
+    if on:
+        entry["always_anonymous"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")   # quando l'utente ha detto si'
+    else:
+        entry.pop("always_anonymous", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    over = O.setdefault("tools", {}).setdefault(tool, {})
+    if on:
+        over["always_anonymous"] = entry["always_anonymous"]
+    else:
+        over.pop("always_anonymous", None)
+
+
+# Il conteggio locale (28/10/2026): proposte mostrate, scelte e invii, per sapere dove si perde una segnalazione.
+# Resta sul computer, in <dir>/.stats-<strumento>.json; `observe stats` lo stampa
+def bump(tool, key):
+    f = box_dir() / f".stats-{re.sub(r'[^A-Za-z0-9_.-]', '_', tool)}.json"
+    try:
+        st = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    st[key] = int(st.get(key) or 0) + 1
+    try:
+        box_dir().mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(st, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def auto_pending(tool):
+    """Cio' che «Sempre in forma anonima» manda da solo: gli errori dell'hook in attesa, mai le note a mano."""
+    return [r for r in pending(tool) if r.get("kind") != "note" and str(r.get("source") or "").startswith("hook")]
+
+
+def spawn_auto(tool):
+    """L'invio parte in un processo staccato: un hook ha pochi secondi e la rete puo' metterne trenta."""
+    try:
+        subprocess.Popen([sys.executable, str(HERE / "observe.py"), "auto-send", tool], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
 
 
 def box_dir():
@@ -749,14 +837,43 @@ def hook(p):
     ex = {"input_shape": shape(p.get("tool_input")) if name != "Bash" else {"command": call}, "error_raw": scrub(err),
           **({} if name == "Bash" else {"call": name}),
           "session_id": str(p.get("session_id") or ""), "duration_ms": p.get("duration_ms"), "context": ctx}
-    record(tool, rid(tool, key), {"context": ctx, "source": "hook-mcp" if name != "Bash" else "hook-bash", "kind": "error", "call": call if name != "Bash" else head,
-                                  "error": scrub(err), "key": key, "account": account_name(),
-                                  "project": os.path.basename(os.path.realpath(p.get("cwd") or os.getcwd())),
-                                  **({} if certain else {"attribution": "uncertain"})}, ex)
+    r = record(tool, rid(tool, key), {"context": ctx, "source": "hook-mcp" if name != "Bash" else "hook-bash", "kind": "error", "call": call if name != "Bash" else head,
+                                      "error": scrub(err), "key": key, "account": account_name(),
+                                      "project": os.path.basename(os.path.realpath(p.get("cwd") or os.getcwd())),
+                                      **({} if certain else {"attribution": "uncertain"})}, ex)
     hint = known_hint(tool, t, prev, head, err, ctx) if certain else ""
-    if hint:
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": hint}}, ensure_ascii=False))
+    line = ""
+    if certain and not hint:
+        hint, line = propose_on_repeat(tool, t, r, p)
+    out = {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": hint}} if hint else {}
+    if line:
+        out["systemMessage"] = line
+    if out:
+        print(json.dumps(out, ensure_ascii=False))
     return 0
+
+
+def propose_on_repeat(tool, t, r, p):
+    """Lo stesso errore tornato observe.propose_repeat volte nella stessa sessione (28/10/2026): la proposta d'invio
+    subito, una volta sola per errore e sessione, senza aspettare la soglia o l'intervallo di `due`. Con «Sempre in
+    forma anonima» acceso parte l'invio. Torna (contesto per Claude, riga a schermo per l'utente)."""
+    sid = str(p.get("session_id") or "")
+    n = min(int(O.get("propose_repeat") or 0), 3)   # degli esempi se ne tengono tre
+    if (not sid or n < 2 or r.get("pending") or not O.get("propose", True) or not t.get("repo") or r.get("security")
+            or r.get("status") in ("done", "reported") or r.get("fixed_in") or r.get("repeat_proposed") == sid):
+        return "", ""
+    times = sum(1 for e in r.get("examples") or [] if e.get("session_id") == sid)
+    if times < n or tool in mine_tools(os.path.realpath(p.get("cwd") or os.getcwd())):
+        return "", ""
+    with Box(tool) as box:
+        for x in box.recs:
+            if x.get("id") == r.get("id"):
+                x["repeat_proposed"] = sid
+    if consent(tool):
+        spawn_auto(tool)
+        return "", M("observe.auto_line", tool=tool, n=len(auto_pending(tool)))
+    bump(tool, "repeat_shown")
+    return M("observe.repeat_ctx", tool=tool, n=times), M("observe.repeat_line", tool=tool, n=times)
 
 
 def record_external(source, call, text, project="", account=""):
@@ -828,17 +945,24 @@ def stop(cwd):
         if name in mine or not t.get("repo"):
             continue
         for security, suffix in ((True, "sec-"), (False, "")):
-            pend = pending(name, security=security)
+            auto = not security and consent(name)
+            pend = auto_pending(name) if auto else pending(name, security=security)
             if not (pend if security else (pend and due(pend, now))):
                 continue
-            f = box_dir() / f".shown-{suffix}{name}"
+            f = box_dir() / f".{'auto' if auto else 'shown'}-{suffix}{name}"
             try:
                 last = float(f.read_text(encoding="utf-8").strip() or 0)
             except (OSError, ValueError):
                 last = 0.0
-            if now - last < float(O.get("propose_every_days") or 7) * 86400:
+            # con il consenso al piu' un invio al giorno; senza, la riga torna dopo propose_every_days
+            if now - last < (1 if auto else float(O.get("propose_every_days") or 7)) * 86400:
                 continue
-            lines.append(M("observe.stop_line_security" if security else "observe.stop_line", tool=name, n=len(pend)))
+            if auto:
+                spawn_auto(name)
+                lines.append(M("observe.auto_line", tool=name, n=len(pend)))
+            else:
+                bump(name, "shown_security" if security else "shown")
+                lines.append(M("observe.stop_line_security" if security else "observe.stop_line", tool=name, n=len(pend)))
             try:
                 box_dir().mkdir(parents=True, exist_ok=True)
                 f.write_text(str(now), encoding="utf-8")
@@ -932,12 +1056,42 @@ def proposals(real, mine_tools=()):
     for name, t in tools().items():
         if name in mine_tools or not t.get("repo"):
             continue
+        out += fixed_notice_reported(name, t)
         sec = pending(name, security=True)   # binario privato, subito, con il suo intervallo
         if sec and gate(box_dir() / f".proposed-sec-{name}"):
+            bump(name, "proposed_security")
             out.append(M("observe.propose_security", tool=name, n=len(sec)))
         pend = pending(name)
-        if due(pend, now) and gate(box_dir() / f".proposed-{name}"):
+        if not consent(name) and due(pend, now) and gate(box_dir() / f".proposed-{name}"):
+            bump(name, "proposed")
             out.append(M("observe.propose", tool=name, n=len(pend)))
+    return out
+
+
+def fixed_notice_reported(name, t):
+    """Chi ha inviato un errore sa quando e' corretto (28/10/2026): una voce `known` con fixed_in, distribuita con il
+    plugin, che copre un record inviato da qui. Una riga a Claude per SessionStart, una volta sola per record."""
+    fixes = [k for k in t.get("known") or [] if isinstance(k, dict) and k.get("fixed_in")]
+    if not fixes:
+        return []
+    have, out, hit = tool_version(name, t) or "", [], {}
+    for r in read(box_dir() / f"{name}.jsonl"):
+        if r.get("status") != "reported" or r.get("fixed_notified"):
+            continue
+        call, err = str(r.get("call") or ""), str(r.get("error") or "")
+        for k in fixes:
+            if bare_call(str(k.get("call") or "")) in (bare_call(call), call, "") and str(k.get("error") or "").lower() in err.lower():
+                old = not have or ver_tuple(have) < ver_tuple(k["fixed_in"])
+                out.append(M("observe.fixed_notice", tool=name, call=scrub(call, 120), fixed=k["fixed_in"],
+                             have=M("observe.fixed_have_old" if old else "observe.fixed_have_ok", tool=name, have=have or "?")))
+                hit[r["id"]] = k["fixed_in"]
+                break
+    if hit:
+        with Box(name) as box:
+            for x in box.recs:
+                if x.get("id") in hit:
+                    x["fixed_notified"] = hit[x["id"]]
+        bump(name, "fixed_notice")
     return out
 
 
@@ -1082,7 +1236,7 @@ def existing_issue(repo, recs):
     return found[0] if found else None
 
 
-def draft(tool, recs, target=None, security=False):
+def draft(tool, recs, target=None, security=False, bare=False):
     """Titolo e corpo di UNA issue (o di un commento) con le osservazioni dello strumento, gia' anonimizzati. Con
     security=True il testo della segnalazione privata (advisory GitHub o indirizzo di SECURITY.md), mai di una issue."""
     vs = [view(r) for r in sorted(recs, key=lambda r: -int(r.get("count") or 0))]
@@ -1100,6 +1254,8 @@ def draft(tool, recs, target=None, security=False):
                     f"{'; after ' + ', '.join(c['recent_tools']) if c.get('recent_tools') else ''})")
         # la nota di `add --on` (27/09: la causa vera di un errore stava li' e non usciva); come l'aggiramento, solo
         # dai record di questo account
+        if bare:   # l'invio senza domanda («Sempre in forma anonima»): niente testo libero, ne' note ne' aggiramenti
+            continue
         if v.get("note") and not v.get("anonymized"):
             rows.append(f"  - note: {out(v['note'], 500)}")
         if v.get("workaround") and not v.get("anonymized"):
@@ -1143,6 +1299,9 @@ def options(tool, t, h, security, has_gh):
     if endpoint(tool):
         out.append({"label": M("observe.opt_anon"), "description": M("observe.opt_anon_desc_security" if security else "observe.opt_anon_desc", privacy=PRIVACY),
                     "command": f"{base} --send {h} --anonymous"})
+        if not security:   # il consenso una volta per tutte: mai per le security, che restano sul percorso privato
+            out.append({"label": M("observe.opt_always"), "description": M("observe.opt_always_desc", tool=tool),
+                        "command": f"{base} --send {h} --anonymous --always"})
     if security:
         channel = str(t.get("security") or "").strip()
         if channel == "advisory":
@@ -1170,7 +1329,30 @@ def later(tool):
             (box_dir() / f"{f}{tool}").write_text(now, encoding="utf-8")
         except OSError:
             pass
+    bump(tool, "chose_later")
     print(M("observe.later", tool=tool, days=int(float(O.get("propose_every_days") or 7))))
+    return 0
+
+
+def auto_send(tool):
+    """`auto-send`, lanciato staccato da spawn_auto: con il consenso acceso manda gli errori in attesa in una issue
+    anonima, senza note ne' aggiramenti. Senza consenso non fa niente; un rifiuto o la rete giu' lasciano tutto in attesa."""
+    t = tools().get(tool)
+    recs = auto_pending(tool)
+    if not t or not t.get("repo") or not recs or not consent(tool):
+        return 0
+    title, body, _ = draft(tool, recs, bare=True)
+    try:
+        where = send_anonymous(tool, t, title, body, recs, False)
+    except (ValueError, OSError, urllib.error.URLError):
+        bump(tool, "auto_failed")
+        return 4
+    ids = {r["id"] for r in recs}
+    with Box(tool) as box:
+        for x in box.recs:
+            if x.get("id") in ids:
+                x["status"], x["reported"] = "reported", where[:200]
+    bump(tool, "auto_sent")
     return 0
 
 
@@ -1282,7 +1464,7 @@ def report_security(tool, t, repo, send, anonymous=False):
     return 0
 
 
-def report(tool, send=None, security=False, anonymous=False):
+def report(tool, send=None, security=False, anonymous=False, always=False):
     t = tools().get(tool)
     if not t:
         print(M("observe.usage_report"), file=sys.stderr)
@@ -1301,6 +1483,7 @@ def report(tool, send=None, security=False, anonymous=False):
     target = existing_issue(repo, recs) if has_gh else None
     title, body, h = draft(tool, recs, target)
     if send is None:
+        bump(tool, "drafted")
         print(M("observe.draft_head", repo=repo, n=len(recs)))
         if target:
             print(M("observe.draft_existing", number=target["number"], title=target.get("title") or "", url=target.get("url") or ""))
@@ -1320,7 +1503,12 @@ def report(tool, send=None, security=False, anonymous=False):
             print(str(e), file=sys.stderr)
             return 4
         print(M("observe.reported_anonymous", url=where))
+        bump(tool, "sent_always" if always else "sent_anonymous")
+        if always:   # il consenso si salva solo dopo un invio riuscito: e' lo stesso si' che l'ha mandato
+            set_consent(tool, True)
+            print(M("observe.always_on", tool=tool))
     elif has_gh:
+        bump(tool, "sent_own")
         args = (["gh", "issue", "comment", str(target["number"]), "-R", repo, "--body-file", "-"] if target else
                 ["gh", "issue", "create", "-R", repo, "--title", title, "--body-file", "-"])
         res = subprocess.run(args, input=(f"**{title}**\n\n{body}" if target else body), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
@@ -1330,6 +1518,7 @@ def report(tool, send=None, security=False, anonymous=False):
         where = (res.stdout.strip().splitlines() or [""])[-1] or (target or {}).get("url", "")
         print(M("observe.reported", url=where))
     else:
+        bump(tool, "sent_link")
         where = issue_link(repo, title, body)
         print(M("observe.link", url=where))
     ids = {r["id"] for r in recs}
@@ -1489,8 +1678,8 @@ def main(argv):
         return 0
     if sub == "report":
         send = opt(rest, "--send")
-        security, anonymous, is_later = "--security" in rest, "--anonymous" in rest, "--later" in rest
-        rest = [x for x in rest if x not in ("--security", "--anonymous", "--later")]
+        security, anonymous, is_later, always = "--security" in rest, "--anonymous" in rest, "--later" in rest, "--always" in rest
+        rest = [x for x in rest if x not in ("--security", "--anonymous", "--later", "--always")]
         if not rest and len(tools()) == 1:
             rest = list(tools())   # `/<plugin>:observe send` come e' documentato: lo strumento e' il plugin che ospita la copia
         if not rest:
@@ -1498,7 +1687,34 @@ def main(argv):
             return 2
         if is_later:
             return later(rest[0])
-        return report(rest[0], send, security=security, anonymous=anonymous)
+        if always and (security or not anonymous):
+            print(M("observe.usage_report"), file=sys.stderr)
+            return 2
+        return report(rest[0], send, security=security, anonymous=anonymous, always=always)
+    if sub == "auto-send":
+        return auto_send(rest[0]) if rest else 2
+    if sub == "anonymous":   # off | status: si accende solo dalla scelta «Sempre in forma anonima», dopo un invio
+        what = rest[0] if rest and rest[0] in ("off", "status") else ("status" if not rest else "")
+        names = [x for x in rest[1:] if x in tools()] or list(tools())
+        if not what or not names:
+            print(M("observe.usage_anonymous"), file=sys.stderr)
+            return 2
+        for name in names:
+            if what == "off":
+                set_consent(name, False)
+                bump(name, "always_off")
+                print(M("observe.always_off", tool=name))
+            else:
+                print(M("observe.always_status", tool=name, state="on" if consent(name) else "off"))
+        return 0
+    if sub == "stats":   # il conteggio locale: proposte mostrate, scelte, invii
+        for name in [x for x in rest if x in tools()] or list(tools()):
+            try:
+                st = json.loads((box_dir() / f".stats-{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                st = {}
+            print(f"{name}: " + (", ".join(f"{k} {v}" for k, v in sorted(st.items())) or "-"))
+        return 0
     print(M("observe.usage"), file=sys.stderr)
     return 2
 
