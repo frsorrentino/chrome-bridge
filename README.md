@@ -38,17 +38,19 @@ and find the Sign Up button"*: Claude Code calls `navigate`, `audit` and
 `find_text`. Because `navigate` already returns element refs,
 `click(ref="n1")` follows with no discovery turn in between.
 
-For `execute_js`, enable **Allow user scripts** in `chrome://extensions` →
-Chrome Bridge → Details.
-
 The plugin registers the MCP server from npm together with the recipes skill.
-Requires Node.js 18+ and Chrome 135+.
+
+| Requirement | For | Notes |
+|---|---|---|
+| Node.js 18+ | the MCP server | |
+| Chrome 135+ | the extension | `execute_js` needs **Allow user scripts** in `chrome://extensions` → Chrome Bridge → Details; on Chrome 135-137, Developer Mode instead |
+| Claude Code 2.1.275+ in a session, 2.1.292+ from a shell | the one-command install | Older versions: see below |
+| Python 3.8+ (optional) | the plugin's error log hooks | As `python3`, `python` or `py` (the Microsoft Store `python3` alias is skipped). Without it they stay silent and the tools work the same |
 
 <details>
-<summary>Older Claude Code, from source, Windows, Chrome 135-137, one path only</summary>
+<summary>Older Claude Code, from source, Windows, one path only</summary>
 
-**Older Claude Code.** The one-command install needs Claude Code 2.1.275+ in a
-session and 2.1.292+ from a shell. Before that, add the marketplace first:
+**Older Claude Code.** Add the marketplace first:
 `/plugin marketplace add frsorrentino/chrome-bridge`, then
 `/plugin install chrome-bridge@chrome-bridge` (from a shell:
 `claude plugin marketplace add frsorrentino/chrome-bridge`, then
@@ -71,14 +73,9 @@ starts.
 
 **Windows.** `install.sh` does not run from PowerShell or cmd: use the plugin
 with the Web Store extension, or run `install.sh` from Git Bash. The plugin's
-error log hooks run in Git Bash, as Claude Code runs every hook, and need
-Python 3.8+ as `python3`, `python` or `py` (the Microsoft Store `python3` alias
-is skipped); without Python they stay silent and the tools work the same. For
-launch mode see `CHROME_BRIDGE_BROWSER` below: Google Chrome cannot load the
-extension there, Microsoft Edge can.
-
-**Chrome 135-137.** `execute_js` needs Developer Mode instead of the **Allow
-user scripts** toggle.
+error log hooks run in Git Bash, as Claude Code runs every hook. For launch
+mode see `CHROME_BRIDGE_BROWSER` below: Google Chrome cannot load the extension
+there, Microsoft Edge can.
 
 **One path only.** The plugin and `install.sh` would register the same server
 twice, and so would a plugin added from the [Anthropic
@@ -203,10 +200,8 @@ user-script toggle isn't available.
 ## Tools
 
 69 in total. `core` (46 tools: every tool used in 101 real sessions, plus the
-two WebMCP tools) loads by default, 22 of them always in context; the other 23
-sit in seven optional caps that the agent switches on mid-session with
-`get_status({enable: ["visual"]})`, with no restart (`--caps` still sets them
-at startup).
+two WebMCP tools) loads by default; the other 23 sit in seven optional caps,
+switched on with `get_status({enable: ["visual"]})` or at startup with `--caps`.
 
 ![69 tools in nine groups, from clicking a button to tracing a page](assets/readme/card4-toolbox.png)
 
@@ -251,7 +246,7 @@ executes commands through Chrome APIs. User scripts (`execute_js`) run via
 | `CHROME_BRIDGE_ALWAYS_LOAD` / `--always-load` | 22 most used tools | Tools kept in context when the client loads the server whole; the others carry `_meta['anthropic/alwaysLoad'] = false` and wait behind tool search (Claude Code 2.1.285+). `all` loads every tool; a comma list picks them |
 | `CHROME_BRIDGE_NO_JS` / `--no-js` | unset | No arbitrary JavaScript in the page: `execute_js` and `modify_dom` leave the schema, `wait_for(condition=function)` and `javascript:`/`data:` URLs are refused. `get_status` reports `js_evaluation` |
 | `CHROME_BRIDGE_READ_ROOT` / `--read-root` | unset | Where `upload_file` may read from. Unset: any file except keys and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `id_*`, `*.pem`, `*.key`, …), symlinks resolved first. Set: only files under this directory, whatever their name — the way to upload a certificate key on purpose |
-| `CHROME_BRIDGE_BROWSER` | unset | Launch mode only: the browser binary, e.g. `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Unset: the first of Chromium, Edge, Brave, Google Chrome found in the standard paths (on Linux Chromium, then Google Chrome). Google Chrome 137+ cannot load the extension |
+| `CHROME_BRIDGE_BROWSER` | unset | Launch mode only: the browser binary, e.g. `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`. Unset: the first of Chromium, Edge, Brave, Google Chrome found in the standard paths (on Linux Chromium, then Google Chrome) |
 | `CHROME_BRIDGE_OBSERVE` | unset | `off` stops the local error log below. The plugin sets `hook`: its hooks keep the log and the server stays out of it |
 | `CHROME_BRIDGE_WRITE_ROOT` / `--write-root` | unset | Every path the model chooses (`save_to`, `output_path`, exports) must be under this directory, checked before the browser does any work; the server's own state under `~/.config/chrome-bridge` stays writable. The CLI is your shell and is not restricted |
 
@@ -279,8 +274,6 @@ private page data (`get_storage`, `get_tabs`). Those are the product, not bugs.
 What matters is who can reach them and what a hostile page can make the agent
 do with them.
 
-- **Who can connect:** see above — loopback bind, `chrome-extension://` origin
-  check, `CHROME_BRIDGE_TOKEN` on both handshakes.
 - **Launch mode also opens a DevTools port** on 127.0.0.1 (chosen by the
   system), for `lighthouse` and `heap_snapshot`. CDP has no authentication:
   any local process can drive that dedicated browser while it runs. Its profile
@@ -293,11 +286,9 @@ do with them.
   JavaScript, send a request with your cookies, submit a form or upload a file.
   Treat every page you automate as untrusted input, and review what the agent
   proposes on sites that hold money or credentials.
-- **Reduce the surface:** `--caps core` (the default) exposes the smallest set;
-  `--no-js` removes arbitrary JavaScript; `--write-root` fences every path the
-  model writes; `upload_file` refuses keys and credentials, and `--read-root`
-  fences it to one directory. For sessions that matter, automate in a separate
-  Chrome profile.
+- **Reduce the surface:** `--caps core` (the default) exposes the smallest set,
+  and see [Limits you can set](#your-browser-your-login). For sessions that
+  matter, automate in a separate Chrome profile.
 - **`--no-js` is not a sandbox:** `inject_css` stays, and CSS attribute
   selectors with `url()` can leak attribute values to a remote host.
 - **What leaves your machine** is what the browser sends on the agent's behalf.
@@ -309,9 +300,9 @@ do with them.
 When one of its own tools fails, chrome-bridge adds a line to a **local** file,
 `${XDG_STATE_HOME:-~/.local/state}/claude-observe/chrome-bridge.jsonl` (mode
 0600, in a 0700 folder), in the [claude-observe](https://github.com/frsorrentino/claude-observe)
-format (the plugin's copy is in `observe/`). With the plugin, a `PostToolUseFailure` hook writes it; with the npm
-server alone, the server does. The same error seen again is one line with a
-count.
+format (the plugin's copy is in `observe/`). A `PostToolUseFailure` hook writes
+it, or the server when used without the plugin. A repeated error is one line
+with a count.
 
 - **Kept:** the tool name, the error text after scrubbing (your home folder
   becomes `~`; emails, URL queries, secrets and typed values are removed), the
@@ -323,12 +314,11 @@ count.
   content.
 - **Nothing leaves your computer** unless you say yes. With the plugin, once
   a few errors have piled up (or one has waited a few days, or one is marked
-  as a defect), a line at the end of a turn tells you so, and Claude may offer,
-  at a natural moment, to send them as one GitHub issue: it shows you the
-  anonymized text first, then asks with buttons (from your GitHub, or not now)
-  and sends only what you chose. `/chrome-bridge:observe send` does the same
-  on demand; `list`, `mark` and `add` read and triage the log. The server
-  alone never sends or offers anything.
+  as a defect), a line at the end of a turn tells you so, and Claude may offer
+  to send them as one GitHub issue: it shows the anonymized text first and
+  sends only what you choose. `/chrome-bridge:observe send` does the same on
+  demand; `list`, `mark` and `add` read and triage the log. The server alone
+  never sends or offers anything.
 - **Security observations** (a read or write outside the perimeter, a secret
   exposed, unwanted code execution, data leaving the computer) never enter a
   public issue: `/chrome-bridge:observe send --security` prepares a private
