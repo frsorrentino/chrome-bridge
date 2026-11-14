@@ -2556,7 +2556,7 @@ function observeContentScript(recordValues) {
     send({ command: 'type_text', params: { selector: selectorOf(el), text: value }, human: { label: labelOf(el), sensitive, placeholder: sensitive || !recordValues } });
   }, true);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target && /^(INPUT)$/.test(e.target.tagName)) send({ command: 'press_key', params: { key: 'Enter', selector: selectorOf(e.target) }, human: { label: labelOf(e.target) } });
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && e.target && /^(INPUT)$/.test(e.target.tagName)) send({ command: 'press_key', params: { key: 'Enter', selector: selectorOf(e.target) }, human: { label: labelOf(e.target) } });
   }, true);
   return true;
 }
@@ -2821,7 +2821,7 @@ function handoffBanner(id, message, pick, ask, pickMax) {
     root.querySelector('span').textContent = `${message} — ${picks.length}/${pickMax} picked, click more or Done`;
   };
   root.querySelector('.done').onclick = done;
-  if (askInput) { askInput.onkeydown = (e) => { if (e.key === 'Enter') done(); }; setTimeout(() => askInput.focus(), 0); }
+  if (askInput) { askInput.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) done(); }; setTimeout(() => askInput.focus(), 0); }
   root.querySelector('.cancel').onclick = () => finish({ done: false, action: 'cancel' });
   let box = null; let onMove = null; let onClick = null;
   function cleanupPick() {

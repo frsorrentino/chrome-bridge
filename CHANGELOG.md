@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- Popup in dark mode: `:root` now declares `color-scheme: light dark`, so
+  native controls and scrollbars follow the dark palette instead of staying
+  light. Found by `legacy-scan` of modern-web-guidance (guide `dark-mode`).
+- Enter during IME composition: the recorder no longer records a
+  `press_key Enter` step, and the ask overlay no longer submits, while the
+  user is still confirming a composed word (Japanese, Chinese, Korean, some
+  Android keyboards). Both handlers now skip `isComposing` and `keyCode 229`
+  (guide `ime-safe-enter-submit`).
+
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una

@@ -3,6 +3,7 @@
 [hidden] { display: none !important; }
 
 :root {
+  color-scheme: light dark;
   --bg: #ffffff;
   --fg: #1f1f1f;
   --muted: #5f6368;
