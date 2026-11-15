@@ -28,6 +28,33 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.3 — 2026-11-15
+
+Extension: the manifest goes to 1.32.3. Three error messages that sent
+models into retries, from the claude-observe notes collected since 02/11.
+
+### Fixed
+
+- `trusted` input (`click`, `hover`, `type_text`, `press_key`) and
+  `emulate_media` via debugger on a page that holds another extension's frame
+  (password manager, translator): Chrome refuses `chrome.debugger.attach`
+  there, and the tool passed on the bare «Cannot access a chrome-extension://
+  URL of different extension». One model repeated the same click 7 times
+  (13 notes on 1.32.1). The error now names the extension frames found in the
+  tab, says that retrying fails the same way, and gives the remedy: retry
+  without `trusted`, or turn that extension off for the site.
+- A selector with Playwright, jQuery or XPath syntax (`>> nth=0`,
+  `:has-text`, `text=`, `:visible`, `:contains`, `//button`) answered
+  «no element matches», as if it were valid CSS that found nothing.
+  `querySelector` rejects it, and in a comma list one such item makes the
+  whole list fail. The error now says «Invalid selector», names the token,
+  and points to plain CSS, refs or `find_text`.
+- A `>>>` selector whose first part is an ancestor of the shadow host
+  (`main >>> span.label`) found nothing, and the error did not say why. It
+  now explains that `>>>` enters the shadowRoot of the first element the
+  part before it matches, so that part must be the host itself, and points
+  to `find_text`, which searches inside shadow roots.
+
 ## 1.32.2 — 2026-11-15
 
 Extension and server: the manifest goes to 1.32.2.
