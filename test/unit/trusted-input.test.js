@@ -45,3 +45,48 @@ test('click fidato: moved, poi pressed/released per ogni click', () => {
   assert.deepEqual(ev.map((e) => `${e.type}${e.clickCount ?? ''}`), ['mouseMoved', 'mousePressed1', 'mouseReleased1', 'mousePressed2', 'mouseReleased2']);
   assert.ok(ev.every((e) => e.x === 10 && e.y === 20));
 });
+
+// Nota observe chrome-bridg-8f18b944 e sorelle (13 casi su click, hover,
+// type_text, press_key, emulate_media, 1.32.1): Chrome rifiuta l'aggancio del
+// debugger a una scheda che contiene un frame di un'altra estensione (password
+// manager, traduttore), e il messaggio grezzo non dice né la causa né il
+// rimedio: un agente ha riprovato 7 volte lo stesso click.
+test('aggancio rifiutato per il frame di un\'altra estensione: causa, estensione e rimedio', async () => {
+  const prev = globalThis.chrome;
+  globalThis.chrome = {
+    runtime: { id: 'selfselfselfself' },
+    debugger: {
+      attach: async () => { throw new Error('Cannot access a chrome-extension:// URL of different extension'); },
+      detach: async () => {},
+      sendCommand: async () => ({}),
+      onDetach: { addListener() {} },
+    },
+    webNavigation: {
+      getAllFrames: async () => [
+        { frameId: 0, url: 'https://example.com/' },
+        { frameId: 7, url: 'chrome-extension://otherextotherext/inline.html' },
+        { frameId: 8, url: 'chrome-extension://selfselfselfself/overlay.html' },
+      ],
+    },
+  };
+  try {
+    const { withDebugger, holdDebugger } = await import('../../extension/lib/trusted-input.js');
+    let ran = false;
+    await assert.rejects(withDebugger(1, async () => { ran = true; }), (e) => {
+      assert.match(e.message, /^trusted input unavailable: /);
+      assert.match(e.message, /another extension/);
+      assert.match(e.message, /otherextotherext/);
+      assert.doesNotMatch(e.message, /selfselfselfself/);
+      assert.match(e.message, /without trusted/);
+      assert.match(e.message, /retrying .*will not help|retry.*same.*fail/i);
+      return true;
+    });
+    assert.equal(ran, false);
+    await assert.rejects(holdDebugger(2, 'emulation', 'emulate_media via debugger'), /^Error: emulate_media via debugger unavailable: another extension/);
+    // getAllFrames che fallisce: la causa e il rimedio restano, senza id
+    globalThis.chrome.webNavigation.getAllFrames = async () => { throw new Error('No tab with id: 1'); };
+    await assert.rejects(withDebugger(1, async () => {}), /another extension .*without trusted/s);
+  } finally {
+    globalThis.chrome = prev;
+  }
+});

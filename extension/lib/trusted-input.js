@@ -100,8 +100,31 @@ async function attach(tabId, purpose) {
   } catch (e) {
     const msg = String(e?.message ?? e);
     if (/already attached/i.test(msg)) throw new Error(`${purpose} unavailable: another debugger (DevTools?) is attached to this tab — close it, or retry without it`);
+    if (/chrome-extension:\/\/ URL of different extension/i.test(msg)) throw new Error(`${purpose} unavailable: ${await foreignExtensionCause(tabId, purpose)}`);
     throw new Error(`${purpose} unavailable: ${msg}`);
   }
+}
+
+// Chrome rifiuta chrome.debugger.attach su una scheda che contiene anche un
+// solo frame di un'altra estensione (password manager, traduttore, correttore
+// che iniettano un iframe chrome-extension://). Il messaggio grezzo non dice
+// quale frame né che riprovare è inutile: un agente ha ripetuto lo stesso
+// click 7 volte (nota observe chrome-bridg-8f18b944, 1.32.1).
+async function foreignExtensionCause(tabId, purpose) {
+  let ids = [];
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const self = chrome.runtime?.id;
+    ids = [...new Set((frames || [])
+      .map((f) => /^chrome-extension:\/\/([^/]+)/.exec(f.url || '')?.[1])
+      .filter((id) => id && id !== self))];
+  } catch { /* scheda chiusa o frame illeggibili: resta la causa senza id */ }
+  const which = ids.length ? ` (chrome-extension://${ids.join(', chrome-extension://')})` : '';
+  const remedy = purpose === 'trusted input'
+    ? 'Retry without trusted (synthetic events)'
+    : 'Use the options that work without the debugger';
+  return `another extension has a frame in this page${which}, and Chrome does not let chrome.debugger attach to a tab that holds another extension's frame: retrying the same call fails the same way. `
+    + `${remedy}, or turn that extension off for this site (chrome://extensions → Details → Site access) and reload the tab.`;
 }
 
 /** Tiene il debugger agganciato alla scheda per un motivo, finché releaseDebugger. */
