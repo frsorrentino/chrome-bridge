@@ -13,7 +13,7 @@ import { computeTiles } from './lib/tile-layout.js';
 import { classifyDownload } from './lib/download-state.js';
 import { downloadName } from './lib/capture-names.js';
 import { findTextInPage } from './lib/find-text.js';
-import { elementOutcome, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
+import { elementOutcome, notFoundError, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
 import { withDebugger, keyEvents, mouseClickEvents, holdDebugger, releaseDebugger, debuggerHeld } from './lib/trusted-input.js';
 import { emulationCommands } from './lib/emulation.js';
 const { pushError } = globalThis.__cbTelemetry;
@@ -1021,7 +1021,7 @@ async function trustedTarget(tabId, frame_id, selector, what) {
     world: 'MAIN',
   });
   const out = results?.[0]?.result;
-  if (!out || out.missing) throw new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
+  if (!out || out.missing) throw notFoundError(selector);
   return out;
 }
 
@@ -3458,7 +3458,7 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
     args: [selector, { attributes, childList, characterData, subtree }],
     world: 'MAIN',
   });
-  if (install?.[0]?.result?.missing) throw new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
+  if (install?.[0]?.result?.missing) throw notFoundError(selector);
 
   // Read mutations
   const results = await chrome.scripting.executeScript({

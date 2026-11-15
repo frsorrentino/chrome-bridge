@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { elementOutcome, isReportableNavError, watchNavErrors, navErrorMessage } from '../../extension/lib/command-outcome.js';
+import { elementOutcome, isReportableNavError, watchNavErrors, navErrorMessage, notFoundError } from '../../extension/lib/command-outcome.js';
 
 test('click senza risultato dalla funzione iniettata è un errore, non un successo', () => {
   // Quello che executeScript restituisce quando la funzione lancia «Element not found».
@@ -67,4 +67,53 @@ test('watchNavErrors tiene l\'errore della scheda giusta anche se arriva prima c
 test('il messaggio nomina l\'errore di rete, l\'URL e la scheda', () => {
   const m = navErrorMessage({ error: 'net::ERR_CONNECTION_REFUSED', url: 'http://127.0.0.1:9/' }, 41);
   assert.match(m, /^net::ERR_CONNECTION_REFUSED loading http:\/\/127\.0\.0\.1:9\/ \(tab 41/);
+});
+
+// Note observe chrome-bridg-a1255c1b («li:has(span.JDoTSe) >> nth=0») e
+// chrome-bridg-5a9d399e («#app >>> aru-button:has-text, main aru-button»),
+// 1.32.1: sintassi Playwright che querySelector rifiuta con un SyntaxError.
+// executeScript la riduce a un risultato vuoto e il tool diceva «no element
+// matches», come se il selettore fosse valido; nella lista con la virgola una
+// sola voce non CSS fa fallire anche «main aru-button», che avrebbe trovato.
+test('selettore non CSS (Playwright, jQuery, XPath): lo dice invece di «no element matches»', () => {
+  const invalid = [
+    ['li:has(span.JDoTSe) >> nth=0', '>>'],
+    ['#app >>> aru-button:has-text, main aru-button', ':has-text'],
+    ['button:has-text("Invia")', ':has-text'],
+    ['text=Accedi', 'text='],
+    ['div.item:visible', ':visible'],
+    ['li:contains("Totale")', ':contains'],
+    ['ul li:first', ':first'],
+    ['//button[@id="x"]', 'XPath'],
+  ];
+  for (const [sel, token] of invalid) {
+    assert.throws(() => elementOutcome([{ frameId: 0 }], sel), (e) => {
+      assert.match(e.message, /^Invalid selector: /, sel);
+      assert.ok(e.message.includes(token), `${sel}: ${e.message}`);
+      assert.match(e.message, /not CSS/);
+      assert.match(e.message, /get_interactives|find_text/);
+      return true;
+    }, sel);
+  }
+  // CSS valido resta «Element not found», anche con parole simili dentro le virgolette o i nomi
+  for (const sel of ['li:first-child', 'li:last-of-type', '[title=":visible"]', 'my-app >>> button.save', 'a[href*="text=1"]', '.first', 'div:has(> span)', 'xpath-none']) {
+    assert.throws(() => elementOutcome([{ frameId: 0 }], sel), /^Error: Element not found: /, sel);
+  }
+  assert.match(notFoundError('#x').message, /^Element not found: #x \(no element matches; check it with query_dom\)$/);
+});
+
+// Note observe chrome-bridg-6379570f («main >>> span.aru-text.aru-text-md»),
+// chrome-bridg-f262acc4 («div[role=…] >>> span»), 1.32.1: la parte prima di
+// ">>>" deve essere l'host dello shadow DOM, non un suo antenato. «no element
+// matches» lasciava credere che mancasse lo span, e il modello cambiava classe.
+test('">>>" senza riscontri: dice che la parte prima va sull\'host dello shadow DOM', () => {
+  assert.throws(() => elementOutcome([{ frameId: 0 }], 'main >>> span.aru-text.aru-text-md'), (e) => {
+    assert.match(e.message, /^Element not found: main >>> span\.aru-text\.aru-text-md /);
+    assert.match(e.message, /shadow host/);
+    assert.match(e.message, /"main"/);
+    assert.match(e.message, /find_text|get_interactives/);
+    return true;
+  });
+  // senza ">>>" il messaggio resta quello di prima
+  assert.throws(() => elementOutcome([{ frameId: 0 }], 'main span'), /^Error: Element not found: main span \(no element matches; check it with query_dom\)$/);
 });

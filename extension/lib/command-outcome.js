@@ -23,7 +23,41 @@ export function elementOutcome(results, selector) {
   if (first?.result != null) return first.result;
   if (first?.error?.message) throw new Error(first.error.message);
   if (!selector) throw new Error('The page returned no result for the command');
-  throw new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
+  throw notFoundError(selector);
+}
+
+/**
+ * Sintassi di Playwright, jQuery o XPath dentro un selettore CSS: querySelector
+ * la rifiuta con un SyntaxError, che executeScript riduce a un risultato vuoto.
+ * «no element matches» faceva credere a un selettore valido senza riscontri
+ * (note observe chrome-bridg-a1255c1b, chrome-bridg-5a9d399e, 1.32.1). Le
+ * stringhe tra virgolette si tolgono prima: `[title=":visible"]` è CSS valido.
+ */
+export function nonCssToken(selector) {
+  const s = String(selector).replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+  if (/^\s*\(?\/\//.test(s) || /(^|[\s,])xpath=/.test(s)) return 'XPath';
+  const engine = /(^|[\s,])(text|css|id|role|data-testid|internal:[\w-]+)=/.exec(s);
+  if (engine) return `${engine[2]}=`;
+  if (/(^|[^>])>>(?!>)/.test(s)) return '>>';
+  const pseudo = /:(has-text|text-is|text-matches|text|visible|hidden|nth-match|left-of|right-of|above|below|near|contains|eq|gt|lt|first|last|even|odd)(?![\w-])/.exec(s);
+  return pseudo ? `:${pseudo[1]}` : null;
+}
+
+export function notFoundError(selector) {
+  const token = nonCssToken(selector);
+  if (!token && String(selector).includes('>>>')) {
+    // ">>>" entra nello shadowRoot del primo elemento che la parte prima trova:
+    // un antenato senza shadowRoot («main >>> span») non trova niente anche
+    // se lo span c'è (note observe chrome-bridg-6379570f, chrome-bridg-f262acc4).
+    const host = String(selector).split('>>>')[0].trim();
+    return new Error(`Element not found: ${selector} (no element matches; ">>>" enters the shadowRoot of the first element "${host}" matches, `
+      + 'so that part must be the shadow host itself, e.g. the custom element\'s tag, not an ancestor of it. '
+      + 'Check it with query_dom, or locate the target by its visible text with find_text, which searches inside shadow roots)');
+  }
+  if (!token) return new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
+  const what = token === 'XPath' ? 'XPath is not CSS' : `"${token}" is Playwright/jQuery syntax, not CSS`;
+  return new Error(`Invalid selector: ${selector} — ${what}: the page rejects the whole selector, every item of a comma list included. `
+    + 'Use plain CSS (">>>" pierces shadow DOM), a ref from get_interactives, or find_text to locate by visible text.');
 }
 
 /**
