@@ -48,6 +48,7 @@ try:
 except ImportError:
     fcntl = None
 import hashlib
+import base64
 import json
 import os
 import re
@@ -1356,21 +1357,37 @@ def auto_send(tool):
     return 0
 
 
-def send_anonymous(tool, t, title, body, recs, security):
+def send_anonymous(tool, t, title, body, recs, security, labels=None, image=None):
     """L'invio anonimo: POST JSON a observe.endpoint con la bozza anonimizzata piu' plugin, versione e i flag — niente
-    altro. La issue la apre l'account di servizio del sito, senza il nome dell'utente. Torna l'URL (o l'endpoint)."""
+    altro. La issue la apre l'account di servizio del sito, senza il nome dell'utente. Torna l'URL (o l'endpoint).
+    05/11/2026: `labels` (lista chiusa del servizio: app, suggerimento, bug) e `image` (mime, bytes: jpeg o png, al
+    massimo 1 MB), che il servizio carica nel repo pubblico delle immagini e linka in fondo al corpo; mai con security."""
+    payload = {"plugin": tool, "version": tool_version(tool, t) or None, "security": bool(security),
+               "severity": "high" if any(r.get("severity") == "high" for r in recs) else None, "title": title, "body": body}
+    if labels:
+        payload["labels"] = list(labels)
+    if image:
+        payload["image"] = {"mime": image[0], "data": base64.b64encode(image[1]).decode()}
+    return _post_service(tool, payload)
+
+
+def upload_image(tool, mime, data):
+    """05/11/2026: solo l'immagine al servizio anonimo ({plugin, image}), per una issue che la persona apre col suo GitHub:
+    il servizio la carica nel repo pubblico delle immagini e torna il suo URL."""
+    return _post_service(tool, {"plugin": tool, "image": {"mime": mime, "data": base64.b64encode(data).decode()}}, need_url=True)
+
+
+def _post_service(tool, payload, need_url=False):
     url = endpoint(tool)
     if not url:
         raise ValueError(M("observe.no_endpoint"))
-    payload = {"plugin": tool, "version": tool_version(tool, t) or None, "security": bool(security),
-               "severity": "high" if any(r.get("severity") == "high" for r in recs) else None, "title": title, "body": body}
     req = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "claude-observe"})
     # un rifiuto del servizio (formato, limite, testo che sembra personale) si dice com'e'; un guasto di rete o di TLS
     # (27/09: il CDN di SiteGround che rompe il TLS) si riprova una volta. In entrambi i casi niente e' stato inviato
     for attempt in (1, 2):
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=60 if "image" in payload else 30) as r:
                 raw = r.read().decode()
             break
         except urllib.error.HTTPError as e:
@@ -1384,9 +1401,12 @@ def send_anonymous(tool, t, title, body, recs, security):
                 raise ValueError(M("observe.anon_unreachable", reason=str(getattr(e, "reason", "") or e)[:200]))
             time.sleep(2)
     try:
-        return str(json.loads(raw).get("url") or url)
+        got = json.loads(raw).get("url")
     except (ValueError, AttributeError):
-        return url
+        got = None
+    if need_url and not got:
+        raise ValueError(M("observe.anon_refused", code=200, error="no url in the answer"))
+    return str(got or url)
 
 
 def issue_link(repo, title, body, limit=7500):
