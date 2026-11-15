@@ -2,17 +2,6 @@
 
 ## Unreleased
 
-### Fixed
-
-- Popup in dark mode: `:root` now declares `color-scheme: light dark`, so
-  native controls and scrollbars follow the dark palette instead of staying
-  light. Found by `legacy-scan` of modern-web-guidance (guide `dark-mode`).
-- Enter during IME composition: the recorder no longer records a
-  `press_key Enter` step, and the ask overlay no longer submits, while the
-  user is still confirming a composed word (Japanese, Chinese, Korean, some
-  Android keyboards). Both handlers now skip `isComposing` and `keyCode 229`
-  (guide `ime-safe-enter-submit`).
-
 ### Difetto aperto, riproducibile, senza rimedio deciso
 
 `tab_action close` su una scheda `#home` del Terminale ChromeOS che sta in una
@@ -38,6 +27,27 @@ home non si chiude finché ha compagnia, ma si può portare via da sola:
 finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
+
+## 1.32.2 — 2026-11-15
+
+Extension and server: the manifest goes to 1.32.2.
+
+### Fixed
+
+- Popup in dark mode: `:root` now declares `color-scheme: light dark`, so
+  native controls and scrollbars follow the dark palette instead of staying
+  light. Found by `legacy-scan` of modern-web-guidance (guide `dark-mode`).
+- Enter during IME composition: the recorder no longer records a
+  `press_key Enter` step, and the ask overlay no longer submits, while the
+  user is still confirming a composed word (Japanese, Chinese, Korean, some
+  Android keyboards). Both handlers now skip `isComposing` and `keyCode 229`
+  (guide `ime-safe-enter-submit`).
+
+### Changed
+
+- `observe/observe.py` synced with claude-observe 6441c77: the anonymous
+  report can carry labels and an image. chrome-bridge passes neither, so what
+  a report sends does not change.
 
 ## 1.32.1 — 2026-10-29
 
