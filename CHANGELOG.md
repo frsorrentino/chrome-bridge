@@ -28,6 +28,20 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.5 — 2026-11-16
+
+Plugin hooks only: no server or extension code changes, the manifest stays
+1.32.4. Task chrome-bridge-observe-unico-16-11.
+
+### Fixed
+
+- The three observe hooks in `hooks/hooks.json` (`hook`, `session-start`,
+  `stop`) now pass the plugin's name, `chrome-bridge`, to `observe.py`, so
+  the notes land in this plugin's store even when another installed plugin
+  ships the same observe hooks. The Stop hook runs synchronously with a 15 s
+  timeout instead of 5. Regenerated with claude-observe `sync.py` at 64aef81;
+  `observe.py` and `py.sh` are unchanged.
+
 ## 1.32.4 — 2026-11-16
 
 Extension: the manifest goes to 1.32.4. `>>>` becomes a deep combinator.
