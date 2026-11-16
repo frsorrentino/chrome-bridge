@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" hook",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" hook chrome-bridge",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" session-start",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" session-start chrome-bridge",
             "timeout": 10
           }
         ]
@@ -28,8 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" stop",
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" stop chrome-bridge",
+            "timeout": 15
           }
         ]
       }
