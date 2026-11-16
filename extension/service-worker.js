@@ -990,16 +990,29 @@ async function trustedTarget(tabId, frame_id, selector, what) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -1090,16 +1103,29 @@ async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'l
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -1165,16 +1191,29 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -1806,16 +1845,29 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id 
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -1881,16 +1933,29 @@ async function cmdGetCssStyles({ selector, properties, include_inherited = false
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -1924,16 +1989,29 @@ async function cmdModifyDom({ selector, action, name, value, className, tab_id, 
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -2121,16 +2199,29 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -2194,16 +2285,29 @@ async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, ta
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -2318,16 +2422,29 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -2713,16 +2830,29 @@ async function cmdReadForm({ selector, tab_id }) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -2802,16 +2932,29 @@ async function evalWatch(w) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -3161,16 +3304,29 @@ async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
               return el ? [el] : [];
             }
             const parts = sel.split('>>>').map((s) => s.trim());
-            const last = parts.pop();
-            let ctx = document;
-            for (const p of parts) {
-              const found = ctx.querySelector(p);
-              if (!found || !found.shadowRoot) return [];
-              ctx = found.shadowRoot;
+            let scopes = [...document.querySelectorAll(parts[0])];
+            for (let i = 1; i < parts.length && scopes.length; i++) {
+              const last = i === parts.length - 1;
+              const found = new Set();
+              const done = new Set();
+              for (const scope of scopes) {
+                // Sotto uno scope già visitato le radici sono già state interrogate.
+                let up = scope.parentNode || scope.host;
+                while (up && !done.has(up)) up = up.parentNode || up.host;
+                if (up) continue;
+                done.add(scope);
+                const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+                for (let r = 0; r < roots.length; r++) {
+                  for (const el of roots[r].querySelectorAll(parts[i])) {
+                    if (firstOnly && last) return [el];
+                    found.add(el);
+                  }
+                  for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+                }
+              }
+              scopes = [...found];
             }
-            if (!firstOnly) return [...ctx.querySelectorAll(last)];
-            const el = ctx.querySelector(last);
-            return el ? [el] : [];
+            return scopes;
           }
 
           function deepQuery(sel) {
@@ -3460,16 +3616,29 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -3559,16 +3728,29 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -3818,16 +4000,29 @@ async function cmdHover({ selector, tab_id, frame_id, trusted = false }) {
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -3873,16 +4068,29 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -3988,16 +4196,29 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, upload_id
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -4323,16 +4544,29 @@ async function captureForDiff(tabId, selector) {
               return el ? [el] : [];
             }
             const parts = sel.split('>>>').map((s) => s.trim());
-            const last = parts.pop();
-            let ctx = document;
-            for (const p of parts) {
-              const found = ctx.querySelector(p);
-              if (!found || !found.shadowRoot) return [];
-              ctx = found.shadowRoot;
+            let scopes = [...document.querySelectorAll(parts[0])];
+            for (let i = 1; i < parts.length && scopes.length; i++) {
+              const last = i === parts.length - 1;
+              const found = new Set();
+              const done = new Set();
+              for (const scope of scopes) {
+                // Sotto uno scope già visitato le radici sono già state interrogate.
+                let up = scope.parentNode || scope.host;
+                while (up && !done.has(up)) up = up.parentNode || up.host;
+                if (up) continue;
+                done.add(scope);
+                const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+                for (let r = 0; r < roots.length; r++) {
+                  for (const el of roots[r].querySelectorAll(parts[i])) {
+                    if (firstOnly && last) return [el];
+                    found.add(el);
+                  }
+                  for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+                }
+              }
+              scopes = [...found];
             }
-            if (!firstOnly) return [...ctx.querySelectorAll(last)];
-            const el = ctx.querySelector(last);
-            return el ? [el] : [];
+            return scopes;
           }
 
           function deepQuery(sel) {
@@ -5030,16 +5264,29 @@ async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5'
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {
@@ -5809,16 +6056,29 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, container, m
           return el ? [el] : [];
         }
         const parts = sel.split('>>>').map((s) => s.trim());
-        const last = parts.pop();
-        let ctx = document;
-        for (const p of parts) {
-          const found = ctx.querySelector(p);
-          if (!found || !found.shadowRoot) return [];
-          ctx = found.shadowRoot;
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
         }
-        if (!firstOnly) return [...ctx.querySelectorAll(last)];
-        const el = ctx.querySelector(last);
-        return el ? [el] : [];
+        return scopes;
       }
 
       function deepQuery(sel) {

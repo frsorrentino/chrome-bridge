@@ -46,13 +46,14 @@ export function nonCssToken(selector) {
 export function notFoundError(selector) {
   const token = nonCssToken(selector);
   if (!token && String(selector).includes('>>>')) {
-    // ">>>" entra nello shadowRoot del primo elemento che la parte prima trova:
-    // un antenato senza shadowRoot («main >>> span») non trova niente anche
-    // se lo span c'è (note observe chrome-bridg-6379570f, chrome-bridg-f262acc4).
-    const host = String(selector).split('>>>')[0].trim();
-    return new Error(`Element not found: ${selector} (no element matches; ">>>" enters the shadowRoot of the first element "${host}" matches, `
-      + 'so that part must be the shadow host itself, e.g. the custom element\'s tag, not an ancestor of it. '
-      + 'Check it with query_dom, or locate the target by its visible text with find_text, which searches inside shadow roots)');
+    // Dalla 1.32.4 ">>>" cerca la parte dopo sotto ogni elemento che la parte
+    // prima trova, nel light DOM e in ogni shadow root aperto (lib/deep-query.js):
+    // un antenato dell'host va bene («main >>> span», note observe
+    // chrome-bridg-6379570f, chrome-bridg-f262acc4). Restano fuori i chiusi.
+    const scope = String(selector).split('>>>')[0].trim();
+    return new Error(`Element not found: ${selector} (no element matches; ">>>" looks for the part after it under every element "${scope}" matches, `
+      + 'in the light DOM and in open shadow roots at any depth; closed shadow roots stay out of reach. '
+      + 'Check it with query_dom, or locate the target by its visible text with find_text)');
   }
   if (!token) return new Error(`Element not found: ${selector} (no element matches; check it with query_dom)`);
   const what = token === 'XPath' ? 'XPath is not CSS' : `"${token}" is Playwright/jQuery syntax, not CSS`;

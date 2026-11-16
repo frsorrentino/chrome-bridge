@@ -103,15 +103,19 @@ test('selettore non CSS (Playwright, jQuery, XPath): lo dice invece di «no elem
 });
 
 // Note observe chrome-bridg-6379570f («main >>> span.aru-text.aru-text-md»),
-// chrome-bridg-f262acc4 («div[role=…] >>> span»), 1.32.1: la parte prima di
-// ">>>" deve essere l'host dello shadow DOM, non un suo antenato. «no element
+// chrome-bridg-f262acc4 («div[role=…] >>> span»), 1.32.1: «no element
 // matches» lasciava credere che mancasse lo span, e il modello cambiava classe.
-test('">>>" senza riscontri: dice che la parte prima va sull\'host dello shadow DOM', () => {
+// Dalla 1.32.4 ">>>" attraversa ogni shadow root sotto la parte prima (vedi
+// deep-query.test.js): un antenato dell'host va bene, e il messaggio non deve
+// più chiedere l'host. Quel che resta fuori sono gli shadow root chiusi.
+test('">>>" senza riscontri: dice dove si è cercato e che gli shadow root chiusi restano fuori', () => {
   assert.throws(() => elementOutcome([{ frameId: 0 }], 'main >>> span.aru-text.aru-text-md'), (e) => {
     assert.match(e.message, /^Element not found: main >>> span\.aru-text\.aru-text-md /);
-    assert.match(e.message, /shadow host/);
+    assert.doesNotMatch(e.message, /shadow host itself/);
     assert.match(e.message, /"main"/);
-    assert.match(e.message, /find_text|get_interactives/);
+    assert.match(e.message, /any depth/);
+    assert.match(e.message, /closed shadow roots/);
+    assert.match(e.message, /find_text/);
     return true;
   });
   // senza ">>>" il messaggio resta quello di prima
