@@ -982,19 +982,30 @@ async function trustedTarget(tabId, frame_id, selector, what) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, kind) => {
-      function deepQuery(s) {
-        if (!s.includes('>>>')) return document.querySelector(s);
-        const parts = s.split('>>>').map((x) => x.trim());
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = sel ? deepQuery(sel) : (document.activeElement || document.body);
       if (!el) return { missing: true };
       if (kind === 'point') {
@@ -1071,19 +1082,30 @@ async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'l
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, forceClick, btn, times) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -1135,19 +1157,30 @@ async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: async (sel, txt, typeMode) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       el.focus();
@@ -1765,8 +1798,13 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, props, lim) => {
-      function deepQueryAll(sel) {
-        if (!sel.includes('>>>')) return [...document.querySelectorAll(sel)];
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
         const last = parts.pop();
         let ctx = document;
@@ -1775,8 +1813,15 @@ async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id 
           if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return [...ctx.querySelectorAll(last)];
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const els = deepQueryAll(sel).slice(0, lim);
       return els.map((el) => {
         const attrs = {};
@@ -1828,19 +1873,30 @@ async function cmdGetCssStyles({ selector, properties, include_inherited = false
   const results = await chrome.scripting.executeScript({
     target,
     func: (sel, props, inherited) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       return globalThis.__cbCssStyles(el, { selector: sel, properties: props, include_inherited: inherited });
@@ -1860,19 +1916,30 @@ async function cmdModifyDom({ selector, action, name, value, className, tab_id, 
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, act, attrName, attrValue, cls) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       switch (act) {
@@ -2046,19 +2113,30 @@ async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, vi
   const run = () => chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, tout, intv, vis) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       return new Promise((resolve) => {
         const start = Date.now();
         const check = () => {
@@ -2108,19 +2186,30 @@ async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, ta
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel, sx, sy, beh, offY) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       if (sel) {
         const el = deepQuery(sel);
         if (!el) throw new Error(`Element not found: ${sel}`);
@@ -2221,19 +2310,30 @@ async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (flds, submitSel) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const report = [];
       for (const { selector, value } of flds) {
         try {
@@ -2605,19 +2705,30 @@ async function cmdReadForm({ selector, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const SENSITIVE = /pass|pwd|card|cvv|cvc|secret|token|otp|pin\b/i;
       const root = sel ? deepQuery(sel) : document;
       if (!root) return { error: `No element matches ${sel}` };
@@ -2683,19 +2794,30 @@ async function evalWatch(w) {
   const results = await chrome.scripting.executeScript({
     target: { tabId: w.tabId },
     func: (selector, text, valueOf) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const out = { url: location.href };
       if (selector) out.present = !!deepQuery(selector);
       if (text) out.text_found = (document.body?.innerText || '').toLowerCase().includes(String(text).toLowerCase());
@@ -3031,19 +3153,30 @@ async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
       const res = await chrome.scripting.executeScript({
         target: { tabId },
         func: (sel) => {
-          function deepQuery(sel) {
-            if (!sel.includes('>>>')) return document.querySelector(sel);
+          // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+          function deepQueryAll(sel, firstOnly) {
+            if (!sel.includes('>>>')) {
+              if (!firstOnly) return [...document.querySelectorAll(sel)];
+              const el = document.querySelector(sel);
+              return el ? [el] : [];
+            }
             const parts = sel.split('>>>').map((s) => s.trim());
+            const last = parts.pop();
             let ctx = document;
-            for (let i = 0; i < parts.length; i++) {
-              const found = ctx.querySelector(parts[i]);
-              if (!found) return null;
-              if (i === parts.length - 1) return found;
-              if (!found.shadowRoot) return null;
+            for (const p of parts) {
+              const found = ctx.querySelector(p);
+              if (!found || !found.shadowRoot) return [];
               ctx = found.shadowRoot;
             }
-            return null;
+            if (!firstOnly) return [...ctx.querySelectorAll(last)];
+            const el = ctx.querySelector(last);
+            return el ? [el] : [];
           }
+
+          function deepQuery(sel) {
+            return deepQueryAll(sel, true)[0] || null;
+          }
+          // deep-query:end
           const el = deepQuery(sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
@@ -3319,19 +3452,30 @@ async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel1, sel2) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el1 = deepQuery(sel1);
       const el2 = deepQuery(sel2);
       if (!el1) throw new Error(`Element not found: ${sel1}`);
@@ -3407,19 +3551,30 @@ async function cmdWatchDom({ selector = 'body', attributes = true, childList = t
   const install = await chrome.scripting.executeScript({
     target: { tabId },
     func: (sel, opts) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       if (!deepQuery(sel)) return { missing: true };
       if (window.__chromeBridge_domWatcherHooked && window.__chromeBridge_domWatchSelector !== sel) {
         if (window.__chromeBridge_domObserver) window.__chromeBridge_domObserver.disconnect();
@@ -3655,19 +3810,30 @@ async function cmdHover({ selector, tab_id, frame_id, trusted = false }) {
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (sel) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       const rect = el.getBoundingClientRect();
@@ -3699,19 +3865,30 @@ async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = f
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: (k, sel, mods) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       let el;
       if (sel) {
         el = deepQuery(sel);
@@ -3803,19 +3980,30 @@ async function cmdUploadFile({ selector, name, mime_type, content_b64, upload_id
     func: (sel, fname, mime, b64, id, expected) => {
       const pieces = id ? window.__cbUploads?.[id] : null;
       if (id) delete window.__cbUploads?.[id];
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const el = deepQuery(sel);
       if (!el) throw new Error(`Element not found: ${sel}`);
       // Un throw qui si perderebbe (elementOutcome lo leggerebbe come «not found»): esito esplicito.
@@ -4127,19 +4315,30 @@ async function captureForDiff(tabId, selector) {
       const res = await chrome.scripting.executeScript({
         target: { tabId },
         func: (sel) => {
-          function deepQuery(sel) {
-            if (!sel.includes('>>>')) return document.querySelector(sel);
+          // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+          function deepQueryAll(sel, firstOnly) {
+            if (!sel.includes('>>>')) {
+              if (!firstOnly) return [...document.querySelectorAll(sel)];
+              const el = document.querySelector(sel);
+              return el ? [el] : [];
+            }
             const parts = sel.split('>>>').map((s) => s.trim());
+            const last = parts.pop();
             let ctx = document;
-            for (let i = 0; i < parts.length; i++) {
-              const found = ctx.querySelector(parts[i]);
-              if (!found) return null;
-              if (i === parts.length - 1) return found;
-              if (!found.shadowRoot) return null;
+            for (const p of parts) {
+              const found = ctx.querySelector(p);
+              if (!found || !found.shadowRoot) return [];
               ctx = found.shadowRoot;
             }
-            return null;
+            if (!firstOnly) return [...ctx.querySelectorAll(last)];
+            const el = ctx.querySelector(last);
+            return el ? [el] : [];
           }
+
+          function deepQuery(sel) {
+            return deepQueryAll(sel, true)[0] || null;
+          }
+          // deep-query:end
           const el = deepQuery(sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
@@ -4823,19 +5022,30 @@ async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5'
   const results = await chrome.scripting.executeScript({
     target: scriptTarget(tabId, frame_id),
     func: async (srcSel, tgtSel, dndMode) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       // Un throw qui arrivava come result undefined e diventava {dragged:false}:
       // un selettore ">>>" (SyntaxError per querySelector) falliva in silenzio.
       const src = deepQuery(srcSel);
@@ -5591,19 +5801,30 @@ async function cmdScrollUntil({ until = 'no_new_content', selector, container, m
   const run = () => chrome.scripting.executeScript({
     target: { tabId },
     func: (mode, sel, containerSel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
-      function deepQuery(sel) {
-        if (!sel.includes('>>>')) return document.querySelector(sel);
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
         const parts = sel.split('>>>').map((s) => s.trim());
+        const last = parts.pop();
         let ctx = document;
-        for (let i = 0; i < parts.length; i++) {
-          const found = ctx.querySelector(parts[i]);
-          if (!found) return null;
-          if (i === parts.length - 1) return found;
-          if (!found.shadowRoot) return null;
+        for (const p of parts) {
+          const found = ctx.querySelector(p);
+          if (!found || !found.shadowRoot) return [];
           ctx = found.shadowRoot;
         }
-        return null;
+        if (!firstOnly) return [...ctx.querySelectorAll(last)];
+        const el = ctx.querySelector(last);
+        return el ? [el] : [];
       }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const docEl = document.scrollingElement || document.documentElement;
       const scrollable = (el) => {
