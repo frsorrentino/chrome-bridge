@@ -1170,15 +1170,21 @@ async function testUploadShadow() {
   const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}upload-shadow`, active: true });
   const tab_id = tab.id;
   await new Promise((r) => setTimeout(r, 800));
-  try {
-    const r = await uploadBuffer((t, p) => wsManager.sendCommand(t, p), { selector: '#l1 >>> #l2 >>> #l3 >>> input[type=file]', name: 'deep.txt', mime_type: 'text/plain', buf: Buffer.from('ciao'), tab_id });
-    const page = await wsManager.sendCommand(MessageType.EXECUTE_JS, {
-      code: '(async () => { const f = document.getElementById("l1").shadowRoot.getElementById("l2").shadowRoot.getElementById("l3").shadowRoot.getElementById("f").files[0]; return f ? f.name + ":" + await f.text() : null; })()',
-      tab_id,
-    });
-    if (r.uploaded !== 'deep.txt' || page.result !== 'deep.txt:ciao') throw new Error(`esito ${JSON.stringify(r)}, pagina ${page.result}`);
-    ok('upload_file attraverso 3 shadow root con >>>');
-  } catch (e) { fail('upload_file attraverso 3 shadow root', e.message); }
+  // 1.32.4: anche con un antenato degli host prima di ">>>".
+  for (const [where, selector, name] of [
+    ['attraverso 3 shadow root con >>>', '#l1 >>> #l2 >>> #l3 >>> input[type=file]', 'deep.txt'],
+    ['con >>> dopo un antenato degli host (body)', 'body >>> input[type=file]', 'avo.txt'],
+  ]) {
+    try {
+      const r = await uploadBuffer((t, p) => wsManager.sendCommand(t, p), { selector, name, mime_type: 'text/plain', buf: Buffer.from('ciao'), tab_id });
+      const page = await wsManager.sendCommand(MessageType.EXECUTE_JS, {
+        code: '(async () => { const f = document.getElementById("l1").shadowRoot.getElementById("l2").shadowRoot.getElementById("l3").shadowRoot.getElementById("f").files[0]; return f ? f.name + ":" + await f.text() : null; })()',
+        tab_id,
+      });
+      if (r.uploaded !== name || page.result !== `${name}:ciao`) throw new Error(`esito ${JSON.stringify(r)}, pagina ${page.result}`);
+      ok(`upload_file ${where}`);
+    } catch (e) { fail(`upload_file ${where}`, e.message); }
+  }
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
 
@@ -1342,19 +1348,29 @@ async function testShadowSelectors() {
   const tab = await wsManager.sendCommand(MessageType.CREATE_TAB, { url: `${FIXTURE_URL}shadow-tools`, active: true });
   const tab_id = tab.id;
   await new Promise((r) => setTimeout(r, 800));
-  const D = '#l1 >>> #l2 >>> #l3 >>> ';
   const deep = (expr) => wsManager.sendCommand(MessageType.EXECUTE_JS, {
     code: `(() => { const r = document.getElementById("l1").shadowRoot.getElementById("l2").shadowRoot.getElementById("l3").shadowRoot; return ${expr}; })()`, tab_id,
   }).then((d) => d.result);
-  const cases = [
+  // 1.32.4: ">>>" attraversa ogni shadow root sotto la parte prima, quindi ogni
+  // caso gira due volte: con la catena degli host e con un antenato («body»)
+  // che salta tutti e tre i livelli. Con la regola vecchia il secondo giro
+  // falliva in ogni tool. k cambia i valori scritti, così il secondo giro non
+  // passa per quello che ha lasciato il primo.
+  const casesFor = (D, k) => [
     ['modify_dom', async () => {
-      await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector: `${D}#a`, action: 'setAttribute', name: 'data-x', value: '1', tab_id });
-      return (await deep('r.getElementById("a").dataset.x')) === '1';
+      await wsManager.sendCommand(MessageType.MODIFY_DOM, { selector: `${D}#a`, action: 'setAttribute', name: 'data-x', value: k, tab_id });
+      return (await deep('r.getElementById("a").dataset.x')) === k;
+    }],
+    ['query_dom', async () => {
+      const d = await wsManager.sendCommand(MessageType.QUERY_DOM, { selector: `${D}#a`, tab_id });
+      const els = Array.isArray(d) ? d : (d.elements ?? d.results ?? []);
+      return els.length === 1 && els[0].id === 'a';
     }],
     ['scroll action=to', async () => { await wsManager.sendCommand(MessageType.SCROLL_TO, { selector: `${D}#b`, tab_id }); return true; }],
     ['fill_form (campo e submit_selector)', async () => {
-      const d = await wsManager.sendCommand(MessageType.FILL_FORM, { fields: [{ selector: `${D}#t`, value: 'abc' }], submit_selector: `${D}#go`, tab_id });
-      return d.fields?.[0]?.success === true && d.submitted === true && (await deep('r.getElementById("t").value + "/" + r.getElementById("fm").dataset.sent')) === 'abc/1';
+      await deep('(delete r.getElementById("fm").dataset.sent, true)');
+      const d = await wsManager.sendCommand(MessageType.FILL_FORM, { fields: [{ selector: `${D}#t`, value: `abc${k}` }], submit_selector: `${D}#go`, tab_id });
+      return d.fields?.[0]?.success === true && d.submitted === true && (await deep('r.getElementById("t").value + "/" + r.getElementById("fm").dataset.sent')) === `abc${k}/1`;
     }],
     ['read_form', async () => {
       const d = await wsManager.sendCommand(MessageType.READ_FORM, { selector: `${D}#fm`, tab_id });
@@ -1377,7 +1393,7 @@ async function testShadowSelectors() {
       // Prima un selettore illeggibile faceva fallire lo script in silenzio e
       // il tool rispondeva senza osservare nulla: conta la mutation vista.
       await wsManager.sendCommand(MessageType.WATCH_DOM, { selector: `${D}#a`, clear: true, tab_id });
-      await deep('r.getElementById("a").setAttribute("data-y", "2")');
+      await deep(`r.getElementById("a").setAttribute("data-y", "${k}")`);
       await new Promise((r) => setTimeout(r, 200));
       const d = await wsManager.sendCommand(MessageType.WATCH_DOM, { selector: `${D}#a`, tab_id });
       await wsManager.sendCommand(MessageType.WATCH_DOM, { stop: true, tab_id });
@@ -1394,17 +1410,20 @@ async function testShadowSelectors() {
     }],
     ['drag_and_drop (sorgente e destinazione)', async () => {
       // Prima rispondeva {dragged:false} senza errore: conta il drop arrivato.
-      await deep('(r.getElementById("b").addEventListener("drop", (e) => { e.currentTarget.dataset.dropped = "1"; }), true)');
+      await deep(`(r.getElementById("b").addEventListener("drop", (e) => { e.currentTarget.dataset.dropped = "${k}"; }, { once: true }), true)`);
       const d = await wsManager.sendCommand(MessageType.DRAG_AND_DROP, { source_selector: `${D}#a`, target_selector: `${D}#b`, tab_id });
-      return d.dragged === `${D}#a` && (await deep('r.getElementById("b").dataset.dropped')) === '1';
+      return d.dragged === `${D}#a` && (await deep('r.getElementById("b").dataset.dropped')) === k;
     }],
   ];
-  for (const [tool, run] of cases) {
-    const name = `${tool} attraverso 3 shadow root con >>>`;
-    try {
-      if (!(await run())) throw new Error('esito inatteso');
-      ok(name);
-    } catch (e) { fail(name, e.message); }
+  const prefixes = [['attraverso 3 shadow root con >>>', '#l1 >>> #l2 >>> #l3 >>> '], ['con >>> dopo un antenato degli host (body)', 'body >>> ']];
+  for (const [n, [where, D]] of prefixes.entries()) {
+    for (const [tool, run] of casesFor(D, String(n + 1))) {
+      const name = `${tool} ${where}`;
+      try {
+        if (!(await run())) throw new Error('esito inatteso');
+        ok(name);
+      } catch (e) { fail(name, e.message); }
+    }
   }
   await wsManager.sendCommand(MessageType.TAB_ACTION, { action: 'close', tab_id }).catch(() => {});
 }
@@ -1515,9 +1534,10 @@ async function main() {
     const withTab = (params = {}) => ({ ...params, tab_id: testTabId });
 
     console.log('Running tests:\n');
-    // CHROME_BRIDGE_E2E_ONLY=webmcp: solo il blocco WebMCP, senza l'intera suite.
+    // CHROME_BRIDGE_E2E_ONLY=webmcp|shadow: solo quel blocco, senza l'intera suite.
     suite: {
       if (process.env.CHROME_BRIDGE_E2E_ONLY === 'webmcp') { await testWebmcp(); break suite; }
+      if (process.env.CHROME_BRIDGE_E2E_ONLY === 'shadow') { await testUploadShadow(); await testShadowSelectors(); break suite; }
 
       // Original 8 tests
       await testGetPageInfo(testTabId);
