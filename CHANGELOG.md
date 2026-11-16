@@ -28,6 +28,30 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.4 — 2026-11-16
+
+Extension: the manifest goes to 1.32.4. `>>>` becomes a deep combinator.
+
+### Changed
+
+- `A >>> B` finds B under every element A matches: in its shadowRoot, in its
+  light DOM and in every open shadow root below, at any depth. Until 1.32.3
+  B was looked for only in the shadowRoot of the first element A matched, so
+  `main >>> span.label`, with the span inside a component under `main`, found
+  nothing; 1.32.3 only explained the rule in the error. Wherever the old rule
+  found an element, the same element comes back: the search starts from A's
+  own shadowRoot. `query_dom` now also lists the matches in A's light DOM.
+  Closed shadow roots stay out of reach, and the not-found error says so.
+
+### Internal
+
+- The 20 inline copies of `deepQuery` in `extension/service-worker.js` come
+  from one source, `extension/lib/deep-query.js`; `node
+  tools/sync-deep-query.mjs` rewrites them, and a unit test fails if a copy
+  differs. The e2e shadow-DOM block runs every tool with the host chain and
+  with an ancestor (`body >>>`); `CHROME_BRIDGE_E2E_ONLY=shadow` runs just
+  that block.
+
 ## 1.32.3 — 2026-11-15
 
 Extension: the manifest goes to 1.32.3. Three error messages that sent
