@@ -28,6 +28,39 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.6 — 2026-11-19
+
+Server and CLI only: the extension does not change, the manifest stays
+1.32.4. Task chrome-bridge-guard-19-11, for the HOL Guard profile in
+hashgraph-online/hol-guard#8079.
+
+### Added
+
+- `chrome-bridge list-tools --format json` prints every tool, the optional
+  groups included (69 today), with `name`, `group`, `description`,
+  `annotations` and `inputSchema`, exactly as `tools/list` sends them with
+  `--caps all`. No server, no Chrome: it reads the tools from the code.
+  Without `--format json`, one line per tool: name, group, hints.
+
+### Fixed
+
+- `tools/list` no longer puts `"$schema": "http://json-schema.org/draft-07/schema#"`
+  at the top of every `inputSchema`. MCP does not ask for it, and generators
+  that build profiles or clients from the schemas reject it.
+- Annotations of the tools a permission profile reviews, checked against
+  what the code does: `click`, `press_key` and `fill_form` are
+  `destructiveHint: true` and `openWorldHint: true` (a click, an Enter or a
+  submit can delete, buy or send); `handle_dialogs` is destructive (accept
+  confirms future `confirm()` dialogs, "Delete?" included); `clipboard` is
+  destructive (write overwrites what the user had copied, as its description
+  already said); `network_rules` is destructive (record overwrites the
+  fixture, stub and block change what the page receives); `upload_file` is
+  `openWorldHint: true` (the page can send the file on at once). Unchanged
+  after the check: `execute_js`, `http_request`, `webmcp_call`, `tab_action`,
+  `type_text`, and `get_status`, which stays not read-only because `enable`
+  turns optional groups on. No new confirmations: chrome-bridge itself does
+  not read these hints.
+
 ## 1.32.5 — 2026-11-16
 
 Plugin hooks only: no server or extension code changes, the manifest stays
