@@ -16,6 +16,7 @@
 import { uploadBuffer } from './upload.js';
 import WebSocket from 'ws';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, MessageType, createCommand, getTimeout } from './protocol.js';
@@ -562,7 +563,13 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// npm e npx installano il bin come symlink: argv[1] è il link, non questo file.
+// Senza realpath la CLI installata usciva 0 senza fare niente.
+const invokedDirectly = (() => {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+})();
+if (invokedDirectly) {
   main().catch((err) => {
     process.stderr.write(`Error: ${err.message}\n`);
     process.exit(1);

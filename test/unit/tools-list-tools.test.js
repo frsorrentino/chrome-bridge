@@ -12,6 +12,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -76,6 +79,24 @@ test('chrome-bridge list-tools --format json: JSON completo senza server', () =>
   assert.deepEqual(tools, JSON.parse(JSON.stringify(describeTools())));
   for (const n of ['execute_js', 'click', 'get_status', 'clipboard', 'handle_dialogs', 'cookie_audit', 'heap_snapshot']) {
     assert.ok(tools.some((t) => t.name === n), `${n} manca`);
+  }
+});
+
+// npm e npx installano il bin come symlink (node_modules/.bin/chrome-bridge →
+// ../chrome-bridge-mcp/server/cli.js): process.argv[1] è il link, non il file.
+// Con il confronto sul percorso nudo la CLI usciva 0 senza fare niente.
+test('la CLI parte anche chiamata da un symlink, come la installa npm', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cb-bin-'));
+  const link = join(dir, 'chrome-bridge');
+  symlinkSync(CLI, link);
+  try {
+    const r = spawnSync(process.execPath, [link, 'list-tools', '--format', 'json'], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, CHROME_BRIDGE_PORT: '1' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(JSON.parse(r.stdout).length >= 60, 'output vuoto o incompleto dal symlink');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
