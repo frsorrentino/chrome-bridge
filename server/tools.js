@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
+import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import { runAssert } from './assertions.js';
 import { ensureStubServer, addStub, clearStubs, listStubs, stubHost } from './stub-server.js';
 import { MessageType, VERSION, EXTENSION_STORE_URL } from './protocol.js';
@@ -414,19 +415,19 @@ export const TOOL_ANNOTATIONS = {
   webmcp_tools: ro(),
 
   // --- interazione con la pagina ---
-  click: rw({ open: true }),          // un click può navigare
+  click: rw({ destructive: true, open: true }),  // un click può inviare, cancellare o navigare
   drag_and_drop: rw(),
-  fill_form: rw(),  // con submit_selector INVIA: ritentare invia due volte
+  fill_form: rw({ destructive: true, open: true }),  // con submit_selector INVIA: ritentare invia due volte
   hover: rw({ idempotent: true }),
-  press_key: rw(),
+  press_key: rw({ destructive: true, open: true }),  // Enter invia il form
   scroll: rw(),
   type_text: rw({ idempotent: true }),
-  upload_file: rw(),
+  upload_file: rw({ open: true }),  // la pagina può mandare subito il file al suo server
 
   // --- modifica di pagina, tab o resa ---
   dismiss_overlays: rw({ idempotent: true }),
   emulate_media: rw({ idempotent: true }),
-  handle_dialogs: rw({ idempotent: true }),
+  handle_dialogs: rw({ destructive: true, idempotent: true }),  // accept conferma i confirm() futuri, «Eliminare?» compreso
   inject_css: rw({ idempotent: true }),
   modify_dom: rw({ idempotent: true }),
   screenshot_diff: rw({ idempotent: true }),
@@ -440,7 +441,7 @@ export const TOOL_ANNOTATIONS = {
 
   // --- rete, identità, posizione ---
   http_auth: rw({ idempotent: true, open: true }),
-  network_rules: rw({ idempotent: true, open: true }),
+  network_rules: rw({ destructive: true, idempotent: true, open: true }),  // record sovrascrive la fixture; stub e block cambiano ciò che la pagina riceve
   set_geolocation: rw({ idempotent: true }),
 
   // --- codice arbitrario ---
@@ -453,13 +454,68 @@ export const TOOL_ANNOTATIONS = {
   http_request: rw({ destructive: true, open: true }),
 
   // --- stato che può essere distrutto o sovrascritto ---
-  clipboard: rw({ idempotent: true }),
+  clipboard: rw({ destructive: true, idempotent: true }),  // write sovrascrive quello che l'utente aveva copiato
   read_console: rw({ destructive: true }),                        // clear:true cancella il buffer
   save_page: rw({ destructive: true, idempotent: true }),         // sovrascrive output_path
   session_fixture: rw({ destructive: true, idempotent: true }),   // restore sovrascrive cookie e storage
   session_record: rw(),
   set_storage: rw({ destructive: true, idempotent: true }),
 };
+
+/**
+ * Lo schema JSON di un tool come lo manda tools/list: stesso converter e
+ * stesse opzioni dell'SDK, senza "$schema". L'SDK lo mette in testa a ogni
+ * inputSchema ("draft-07"); la specifica MCP non lo chiede e chi genera
+ * profili o client dagli schemi (HOL Guard, hol-guard#8079) lo rifiuta.
+ */
+export function inputJsonSchema(shape) {
+  const { $schema: _dialect, ...js } = toJsonSchemaCompat(z.object(shape ?? {}), { strictUnions: true, pipeStrategy: 'input' });
+  return js;
+}
+
+// tools/list lo costruisce l'SDK dentro il suo handler, senza un'opzione per
+// togliere "$schema": lo si toglie dal risultato. _requestHandlers è interno
+// all'SDK; se cambia, il tool resta com'era e
+// test/unit/tools-list-tools.test.js fallisce.
+function dropSchemaDialect(lowLevelServer) {
+  const handlers = lowLevelServer?._requestHandlers;
+  const list = handlers?.get?.('tools/list');
+  if (typeof list !== 'function' || list.dialectDropped) return;
+  const wrapped = async (request, extra) => {
+    const res = await list(request, extra);
+    for (const t of res?.tools ?? []) {
+      if (t.inputSchema) delete t.inputSchema.$schema;
+      if (t.outputSchema) delete t.outputSchema.$schema;
+    }
+    return res;
+  };
+  wrapped.dialectDropped = true;
+  handlers.set('tools/list', wrapped);
+}
+
+/**
+ * Tutti i tool, gruppi opzionali compresi, senza server né Chrome: nome,
+ * gruppo, descrizione, annotations e inputSchema identici a tools/list con
+ * caps=all. Per `chrome-bridge list-tools` e per chi tiene un profilo di
+ * permessi allineato ai tool.
+ */
+export function describeTools() {
+  const out = [];
+  const fakeServer = {
+    tool(name, description, schema, annotations) {
+      out.push({
+        name,
+        group: TOOL_TO_CAP.get(name) ?? 'core',
+        description,
+        annotations: typeof annotations === 'function' ? undefined : annotations,
+        inputSchema: inputJsonSchema(schema),
+      });
+    },
+  };
+  const fakeWs = { isConnected: () => false, mode: 'primary', host: '127.0.0.1', port: 0, sendCommand: async () => ({}) };
+  registerTools(fakeServer, fakeWs, 'all');
+  return out;
+}
 
 /**
  * Registra tutti i tool MCP.
@@ -3506,6 +3562,8 @@ export function registerTools(server, wsManager, caps = 'all', options = {}) {
       return { content: [{ type: 'text', text: jsonText(stopped ? { stopped: stopped.name, file: stopped.file } : { stopped: null }) }] };
     }
   );
+
+  dropSchemaDialect(lowLevelServer);
 
   // Per index.js allo shutdown: chiudi le tab create qui e rimaste vuote,
   // come fa Claude in Chrome col suo tab group; le pagine con contenuto restano.

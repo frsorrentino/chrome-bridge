@@ -38,7 +38,7 @@ const INTERNAL_TYPES = new Set([
 ]);
 
 // Comandi virtuali: logica lato CLI (come i corrispondenti tool MCP lato server)
-const VIRTUAL_COMMANDS = new Set(['status', 'window_layout', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence', 'run']);
+const VIRTUAL_COMMANDS = new Set(['status', 'window_layout', 'check_links', 'security_headers', 'replay', 'assert', 'track', 'redirects', 'audit', 'export', 'evidence', 'run', 'list-tools']);
 
 const ALIASES = { tabs: 'get_tabs', js: 'execute_js', console: 'read_console', network: 'monitor_network', interactives: 'get_interactives' };
 
@@ -510,10 +510,30 @@ Examples:
   chrome-bridge redirects --csv migration.csv       # old,new per line; exit 1 on any mismatch
   chrome-bridge audit --kinds a11y,seo,links --out audit.md
   chrome-bridge export --file login.jsonl --out tests/login.spec.ts
+  chrome-bridge list-tools --format json     # every tool, optional groups included: group, annotations, inputSchema; no server needed
   chrome-bridge evidence --url https://copycat.example --out fascicolo/   # screenshot, DOM, HAR, headers, hashes; redacted
   chrome-bridge watch --wait deploy --timeout 3600 && notify-send 'deploy done'   # after watch action=add name=deploy
   chrome-bridge fill_form --from contacts.csv --map '{"#name":"name","#email":"email"}' --url https://crm/new --submit '#save' --assert-text Saved
 `);
+}
+
+/**
+ * Tutti i tool, gruppi opzionali compresi, senza server né Chrome.
+ * --format json: l'array [{name, group, description, annotations, inputSchema}],
+ * come tools/list con caps=all; senza: una riga per tool, nome, gruppo, hint.
+ * tools.js si carica solo qui: gli altri comandi della CLI non lo pagano.
+ */
+export async function listTools(opts = {}) {
+  const { describeTools } = await import('./tools.js');
+  const tools = describeTools();
+  if (opts.format === 'json') return JSON.stringify(tools, null, 2);
+  const hints = (a = {}) => [
+    a.readOnlyHint ? 'read-only' : 'writes',
+    a.destructiveHint && 'destructive',
+    a.idempotentHint && 'idempotent',
+    a.openWorldHint && 'open-world',
+  ].filter(Boolean).join(',');
+  return tools.map((t) => `${t.name}\t${t.group}\t${hints(t.annotations)}`).join('\n');
 }
 
 async function readStdin() {
@@ -531,6 +551,8 @@ async function main() {
   const { command, params, opts } = parseCliArgs(argv);
   // export non tocca il browser: niente bridge da raggiungere
   if (command === 'export') { printResult(await run(null, command, params, opts), opts); return; }
+  // list-tools nemmeno: legge i tool dal codice, senza server né Chrome
+  if (command === 'list-tools') { printResult(await listTools(opts), { ...opts, max_chars: 0 }); return; }
   const port = parseInt(process.env.CHROME_BRIDGE_PORT || DEFAULT_PORT, 10);
   const client = await connect(port);
   try {
