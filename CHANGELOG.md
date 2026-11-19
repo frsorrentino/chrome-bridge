@@ -28,6 +28,20 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.7 — 2026-11-19
+
+CLI only: the extension does not change, the manifest stays 1.32.4. Task
+chrome-bridge-guard-19-11.
+
+### Fixed
+
+- The `chrome-bridge` CLI installed by npm or npx did nothing and exited 0.
+  npm installs the bin as a symlink, so `process.argv[1]` is the link, and
+  the check that starts `main()` compared it with the real path of
+  `server/cli.js`. Both sides now go through `realpath`. Every CLI command
+  was affected on Linux and macOS since the CLI was added, not only
+  `list-tools`; `node server/cli.js` and the Windows shims were not.
+
 ## 1.32.6 — 2026-11-19
 
 Server and CLI only: the extension does not change, the manifest stays
