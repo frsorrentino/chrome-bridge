@@ -1243,7 +1243,9 @@ def draft(tool, recs, target=None, security=False, bare=False):
     vs = [view(r) for r in sorted(recs, key=lambda r: -int(r.get("count") or 0))]
     recs_by_id = {r.get("id"): r for r in recs}
     keep = own_names()
-    out = lambda x, n: generalize(scrub(x, n), keep)  # noqa: E731 — ogni testo che esce
+    # ogni testo che esce, su una riga (20/11, claude-observe-righe-a-capo-20-11: un a capo nel messaggio CSP di execute_js
+    # spezzava la lista e il servizio anonimo rifiutava la bozza con HTTP 400; il file locale resta com'e')
+    out = lambda x, n: " ".join(generalize(scrub(x, n), keep).split())  # noqa: E731
     rows = []
     for v in vs[:20]:
         c = (recs_by_id.get(v.get("id")) or {}).get("context") or {}

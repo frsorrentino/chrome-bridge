@@ -28,6 +28,19 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.8 — 2026-11-20
+
+Observations only: the server, the CLI and the extension do not change, the
+manifest stays 1.32.4. Task claude-observe-righe-a-capo-20-11.
+
+### Fixed
+
+- `/chrome-bridge:observe send --anonymous` was refused with HTTP 400 when an
+  observation carried a message on several lines (the CSP error of
+  `execute_js` has one): the anonymous service accepts only list lines in the
+  body. `observe/` is synced from claude-observe 29459e7, where every text in
+  the draft stays on one line; the local file keeps the message as it was.
+
 ## 1.32.7 — 2026-11-19
 
 CLI only: the extension does not change, the manifest stays 1.32.4. Task
