@@ -28,6 +28,13 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+### Internal
+
+- `observe/` synced from claude-observe 3f264f6, whose `sync.py` no longer
+  writes `allowed-tools` for any plugin: a new sync keeps
+  `/chrome-bridge:observe` without it. Only `observe/SOURCE` changes. Task
+  claude-observe-senza-allowed-tools-24-11.
+
 ## 1.32.9 — 2026-11-24
 
 Extension: the manifest goes to 1.32.9, with no change in what it does. The
