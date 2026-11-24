@@ -28,6 +28,37 @@ finestra app con le sole sessioni, poi `tab_action close` sulla home (sola nel
 suo popup) la chiude subito. La finestra resta di tipo `app` e accetta schede
 nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
 
+## 1.32.9 — 2026-11-24
+
+Extension: the manifest goes to 1.32.9, with no change in what it does. The
+two holds of the plugin directory on 1.32.8 that could be fixed at once.
+Task chrome-bridge-directory-24-11.
+
+### Changed
+
+- `/chrome-bridge:observe` no longer pre-approves its own command: without
+  `allowed-tools` in `commands/observe.md`, Claude Code asks for the Bash
+  permission as it does for any other command. The directory held the plugin
+  for «Pre-approved tools are limited beside a dependency install».
+  claude-observe `sync.py` (29459e7) still writes that line: a new sync puts
+  it back until the source changes.
+
+### Internal
+
+- `extension/service-worker.js` was 273,285 bytes, over the 256 KiB the
+  directory validator reads («Files or downloads the validator couldn't
+  inspect»). Eight groups moved as they were into modules under
+  `extension/sw/`: the audit commands, `handoff`, `observe`, `emulate_media`,
+  the perf commands, `manage_downloads` with `capture_files`, and the tab and
+  screen-capture helpers they share. The service worker imports them and is
+  now 204,179 bytes; the largest module is 21,394. The listeners stay in the
+  service worker, in the same order. Checked against 1.32.8: the same 202
+  top-level statements with the same text, every comment kept, no name left
+  unresolved, the 20 inline `deepQuery` copies still in the service worker.
+  The e2e suite in launch mode (Edge headless, on Windows) gives 132/133 on
+  both builds, the same test failing on both: `viewport_resize`, «Bounds must
+  be at least 50% within visible screen space».
+
 ## 1.32.8 — 2026-11-20
 
 Observations only: the server, the CLI and the extension do not change, the

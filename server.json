@@ -6,13 +6,13 @@
     "url": "https://github.com/frsorrentino/chrome-bridge",
     "source": "github"
   },
-  "version": "1.32.8",
+  "version": "1.32.9",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "chrome-bridge-mcp",
-      "version": "1.32.8",
+      "version": "1.32.9",
       "transport": {
         "type": "stdio"
       }
