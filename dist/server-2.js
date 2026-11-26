@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { resolve, join, dirname, extname, basename, isAbsolute, sep } from 'node:path';
 import { p as parse } from './vendor-node-html-parser-1.js';
 import { t as toJsonSchemaCompat } from './vendor-modelcontextprotocol-sdk-1.js';
-import { E as EXTENSION_STORE_URL, M as MessageType, c as consoleLines, t as toHar, n as networkLines, r as runLighthouse, l as lighthouseArgs, s as summarizeLighthouse, a as summarizeHeap, b as cdpConnect, d as targetWsUrl, e as takeHeapSnapshot, f as diffHeap, g as MAX_UPLOAD_BYTES, u as uploadBuffer, i as interactivesLines, h as ensureStubServer, j as addStub, k as stubHost, m as clearStubs, o as listStubs, p as decodeTrackingRequests, q as trackingLines, v as summarizeConsent, w as consentLines, D as DEFAULT_KINDS, x as runAudit, y as summarizeAudit, z as auditReport, C as CAPTURE_DEFAULT_MB, A as CAPTURE_MAX_MB, B as collectCaptured, F as windowLayout, G as interactiveLine, H as runAssert, I as toPlaywrightTest, J as fingerprintDelta, K as createResolver, L as analyzeTrace, N as traceEventsOf, O as assembleVideo, V as VERSION, P as AUDIT_KINDS } from './server-1.js';
+import { E as EXTENSION_STORE_URL, M as MessageType, c as consoleLines, t as toHar, n as networkLines, s as summarizeHeap, a as cdpConnect, b as targetWsUrl, d as takeHeapSnapshot, e as diffHeap, f as MAX_UPLOAD_BYTES, u as uploadBuffer, i as interactivesLines, g as ensureStubServer, h as addStub, j as stubHost, k as clearStubs, l as listStubs, m as decodeTrackingRequests, o as trackingLines, p as summarizeConsent, q as consentLines, D as DEFAULT_KINDS, r as runAudit, v as summarizeAudit, w as auditReport, C as CAPTURE_DEFAULT_MB, x as CAPTURE_MAX_MB, y as collectCaptured, z as windowLayout, A as interactiveLine, B as runAssert, F as toPlaywrightTest, G as fingerprintDelta, H as createResolver, I as analyzeTrace, J as traceEventsOf, K as assembleVideo, V as VERSION, L as AUDIT_KINDS } from './server-1.js';
 import { p as array, _ as _enum, t as boolean, s as string, n as number, o as object, r as record, C as any } from './vendor-zod-5.js';
 import './vendor-zod-1.js';
 import './vendor-zod-6.js';
@@ -37,6 +37,21 @@ import './vendor-jridgewell-sourcemap-codec-1.js';
 import './vendor-jridgewell-resolve-uri-1.js';
 import 'node:child_process';
 import 'node:fs';
+
+/**
+ * Takes the place of server/lighthouse.js in the bundle of the Claude Code plugin
+ * (tools/build-plugin-server.mjs). The real module fetches the Lighthouse CLI from npm
+ * on its first call and runs it; the plugin ships no code that fetches and runs another.
+ *
+ * Nothing is lost: the lighthouse tool works only in launch mode (it needs the DevTools
+ * port of the browser chrome-bridge started), and the plugin never starts in launch mode,
+ * so the tool already stops at cdpPortOrThrow in server/tools.js with the same message as
+ * before, ahead of any call below. The npm package keeps the real module.
+ */
+const NOT_HERE = 'Lighthouse is not part of the Claude Code plugin: it runs in launch mode, from the npm package chrome-bridge-mcp.';
+function lighthouseArgs() { throw new Error(NOT_HERE); }
+function runLighthouse() { return Promise.reject(new Error(NOT_HERE)); }
+function summarizeLighthouse() { throw new Error(NOT_HERE); }
 
 /**
  * Registra i tool MCP sul server.
@@ -2299,14 +2314,14 @@ function registerTools(server, wsManager, caps = 'all', options = {}) {
       tab_id: tabId,
     },
     async ({ url, categories, form_factor, save_to, tab_id }) => {
-      const port = await cdpPortOrThrow('lighthouse');
+      await cdpPortOrThrow('lighthouse');
       const target = url ?? (await send(MessageType.CDP_TARGET, { tab_id })).url;
       if (!/^https?:/i.test(target ?? '')) throw new Error(`Lighthouse needs an http(s) URL, got ${target}`);
       const base = guardWrite(save_to ?? join(CAPTURES_DIR, `lighthouse-${captureStamp()}`));
       await mkdir(dirname(base), { recursive: true });
-      await runLighthouse(lighthouseArgs(target, port, base, { categories, formFactor: form_factor }));
-      const lhr = JSON.parse(await readFile(`${base}.report.json`, 'utf8'));
-      const data = { ...summarizeLighthouse(lhr), report: `${base}.report.html`, json: `${base}.report.json` };
+      await runLighthouse(lighthouseArgs());
+      JSON.parse(await readFile(`${base}.report.json`, 'utf8'));
+      const data = { ...summarizeLighthouse(), report: `${base}.report.html`, json: `${base}.report.json` };
       return { content: [{ type: 'text', text: jsonText(data) }] };
     }
   );

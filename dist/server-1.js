@@ -2,12 +2,12 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { mkdir, writeFile, readFile, rm, open } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
-import { join, dirname, extname, win32 } from 'node:path';
+import { join, dirname, extname } from 'node:path';
 import { W as WebSocket, a as WebSocketServer } from './vendor-ws-1.js';
 import { createServer } from 'node:http';
 import { T as TraceMap, o as originalPositionFor } from './vendor-jridgewell-trace-mapping-1.js';
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 
 /**
  * Costanti del protocollo e helper per la comunicazione WebSocket.
@@ -115,7 +115,7 @@ const MessageType = Object.freeze({
 });
 
 // Versione
-const VERSION               = '1.33.0';
+const VERSION               = '1.33.1';
 
 // Configurazione
 const DEFAULT_PORT          = 8765;
@@ -2745,91 +2745,4 @@ function diffHeap(before, after, { top = 15 } = {}) {
   };
 }
 
-/**
- * lighthouse: il CLI di Lighthouse contro la porta CDP del browser lanciato,
- * prestazioni comprese (chrome-devtools-mcp le esclude dal suo audit). Il
- * report intero va su file; al modello arrivano punteggi, metriche e le voci
- * che pesano di più fra quelle non superate.
- *
- * Il CLI arriva con npx alla prima chiamata (versione fissata, ~19 MB): non è
- * una dipendenza di chrome-bridge. Lighthouse 13 vuole Node >= 22.19, mentre
- * chrome-bridge gira da Node 18: sotto si usa la 12.8.2 (Node >= 18.16).
- */
-
-function lighthouseVersion(node = process.versions.node) {
-  const [maj, min] = node.split('.').map(Number);
-  return maj > 22 || (maj === 22 && min >= 19) ? '13.5.0' : '12.8.2';
-}
-const METRICS = ['first-contentful-paint', 'largest-contentful-paint', 'total-blocking-time', 'cumulative-layout-shift', 'speed-index'];
-
-function lighthouseArgs(url, port, outBase, { categories, formFactor = 'mobile' } = {}) {
-  return ['-y', `lighthouse@${lighthouseVersion()}`, url, `--port=${port}`, '--output=json', '--output=html', `--output-path=${outBase}`,
-    '--quiet', ...(categories?.length ? [`--only-categories=${categories.join(',')}`] : []), ...(formFactor === 'desktop' ? ['--preset=desktop'] : [])];
-}
-
-/**
- * Come lanciare npx. Su Windows npx è npx.cmd, che spawn senza shell non trova
- * (ENOENT): si usa npx-cli.js accanto a node.exe con il node del server, senza
- * shell. Se manca, npx.cmd con la shell e gli argomenti fra virgolette.
- */
-function npxCommand({ platform = process.platform, execPath = process.execPath, env = process.env, exists = existsSync } = {}) {
-  if (env.CHROME_BRIDGE_NPX) return { cmd: env.CHROME_BRIDGE_NPX, pre: [], shell: false };
-  if (platform !== 'win32') return { cmd: 'npx', pre: [], shell: false };
-  const cli = win32.join(win32.dirname(execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  if (exists(cli)) return { cmd: execPath, pre: [cli], shell: false };
-  return { cmd: 'npx.cmd', pre: [], shell: true };
-}
-
-function runLighthouse(args, { timeoutMs = 240000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const { cmd, pre, shell } = npxCommand();
-    const argv = [...pre, ...args].map((a) => (shell ? `"${a}"` : a));
-    const p = spawn(cmd, argv, { stdio: ['ignore', 'ignore', 'pipe'], shell });
-    let err = '';
-    const timer = setTimeout(() => { p.kill('SIGKILL'); reject(new Error(`Lighthouse did not finish within ${timeoutMs / 1000} s`)); }, timeoutMs);
-    p.stderr.on('data', (d) => { err += d; });
-    p.on('error', (e) => { clearTimeout(timer); reject(new Error(e.code === 'ENOENT' ? 'npx not found: Lighthouse runs through npx (Node.js)' : e.message)); });
-    p.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`Lighthouse exited with ${code}: ${err.trim().split('\n').slice(-3).join(' ').slice(0, 400)}`));
-    });
-  });
-}
-
-/** Sintesi del report JSON: punteggi 0-100, metriche, voci non superate per peso. */
-function summarizeLighthouse(lhr, { top = 10 } = {}) {
-  const categories = {};
-  const failing = [];
-  for (const [id, cat] of Object.entries(lhr.categories ?? {})) {
-    categories[id] = cat.score == null ? null : Math.round(cat.score * 100);
-    for (const ref of cat.auditRefs ?? []) {
-      const a = lhr.audits?.[ref.id];
-      if (!a || a.score == null || a.score >= 0.9 || a.scoreDisplayMode === 'informative' || a.scoreDisplayMode === 'notApplicable') continue;
-      if (!ref.weight && !a.metricSavings) continue;
-      failing.push({
-        category: id, id: ref.id, title: a.title, score: Math.round(a.score * 100),
-        ...(a.displayValue && { value: a.displayValue }),
-        ...(a.metricSavings && Object.values(a.metricSavings).some(Boolean) && { savings: a.metricSavings }),
-        weight: ref.weight ?? 0,
-      });
-    }
-  }
-  failing.sort((x, y) => (y.weight - x.weight) || (x.score - y.score));
-  const metrics = {};
-  for (const m of METRICS) {
-    const a = lhr.audits?.[m];
-    if (a) metrics[m] = { value: a.displayValue ?? null, score: a.score == null ? null : Math.round(a.score * 100) };
-  }
-  return {
-    url: lhr.finalDisplayedUrl ?? lhr.finalUrl ?? lhr.requestedUrl,
-    lighthouse: lhr.lighthouseVersion,
-    form_factor: lhr.configSettings?.formFactor ?? null,
-    categories,
-    metrics,
-    failing: failing.slice(0, top).map(({ weight: _w, ...r }) => r),
-    ...(lhr.runWarnings?.length && { warnings: lhr.runWarnings.slice(0, 3) }),
-  };
-}
-
-export { evidenceIndex as $, CAPTURE_MAX_MB as A, collectCaptured as B, CAPTURE_DEFAULT_MB as C, DEFAULT_KINDS as D, EXTENSION_STORE_URL as E, windowLayout as F, interactiveLine as G, runAssert as H, toPlaywrightTest as I, fingerprintDelta as J, createResolver as K, analyzeTrace as L, MessageType as M, traceEventsOf as N, assembleVideo as O, AUDIT_KINDS as P, DEFAULT_PORT as Q, checkLinksBatch as R, linksLines as S, parseRedirectCsv as T, checkRedirects as U, VERSION as V, redirectLines as W, redactText as X, redactHar as Y, redactHeaders as Z, buildManifest as _, summarizeHeap as a, evaluateSecurityHeaders as a0, parseCsv as a1, fillFromRows as a2, fillLines as a3, getTimeout as a4, createCommand as a5, WSManager as a6, cdpConnect as b, consoleLines as c, targetWsUrl as d, takeHeapSnapshot as e, diffHeap as f, MAX_UPLOAD_BYTES as g, ensureStubServer as h, interactivesLines as i, addStub as j, stubHost as k, lighthouseArgs as l, clearStubs as m, networkLines as n, listStubs as o, decodeTrackingRequests as p, trackingLines as q, runLighthouse as r, summarizeLighthouse as s, toHar as t, uploadBuffer as u, summarizeConsent as v, consentLines as w, runAudit as x, summarizeAudit as y, auditReport as z };
+export { fillFromRows as $, interactiveLine as A, runAssert as B, CAPTURE_DEFAULT_MB as C, DEFAULT_KINDS as D, EXTENSION_STORE_URL as E, toPlaywrightTest as F, fingerprintDelta as G, createResolver as H, analyzeTrace as I, traceEventsOf as J, assembleVideo as K, AUDIT_KINDS as L, MessageType as M, DEFAULT_PORT as N, checkLinksBatch as O, linksLines as P, parseRedirectCsv as Q, checkRedirects as R, redirectLines as S, redactText as T, redactHar as U, VERSION as V, redactHeaders as W, buildManifest as X, evidenceIndex as Y, evaluateSecurityHeaders as Z, parseCsv as _, cdpConnect as a, fillLines as a0, getTimeout as a1, createCommand as a2, WSManager as a3, targetWsUrl as b, consoleLines as c, takeHeapSnapshot as d, diffHeap as e, MAX_UPLOAD_BYTES as f, ensureStubServer as g, addStub as h, interactivesLines as i, stubHost as j, clearStubs as k, listStubs as l, decodeTrackingRequests as m, networkLines as n, trackingLines as o, summarizeConsent as p, consentLines as q, runAudit as r, summarizeHeap as s, toHar as t, uploadBuffer as u, summarizeAudit as v, auditReport as w, CAPTURE_MAX_MB as x, collectCaptured as y, windowLayout as z };
