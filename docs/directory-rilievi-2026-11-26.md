@@ -91,44 +91,90 @@ Due candidati, da confermare sul portale:
   l'anonimizzatore. Niente di ciò che arriva dalla rete viene eseguito. Non si tocca qui (lo riscrive `sync.py`):
   appello, o una correzione in claude-observe proposta dalla master.
 
-## Appello (per ciò che resta dopo la 1.33.1)
+## Convalida del tag directory-1.33.1 (2004f49, 26/11 20:26)
+
+3 blocchi solo da Verified (hook command, server MCP locale, `dist/cli.js`), 10 rifiuti, 3 avvisi. Cosa combacia,
+verificato sui file del tag:
+
+- `dist/vendor-ajv-1.js`: ajv chiama `env` il suo `SchemaEnv` (`constructor(env)`, `env.schema`, 25 volte). Non legge
+  l'ambiente.
+- `dist/vendor-node-html-parser-1.js`: i token del parser dei selettori CSS (`compileToken`, `DOMTokenList`) e il
+  selettore `password: "[type=password]"`.
+- `dist/vendor-ws-1.js`: r. 3645-3646 mette l'utente e la password scritti nell'URL `ws://user:pass@…` in `opts.auth`;
+  r. 3693-3694 toglie `authorization` e `cookie` quando un redirect cambia host; r. 3707-3708 l'header Basic. Il
+  client WebSocket di chrome-bridge si collega a `127.0.0.1` di default, mai con credenziali.
+- `dist/vendor-zod-5.js`: il validatore di formato `z.jwt()` (r. 925, 1220), che controlla la forma di una stringa.
+- `dist/server-1.js`: la redazione di `server/evidence.js` (r. 1162-1166, le regex che sostituiscono cookie, token e
+  password con `[REDACTED]`) e il controllo dei banner cookie di `server/consent.js` (cookie prima e dopo il consenso).
+- `dist/server-2.js`: `server/tools.js`, cookie del browser, `http_auth`, `SECRET_DIRS`/`SECRET_FILES` (r. 87-89).
+- `.claude-plugin/plugin.json`: la sola parola «token» in «the zero-token CLI» della descrizione.
+- `observe/py.sh`, «a zsh glob qualifier that runs code»: lo script gira con `bash` (lo lancia così l'hook) e non ha
+  glob. Le uniche parentesi sono dentro l'argomento Python fra apici singoli, alla r. 15: `-c 'import sys;
+  sys.exit(sys.version_info < (3, 8))'`. Il file viene da claude-observe.
+- Avviso `RUNTIME_FETCH_EXEC` in `dist/server-1.js`: non è Lighthouse, la cui descrizione sta in `dist/server-2.js`
+  r. 2308 («the first call downloads Lighthouse through npx», vera solo per il pacchetto npm). In `server-1.js` stanno
+  invece tre cose diverse:
+  - il controllo dei link di `server/link-checker.js` (r. 364, `fetch` HEAD/GET di cui si legge solo lo stato);
+  - la lista dei tab dal DevTools locale `127.0.0.1` di `server/heap.js` (r. 2680);
+  - `ffmpeg`, già installato dall'utente, avviato da `server/video.js` (r. 2507) sui fotogrammi catturati in locale.
+  Niente di scaricato viene eseguito.
+
+## Appello (testo finale per directory-1.33.1)
 
 Testo da incollare, in inglese come il portale:
 
-> **Credential findings (MCP_FORWARDS_CREDENTIAL_ENV).** Since 1.33.0 the plugin is the `plugin/` folder: the
-> changelog, docs, tests and our Chrome Web Store release script are no longer part of it. What is left reads
-> credentials only as the product's function, never to send them anywhere else:
+> **About the remaining findings on `directory-1.33.1`.** This tag is the `plugin/` folder of the repository at
+> main 8a69a87, and nothing else. The MCP server and its CLI are in `dist/`, bundled from `server/` and not minified,
+> with the licenses of the bundled packages in `dist/THIRD_PARTY_LICENSES.md`. Since 1.33.0 the plugin no longer runs
+> `npx`. Since 1.33.1 it no longer ships the Chrome extension: the plugin never used that copy, and users get the
+> extension from the Chrome Web Store. It also no longer ships the Lighthouse runner that fetched its CLI from npm.
+> What is left, file by file:
 >
-> - `dist/` (the bundled `server/tools.js`): the browser tools act inside the user's own logged-in Chrome. `http_request`
->   sends a request with that browser's cookies to the URL the user asked for, exactly as the page itself would;
->   `cookie_audit` lists the cookies of the open page so the user can audit them. `http_auth` keeps a Basic/Digest
->   username and password that the user (through the model) passes in, in memory only, for the HTTP auth dialogs of the
->   site being tested. Nothing is read from disk: the server refuses to upload or save into `~/.ssh`, `~/.aws`,
->   `~/.gnupg`, `.env*`, `*.pem`, `*.key` and similar (`SECRET_DIRS` / `SECRET_FILES`), and `--read-root` /
->   `--write-root` can narrow the readable and writable tree further.
+> **Credential findings (MCP_FORWARDS_CREDENTIAL_ENV), 8 files.** No file reads a credential from the user's
+> machine to send it anywhere.
+>
+> - `.claude-plugin/plugin.json`: the only match is the word «token» in «the zero-token CLI» in the description (a
+>   CLI that costs no model tokens).
+> - `dist/vendor-ajv-1.js`, `dist/vendor-node-html-parser-1.js`, `dist/vendor-ws-1.js`, `dist/vendor-zod-5.js` are
+>   third-party libraries, bundled unchanged: ajv names its schema environment `env` (`SchemaEnv`, not the process
+>   environment); node-html-parser has CSS selector tokens and the `[type=password]` selector; ws, the WebSocket
+>   library, handles a `user:password` written in a `ws://` URL and drops `Authorization` and `Cookie` headers on a
+>   cross-host redirect (chrome-bridge connects it to `127.0.0.1` by default, and never with credentials); zod has the `jwt()` string
+>   format check.
+> - `dist/server-1.js`: the matches are protections. The evidence report replaces cookies, tokens, `Authorization`
+>   headers and password field values with `[REDACTED]` before anything is written. The cookie-banner audit compares the
+>   page's cookies before and after the user's consent.
+> - `dist/server-2.js` (the tools): the browser tools act inside the user's own logged-in Chrome. `http_request` sends a
+>   request with that browser's cookies to the URL the user asked for, exactly as the page itself would. `cookie_audit`
+>   lists the cookies of the open page so the user can audit them. `http_auth` keeps a Basic/Digest username and
+>   password that the user passes in, in memory only, for the HTTP auth dialogs of the site being tested. Nothing is
+>   read from disk: the server refuses to upload or save into `~/.ssh`, `~/.aws`, `~/.gnupg`, `.env*`, `*.pem`, `*.key`
+>   and similar (`SECRET_DIRS` / `SECRET_FILES`, lines 87-89), and `--read-root` / `--write-root` can narrow the
+>   readable and writable tree further.
 > - `observe/observe.py`: the `/chrome-bridge:observe send` command sends the user's own error notes as one GitHub issue
->   only after the user picks «Send from my GitHub» in the options; that route uses the user's `gh` login to open the
->   issue in the user's name. Without `gh`, or if the user prefers, the same text opens as a prefilled GitHub link in the
->   browser, or goes through the anonymous route. The text is anonymized before it leaves, and nothing is sent without
->   that explicit choice.
+>   only after the user picks «Send from my GitHub» in the options. That route uses the user's `gh` login to open the
+>   issue in the user's name. Without `gh`, or if the user prefers, the same text opens as a prefilled GitHub link in
+>   the browser, or goes through the anonymous route. The text is anonymized before it leaves, and nothing is sent
+>   without that explicit choice.
 >
-> **Decoded code (CODE_DECODED_AT_RUN_TIME) and download-and-run (RUNTIME_FETCH_EXEC).**
+> **Decoded code (CODE_DECODED_AT_RUN_TIME), `dist/cli.js`.** Lines 182, 360 and 427 decode base64 to write to disk the
+> PNG screenshots and the MHTML snapshot that arrive in JSON over the local WebSocket; nothing decoded is executed. The
+> `AsyncFunction` at line 272 is `chrome-bridge run`, which runs a script the user wrote and passes on the command line
+> (`--code` or `--file`), with the chrome-bridge tools passed in as `cb`. Rewriting this would only hide the pattern from
+> the scanner without changing what runs, so it stays as it is and readable.
 >
-> - `dist/cli.js` (the bundled `server/cli.js`): `Buffer.from(…, 'base64')` writes to disk the PNG screenshots and the
->   MHTML snapshot that arrive in JSON over the local WebSocket; nothing decoded is executed. The `AsyncFunction` is
->   `chrome-bridge run`, which runs a script the user wrote and passes on the command line (`--code` or `--file`), with
->   the chrome-bridge tools passed in as `cb`. Rewriting it would only hide the pattern from the scanner without
->   changing what runs, so it stays as it is and readable.
-> - `extension/` is no longer part of the plugin since 1.33.1, and we want to say plainly why, since it also removes a
->   flagged file: the plugin never used it. The copy served only launch mode (a dedicated browser the server starts with
->   `--launch`), and the plugin's manifest never passes `--launch`. The extension reaches users from the Chrome Web
->   Store, its source is public in the repository's `extension/` folder, and the Store reviews it. For the record, the
->   flagged lines decode the bytes of a file that `upload_file` sends in base64 pieces into a `Blob` for the page's
->   `<input type=file>`, and the `new Function` is `execute_js`, the tool that runs the JavaScript the user asks for in
->   the page (the server's `--no-js` turns it off).
-> - The Lighthouse runner, which fetched the Lighthouse CLI from npm and ran it, is replaced in the plugin's bundle by a
->   stub with the same exports (`tools/plugin-stubs/lighthouse.js` in the repository). The tool worked only in launch
->   mode, so plugin users lose nothing; the npm package keeps it.
+> **Script not followed (COMMAND_SCRIPT_NOT_FOLLOWED), `observe/py.sh`.** This is the launcher of the hooks: it finds
+> a Python 3.8+ (`python3`, `python`, `py -3`) and runs `observe.py` with it. The hooks start it with `bash`, and it
+> contains no zsh glob. The only parentheses are inside the Python expression passed with `-c` in single quotes (line
+> 15: `sys.exit(sys.version_info < (3, 8))`).
+>
+> **Download-and-run notices (RUNTIME_FETCH_EXEC).** Nothing fetched from the network is executed:
+>
+> - `dist/server-1.js`: the link checker sends HEAD/GET requests and reads only the status code; the heap tool reads the
+>   tab list from the local DevTools endpoint on `127.0.0.1`; the screencast tool runs the user's own installed `ffmpeg`
+>   on frames captured locally. The description of the `lighthouse` tool (in `dist/server-2.js`) still says that the
+>   first call downloads Lighthouse through npx. That is true of the npm package. In this plugin the tool answers only
+>   that it works in launch mode, and the plugin never starts launch mode.
 > - `observe/observe.py`: its only network call is the POST of the anonymous report (`urlopen`), whose answer is read
->   as JSON to get the issue's URL; the processes it starts are `git`, the user's `gh`, the anonymizer and itself
->   (`auto-send`). Nothing received from the network is executed.
+>   as JSON to get the issue's URL. The processes it starts are `git`, the user's `gh`, the anonymizer and itself
+>   (`auto-send`).
