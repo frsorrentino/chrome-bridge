@@ -35,6 +35,44 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
   `/chrome-bridge:observe` without it. Only `observe/SOURCE` changes. Task
   claude-observe-senza-allowed-tools-24-11.
 
+## 1.33.0 — 2026-11-26
+
+The Claude Code plugin no longer downloads its server from npm. Server and npm
+package unchanged; the extension manifest stays 1.32.9, so the Chrome Web Store
+is skipped. Task directory-chrome-bridge-26-11.
+
+### Changed
+
+- The plugin is now the `plugin/` folder (`.claude-plugin/marketplace.json`:
+  `source: "./plugin"`), with only what runs: the manifest, the server and CLI
+  in `plugin/dist/`, and copies of `skills/`, `commands/`, `hooks/`,
+  `observe/` and `extension/`. 102 files instead of the whole repository
+  (327): tests, docs, benchmarks and the Chrome Web Store release tool
+  (`tools/cws-upload.mjs`) no longer reach the plugin cache. Install commands
+  are the same; a marketplace update moves existing installs.
+- The MCP server runs as `node ${CLAUDE_PLUGIN_ROOT}/dist/index.js` instead of
+  `npx -y chrome-bridge-mcp@<version>`: no download and no network on the
+  first start, and the code that runs is the code in the plugin. The plugin
+  directory held the plugin for «Runs a pinned npx or uvx package».
+  `npx chrome-bridge-mcp` keeps working as before outside the plugin.
+
+### Internal
+
+- `tools/build-plugin-server.mjs` bundles `server/` with its dependencies
+  (rollup, not minified) into 26 files under 256 KiB, the largest file the
+  directory reads; copying the 292 source files as they are would have put the
+  plugin over its 512-file limit. Each npm package and `server/` are cut along
+  a topological order of their import cycles, so no two chunks import each
+  other. `observe.js` keeps a file of its own because it starts itself again
+  with `--write`. Licenses of the bundled packages are in
+  `plugin/dist/THIRD_PARTY_LICENSES.md`.
+- `tools/build-plugin.mjs` (`npm run build:plugin`) writes `plugin/`; run it
+  after changing a copied folder and at every release.
+  `test/unit/plugin-dir.test.js` fails when `plugin/` is stale, over the
+  directory limits, or when the bundle answers MCP `tools/list`, the CLI
+  `list-tools` or `--launch` differently from `server/`.
+- `.claude-plugin/plugin.json` and its icon moved to `plugin/.claude-plugin/`.
+
 ## 1.32.9 — 2026-11-24
 
 Extension: the manifest goes to 1.32.9, with no change in what it does. The

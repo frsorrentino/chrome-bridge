@@ -10,7 +10,7 @@
     {
       "name": "chrome-bridge",
       "description": "Drive the Chrome you are already logged into: navigate, read, fill forms, audit, visual diff, network mocking, record what the user does. ChromeOS included; the debugger only on request (trusted input, traces, video).",
-      "source": "./",
+      "source": "./plugin",
       "category": "productivity"
     }
   ]

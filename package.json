@@ -1,7 +1,7 @@
 {
   "name": "chrome-bridge-mcp",
   "mcpName": "io.github.frsorrentino/chrome-bridge",
-  "version": "1.32.9",
+  "version": "1.33.0",
   "type": "module",
   "description": "Chrome Bridge by frsorrentino: MCP server that lets Claude Code borrow a tab from your own logged-in Chrome and hand it back — logins, 2FA and CAPTCHAs stay with you (handoff). 69 tools; 2.8-4.3× cheaper and up to 9.3× fewer turns than Claude in Chrome, measured; ChromeOS included.",
   "main": "server/index.js",
@@ -16,7 +16,8 @@
     "test:e2e": "node test/test-devtools.js",
     "test:e2e:launch": "CHROME_BRIDGE_PORT=8799 node test/test-devtools.js --launch",
     "measure": "node tools/measure-schema.mjs",
-    "bench:latency": "node bench/latency.mjs"
+    "bench:latency": "node bench/latency.mjs",
+    "build:plugin": "node tools/build-plugin.mjs"
   },
   "keywords": [
     "mcp",
@@ -66,5 +67,11 @@
     "@paulirish/trace_engine": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.9",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "rollup": "^4.68.8"
   }
 }

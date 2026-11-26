@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PostToolUseFailure": [
+      {
+        "matcher": "mcp__chrome\\-bridge__.*|mcp__plugin_chrome\\-bridge_chrome\\-bridge__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" hook chrome-bridge",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" session-start chrome-bridge",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/observe/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/observe/observe.py\" stop chrome-bridge",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

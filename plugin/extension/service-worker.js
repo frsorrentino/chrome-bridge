@@ -1,0 +1,4722 @@
+/**
+ * Chrome Bridge — Service Worker
+ *
+ * Mantiene una connessione WebSocket al server MCP in Crostini.
+ * Riceve comandi, li esegue tramite Chrome APIs, e invia le risposte.
+ *
+ * Alcune famiglie di comandi, e gli helper che condividono, stanno nei moduli
+ * di sw/: il validatore della directory dei plugin non legge i file oltre
+ * 256 KiB, e questo era arrivato a 273.285 byte (1.32.8). Una famiglia nuova
+ * va in un modulo di sw/. I listener restano qui, nell'ordine di prima.
+ */
+
+import './telemetry.js';
+import { buildMarkdown } from './lib/page-markdown.js';
+import { pageFingerprint } from './lib/page-fingerprint.js';
+import { computeTiles } from './lib/tile-layout.js';
+import { findTextInPage } from './lib/find-text.js';
+import { elementOutcome, notFoundError, watchNavErrors, navErrorMessage } from './lib/command-outcome.js';
+import { withDebugger, keyEvents, mouseClickEvents } from './lib/trusted-input.js';
+import { waitForComplete, resolveTabId, scriptTarget } from './sw/tab-target.js';
+import { HIDDEN_HINT, pageHidden, captureVisibleOf, withDeadline, withTabVisible, dataUrlToBitmap, blobToBase64, canvasToBase64, MAX_IMAGE_SIDE, canvasToBase64Capped, bitmapToBase64Capped } from './sw/screen-capture.js';
+import { cmdKeyboardWalk, cmdListAssets, cmdResourceTiming, cmdAccessibilityAudit, cmdCollectLinks, cmdSeoAudit, cmdUnusedCss } from './sw/audits.js';
+import { handoffs, cmdHandoff, cmdHandoffEnd } from './sw/handoff.js';
+import { observeState, pushObserveStep, cmdObserve } from './sw/observe-steps.js';
+import { cmdEmulateMedia } from './sw/emulate-media.js';
+import { cmdMotion, traces, casts, CAST_BUFFER_MAX, cmdScreencast, cmdPerfTrace, cmdCdpTarget } from './sw/perf.js';
+import { cmdManageDownloads, captureArmed, injectCaptureHook, captureDownload, cmdCaptureFiles } from './sw/downloads.js';
+const { pushError } = globalThis.__cbTelemetry;
+
+const DEFAULT_PORT = 8765;
+let wsUrl = `ws://localhost:${DEFAULT_PORT}`;
+let extToken = '';
+// true solo nella copia unpacked creata dal launch mode (launch.json presente)
+let launchMode = false;
+
+async function loadConfig() {
+  // launch.json esiste solo nella copia unpacked creata dal launch mode
+  // (porta effimera del server dedicato); nel pacchetto CWS non c'è.
+  let fileCfg = null;
+  try {
+    const res = await fetch(chrome.runtime.getURL('launch.json'));
+    if (res.ok) fileCfg = await res.json();
+  } catch { /* assente: modalità normale */ }
+  launchMode = fileCfg != null;
+  const cfg = await chrome.storage.local.get({ port: DEFAULT_PORT, token: '' });
+  wsUrl = `ws://localhost:${fileCfg?.port ?? cfg.port}`;
+  extToken = fileCfg?.token ?? cfg.token ?? '';
+}
+
+// --- Instrumentation MAIN-world (console/errori/web vitals/route SPA) ---
+// Registrata dinamicamente: quando il toggle è off non viene iniettata su
+// nessuna pagina, quindi footprint e stack pollution sono azzerati.
+const INSTRUMENTATION_ID = 'chrome-bridge-instrumentation';
+
+async function _applyInstrumentation() {
+  const { instrument } = await chrome.storage.local.get({ instrument: true });
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [INSTRUMENTATION_ID] });
+    const isReg = existing.some((s) => s.id === INSTRUMENTATION_ID);
+    // network-hook.js dalla 1.25.0: la registrazione persiste agli
+    // aggiornamenti, quindi un elenco vecchio va riscritto, non solo creato.
+    const JS = ['console-capture.js', 'network-hook.js', 'page-instrumentation.js', 'webmcp-hook.js'];
+    const stale = isReg && JSON.stringify(existing.find((s) => s.id === INSTRUMENTATION_ID)?.js ?? []) !== JSON.stringify(JS);
+    if (instrument && stale) {
+      await chrome.scripting.updateContentScripts([{ id: INSTRUMENTATION_ID, js: JS }]);
+    } else if (instrument && !isReg) {
+      await chrome.scripting.registerContentScripts([{
+        id: INSTRUMENTATION_ID,
+        js: JS,
+        matches: ['<all_urls>'],
+        runAt: 'document_start',
+        world: 'MAIN',
+        persistAcrossSessions: true,
+      }]);
+    } else if (!instrument && isReg) {
+      await chrome.scripting.unregisterContentScripts({ ids: [INSTRUMENTATION_ID] });
+    }
+  } catch (err) {
+    console.error('[chrome-bridge] applyInstrumentation error:', err.message);
+  }
+}
+
+// Serializza le chiamate: toggle rapidi non devono lanciare register concorrenti
+// (due chiamate che vedono entrambe isReg=false → duplicate-id error).
+let instrumentationQueue = Promise.resolve();
+function applyInstrumentation() {
+  instrumentationQueue = instrumentationQueue.then(_applyInstrumentation, _applyInstrumentation);
+  return instrumentationQueue;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.port || changes.token) {
+    loadConfig().then(() => {
+      // Chiudi e lascia che scheduleReconnect riconnetta col nuovo URL
+      if (ws) { try { ws.close(); } catch {} } else { connect(); }
+    });
+  }
+  if (changes.instrument) applyInstrumentation();
+});
+
+const RECONNECT_BASE_MS = 1000;
+// 5 s e non 30: il server aspetta un'estensione non collegata solo 10 s
+// (ws-manager.js, connectWait), e con 30 s il primo comando di una sessione
+// nuova poteva fallire. Un tentativo su localhost chiuso costa pochissimo.
+const RECONNECT_MAX_MS = 5000;
+const KEEPALIVE_ALARM = 'chrome-bridge-keepalive';
+
+let ws = null;
+let reconnectTimer = null;
+let reconnectDelay = RECONNECT_BASE_MS;
+let connectionState = 'disconnected'; // 'connected' | 'connecting' | 'disconnected' | 'refused'
+// Rifiutata perché un altro browser tiene la porta: si riprova piano, senza
+// riempire il log del server a ogni secondo.
+const REFUSED_RETRY_MS = 15000;
+let refusedBy = null;
+
+// Identità del browser per il server: un id che resta fra un riavvio e
+// l'altro (lo stesso browser che si riconnette sostituisce la sua vecchia
+// connessione, un altro browser no) e un'etichetta leggibile in get_status.
+// Calcolata una volta: all'apertura del socket l'ext_init deve partire
+// subito, o il server chiude la connessione non identificata (sotto carico lo
+// storage può metterci secondi). Prima di loadConfig launchMode non è noto:
+// si chiede dopo il primo connect.
+let identityPromise = null;
+function cachedIdentity() {
+  identityPromise ??= browserIdentity().catch(() => ({ id: null, label: 'Chromium-based browser' }));
+  return identityPromise;
+}
+
+async function browserIdentity() {
+  let { browserId } = await chrome.storage.local.get({ browserId: null });
+  if (!browserId) {
+    browserId = crypto.randomUUID();
+    await chrome.storage.local.set({ browserId });
+  }
+  const brands = navigator.userAgentData?.brands ?? [];
+  const brand = brands.find((b) => !/Not.?A.?Brand|^Chromium$/i.test(b.brand)) ?? brands.find((b) => /Chromium/i.test(b.brand));
+  const os = (await chrome.runtime.getPlatformInfo().catch(() => null))?.os ?? navigator.userAgentData?.platform ?? '';
+  const label = [brand ? `${brand.brand} ${brand.version}` : 'Chromium-based browser', os && `on ${os}`, launchMode && '(launch mode)']
+    .filter(Boolean).join(' ');
+  return { id: browserId, label };
+}
+
+let serverVersion = null;
+let sessionStats = { toolCallCount: 0, lastTool: null, lastToolTs: null, recentErrors: [] };
+// Il SW MV3 muore e rinasce: ripristina i contatori di sessione
+chrome.storage.session.get({ sessionStats: null }).then(({ sessionStats: saved }) => {
+  if (saved) sessionStats = saved;
+}).catch(() => {});
+function persistStats() {
+  chrome.storage.session.set({ sessionStats }).catch(() => {});
+}
+
+// Boot del service worker: MV3 lo termina e lo rianima, azzerando ogni stato
+// in RAM (browserNetLog, mainFrameHeaders, diffBaselines, httpAuthCreds). La
+// perdita era indistinguibile da "nessun dato": esporre il boot permette ai
+// tool di dire `log_since` invece di un `count: 0` ambiguo.
+const swBootedAt = Date.now();
+chrome.storage.session.get({ swBootedAt: null }).then(({ swBootedAt: prev }) => {
+  if (prev) console.log(`[chrome-bridge] service worker restarted (previous boot ${new Date(prev).toISOString()})`);
+  chrome.storage.session.set({ swBootedAt }).catch(() => {});
+}).catch(() => {});
+
+// --- Keep-alive: impedisce che il service worker venga fermato ---
+chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); // 30s = minimo Chrome
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    // Tiene attivo il service worker e, se il socket è giù senza un tentativo
+    // in coda (worker appena rianimato), riprova subito.
+    nudgeConnect();
+  }
+  if (alarm.name.startsWith(WATCH_ALARM_PREFIX)) runWatch(alarm.name.slice(WATCH_ALARM_PREFIX.length)).catch(() => {});
+});
+
+// --- Listener per popup ---
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'cb_observe') {
+    if (observeState && sender.tab?.id === observeState.tabId) pushObserveStep(msg.step);
+    return;
+  }
+  if (msg.type === 'cb_handoff_done') {
+    const h = handoffs.get(sender.tab?.id);
+    if (h && h.id === msg.id) h.resolve({ ...msg.result, url: sender.tab?.url ?? null });
+    return;
+  }
+  if (msg.type === 'getConnectionState') {
+    sendResponse({ state: connectionState });
+    return;
+  }
+  if (msg.type === 'getPopupData') {
+    (async () => {
+      const cfg = await chrome.storage.local.get({ port: 8765, instrument: true });
+      sendResponse({
+        state: connectionState,
+        port: cfg.port,
+        instrument: cfg.instrument,
+        extensionVersion: chrome.runtime.getManifest().version,
+        serverVersion,
+        stats: sessionStats,
+      });
+    })();
+    return true; // risposta asincrona
+  }
+  if (msg.type === 'getPageInfo') {
+    getPageInfo()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ available: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'reconnect') {
+    forceReconnect();
+    sendResponse({ ok: true });
+    return;
+  }
+});
+
+// --- WebSocket connection ---
+
+function connect() {
+  clearTimeout(reconnectTimer);
+
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  setConnectionState('connecting');
+  cachedIdentity();
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.error('[chrome-bridge] WebSocket creation error:', err);
+    scheduleReconnect();
+    return;
+  }
+
+  const socket = ws;
+
+  ws.onopen = async () => {
+    console.log('[chrome-bridge] Connected to MCP server');
+    const init = { type: 'ext_init', version: chrome.runtime.getManifest().version, browser: await cachedIdentity() };
+    if (extToken) init.token = extToken;
+    if (socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify(init));
+    setConnectionState('connected');
+    refusedBy = null;
+    reconnectDelay = RECONNECT_BASE_MS; // Reset backoff
+  };
+
+  ws.onclose = () => {
+    if (ws !== socket) return;
+    console.log('[chrome-bridge] Disconnected from MCP server');
+    ws = null;
+    serverVersion = null;
+    setConnectionState(refusedBy ? 'refused' : 'disconnected');
+    scheduleReconnect();
+  };
+
+  ws.onerror = (err) => {
+    console.error('[chrome-bridge] WebSocket error:', err);
+    // onclose verrà chiamato dopo onerror
+  };
+
+  ws.onmessage = async (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      console.error('[chrome-bridge] Invalid JSON from server');
+      return;
+    }
+
+    // Gestisci ping
+    if (msg.type === 'ping') {
+      sendMessage({ type: 'pong', timestamp: Date.now() });
+      return;
+    }
+
+    if (msg.type === 'ext_init_refused') {
+      refusedBy = msg.connected || 'another browser';
+      console.warn(`[chrome-bridge] Refused: ${msg.reason}`);
+      return;
+    }
+
+    // Handshake: il server dichiara la sua versione
+    if (msg.type === 'ext_init_ok') {
+      serverVersion = msg.version || null;
+      return;
+    }
+
+    sessionStats.toolCallCount += 1;
+    sessionStats.lastTool = msg.type;
+    sessionStats.lastToolTs = Date.now();
+
+    // Esegui il comando e rispondi
+    try {
+      const result = await executeCommand(msg);
+      sendMessage({
+        id: msg.id,
+        type: 'result',
+        data: result,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      sessionStats.recentErrors = pushError(sessionStats.recentErrors, {
+        ts: Date.now(), tool: msg.type, message: err.message || String(err),
+      });
+      sendMessage({
+        id: msg.id,
+        type: 'error',
+        error: err.message || String(err),
+        timestamp: Date.now(),
+      });
+    }
+    persistStats();
+  };
+}
+
+function scheduleReconnect() {
+  reconnectTimer = setTimeout(() => {
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+    connect();
+  }, refusedBy ? REFUSED_RETRY_MS : reconnectDelay);
+}
+
+function sendMessage(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  } else {
+    // Il server andrà comunque in timeout sul comando: qui solo traccia diagnostica
+    console.warn('[chrome-bridge] message dropped, WebSocket not open:', obj?.type ?? '', obj?.id ?? '');
+  }
+}
+
+function setConnectionState(state) {
+  connectionState = state;
+  // Broadcast al popup
+  chrome.runtime.sendMessage({ type: 'connectionState', state }).catch(() => {
+    // Popup non aperto, ignora
+  });
+}
+
+// Un worker addormentato si risveglia a ogni evento del browser: il cambio di
+// scheda è frequente, e se il server nel frattempo è partito ci si collega
+// subito invece di aspettare l'allarme dei 30 s.
+function nudgeConnect() {
+  if (connectionState !== 'connected' && !(ws && ws.readyState === WebSocket.CONNECTING)) {
+    reconnectDelay = RECONNECT_BASE_MS;
+    connect();
+  }
+}
+chrome.tabs.onActivated.addListener(() => nudgeConnect());
+
+function forceReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectDelay = RECONNECT_BASE_MS;
+  if (ws) {
+    const s = ws;
+    ws = null; // evita che l'onclose del vecchio socket pianifichi un reconnect
+    try { s.close(); } catch {}
+  }
+  setConnectionState('disconnected');
+  loadConfig().then(connect);
+}
+
+// Info sulla tab attiva per la card "Pagina corrente" del popup.
+// Best-effort: ogni blocco fallisce in silenzio (pagina non iniettabile,
+// instrumentation spenta) e il popup degrada di conseguenza.
+async function getPageInfo() {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tab?.id || !/^https?:/.test(tab.url || '')) return { available: false };
+  const target = { tabId: tab.id };
+
+  let stack = [];
+  try {
+    await chrome.scripting.executeScript({ target, files: ['stack-detect.js'], world: 'MAIN' });
+    const [r] = await chrome.scripting.executeScript({
+      target, world: 'MAIN',
+      func: () => window.__chromeBridge_stackDetect || [],
+    });
+    stack = r?.result || [];
+  } catch {}
+
+  let consoleErrors = null;
+  let vitals = null;
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target, world: 'MAIN',
+      func: () => ({
+        hooked: !!window.__chromeBridge_consoleHooked,
+        errors: (window.__chromeBridge_consoleLogs || []).filter((l) => l.level === 'error').length,
+        vitals: window.__chromeBridge_vitals
+          ? { lcp: window.__chromeBridge_vitals.lcp, cls: Math.round((window.__chromeBridge_vitals.cls || 0) * 1000) / 1000 }
+          : null,
+      }),
+    });
+    if (r?.result?.hooked) {
+      consoleErrors = r.result.errors;
+      vitals = r.result.vitals;
+    }
+  } catch {}
+
+  return { available: true, title: tab.title || '', stack, consoleErrors, vitals };
+}
+
+// --- Command dispatcher ---
+
+async function executeCommand(msg) {
+  const { type, params = {} } = msg;
+
+  switch (type) {
+    case 'get_tabs':
+      return await cmdGetTabs(params);
+    case 'navigate':
+      return await cmdNavigate(params);
+    case 'screenshot':
+      return await cmdScreenshot(params);
+    case 'execute_js':
+      return await cmdExecuteJs(params);
+    case 'click':
+      return await cmdClick(params);
+    case 'type_text':
+      return await cmdTypeText(params);
+    case 'read_page':
+      return await cmdReadPage(params);
+    case 'get_page_info':
+      return await cmdGetPageInfo(params);
+    case 'get_storage':
+      return await cmdGetStorage(params);
+    case 'get_performance':
+      return await cmdGetPerformance(params);
+    case 'query_dom':
+      return await cmdQueryDom(params);
+    case 'get_css_styles':
+      return await cmdGetCssStyles(params);
+    case 'modify_dom':
+      return await cmdModifyDom(params);
+    case 'inject_css':
+      return await cmdInjectCss(params);
+    case 'read_console':
+      return await cmdReadConsole(params);
+    case 'monitor_network':
+      return await cmdMonitorNetwork(params);
+    case 'create_tab':
+      return await cmdCreateTab(params);
+    case 'wait_for_element':
+      return await cmdWaitForElement(params);
+    case 'scroll_to':
+      return await cmdScrollTo(params);
+    case 'set_storage':
+      return await cmdSetStorage(params);
+    case 'fill_form':
+      return await cmdFillForm(params);
+    case 'viewport_resize':
+      return await cmdViewportResize(params);
+    case 'full_page_screenshot':
+      return await cmdFullPageScreenshot(params);
+    case 'element_screenshot':
+      return await cmdElementScreenshot(params);
+    case 'highlight_elements':
+      return await cmdHighlightElements(params);
+    case 'accessibility_audit':
+      return await cmdAccessibilityAudit(params);
+    case 'collect_links':
+      return await cmdCollectLinks(params);
+    case 'measure_spacing':
+      return await cmdMeasureSpacing(params);
+    case 'watch_dom':
+      return await cmdWatchDom(params);
+    case 'emulate_media':
+      return await cmdEmulateMedia(params);
+    case 'hover':
+      return await cmdHover(params);
+    case 'press_key':
+      return await cmdPressKey(params);
+    case 'get_frames':
+      return await cmdGetFrames(params);
+    case 'tab_action':
+      return await cmdTabAction(params);
+    case 'move_tab':
+      return await cmdMoveTab(params);
+    case 'tile_windows':
+      return await cmdTileWindows(params);
+    case 'upload_file':
+      return await cmdUploadFile(params);
+    case 'wait_for_navigation':
+      return await cmdWaitForNavigation(params);
+    case 'dismiss_overlays':
+      return await cmdDismissOverlays(params);
+    case 'wait_for_network_idle':
+      return await cmdWaitForNetworkIdle(params);
+    case 'handle_dialogs':
+      return await cmdHandleDialogs(params);
+    case 'find_text':
+      return await cmdFindText(params);
+    case 'network_rules':
+      return await cmdNetworkRules(params);
+    case 'screenshot_diff':
+      return await cmdScreenshotDiff(params);
+    case 'web_vitals':
+      return await cmdWebVitals(params);
+    case 'motion':
+      return await cmdMotion(params);
+    case 'perf_trace':
+      return await cmdPerfTrace(params);
+    case 'screencast':
+      return await cmdScreencast(params);
+    case 'cdp_target':
+      return await cmdCdpTarget(params);
+    case 'upload_chunk':
+      return await cmdUploadChunk(params);
+    case 'handoff_end':
+      return await cmdHandoffEnd(params);
+    case 'list_event_listeners':
+      return await cmdListEventListeners(params);
+    case 'monitor_websocket':
+      return await cmdMonitorWebsocket(params);
+    case 'seo_audit':
+      return await cmdSeoAudit(params);
+    case 'extract_table':
+      return await cmdExtractTable(params);
+    case 'unused_css':
+      return await cmdUnusedCss(params);
+    case 'drag_and_drop':
+      return await cmdDragAndDrop(params);
+    case 'clipboard':
+      return await cmdClipboard(params);
+    case 'set_geolocation':
+      return await cmdSetGeolocation(params);
+    case 'manage_downloads':
+      return await cmdManageDownloads(params);
+    case 'capture_files':
+      return await cmdCaptureFiles(params);
+    case 'save_page':
+      return await cmdSavePage(params);
+    case 'wait_for_text':
+      return await cmdWaitForText(params);
+    case 'http_request':
+      return await cmdHttpRequest(params);
+    case 'keyboard_walk':
+      return await cmdKeyboardWalk(params);
+    case 'handoff':
+      return await cmdHandoff(params);
+    case 'page_fingerprint':
+      return await cmdPageFingerprint(params);
+    case 'watch':
+      return await cmdWatch(params);
+    case 'observe':
+      return await cmdObserve(params);
+    case 'read_form':
+      return await cmdReadForm(params);
+    case 'list_assets':
+      return await cmdListAssets(params);
+    case 'resource_timing':
+      return await cmdResourceTiming(params);
+    case 'set_zoom':
+      return await cmdSetZoom(params);
+    case 'http_auth':
+      return await cmdHttpAuth(params);
+    case 'get_response_headers':
+      return await cmdGetResponseHeaders(params);
+    case 'get_interactives':
+      return await cmdGetInteractives(params);
+    case 'webmcp':
+      return await cmdWebmcp(params);
+    case 'wait_for_function':
+      return await cmdWaitForFunction(params);
+    case 'scroll_until':
+      return await cmdScrollUntil(params);
+    default:
+      throw new Error(`Unknown command type: ${type}`);
+  }
+}
+
+// --- Utility: chrome.userScripts (esecuzione codice utente, CWS-compliant) ---
+
+
+function userScriptsAvailable() {
+  // L'accesso alla proprietà lancia se l'utente non ha attivato il toggle
+  try {
+    chrome.userScripts.getScripts;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const USER_SCRIPTS_HELP = "User scripts are disabled. Open chrome://extensions, click Details on Chrome Bridge, and enable 'Allow user scripts' (on Chrome 135-137 enable Developer Mode instead). Then retry.";
+
+async function runUserScript(target, code, world) {
+  if (!userScriptsAvailable()) {
+    // Fallback SOLO in launch mode (profilo effimero senza toggle).
+    // Nell'installazione normale il toggle resta il gate di consenso:
+    // nessuna elusione di chrome.userScripts nel pacchetto CWS.
+    if (launchMode) return await runViaFunction(target, code);
+    throw new Error(USER_SCRIPTS_HELP);
+  }
+  const results = await chrome.userScripts.execute({
+    target,
+    js: [{ code }],
+    world,
+  });
+  const r = results?.[0];
+  if (r && r.error !== undefined && r.error !== null) throw new Error(String(r.error));
+  return r?.result;
+}
+
+// Fallback quando chrome.userScripts non è disponibile (tipico del launch
+// mode: profilo effimero senza il toggle "Allow user scripts"): il codice
+// utente gira nel MAIN world via new Function. La CSP della pagina può
+// bloccarlo (unsafe-eval) — l'errore spiega come rimediare.
+async function runViaFunction(target, code) {
+  const results = await chrome.scripting.executeScript({
+    target,
+    world: 'MAIN',
+    func: async (userCode) => {
+      let fn;
+      try {
+        fn = new Function(`return (${userCode});`);
+      } catch {
+        try { fn = new Function(userCode); } catch (e) {
+          return { ok: false, error: String(e?.message || e) };
+        }
+      }
+      try {
+        let v = fn();
+        if (v && typeof v.then === 'function') v = await v;
+        return { ok: true, value: v === undefined ? null : v };
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    },
+    args: [code],
+  });
+  const r = results?.[0]?.result;
+  if (!r) throw new Error('No result from page');
+  if (!r.ok) {
+    const cspHint = /unsafe-eval|Content Security Policy|EvalError/i.test(r.error)
+      ? ' (page CSP blocks dynamic code — strip it with network_rules modify_header on "content-security-policy" and reload, or enable the "Allow user scripts" toggle)'
+      : '';
+    throw new Error(r.error + cspHint);
+  }
+  return r.value;
+}
+
+// --- Implementazione comandi ---
+
+async function cmdGetTabs({ include_windows = false, ended } = {}) {
+  const tabs = await chrome.tabs.query({});
+  const list = tabs.map((t) => ({
+    id: t.id,
+    url: t.url,
+    title: t.title,
+    active: t.active,
+    windowId: t.windowId,
+    // Una scheda scartata da Chrome (memory saver) esiste ancora ma non ha un
+    // renderer: execute_js e compagni falliscono finché non torna in primo piano.
+    ...(t.discarded ? { discarded: true } : {}),
+  }));
+  // ended = id che il server sa suoi e non trova più: la forma ad array resta
+  // quella di sempre per chi non lo chiede.
+  const open = new Set(list.map((t) => t.id));
+  const endings = Array.isArray(ended) && ended.length
+    ? Object.fromEntries(ended.filter((id) => !open.has(id)).map((id) => [id, tabEndings.get(id) ?? { reason: 'unknown' }]))
+    : null;
+  if (!include_windows) return endings ? { tabs: list, ended: endings } : list;
+
+  // Senza geometria e stato non si può decidere dove mettere una finestra: si
+  // può solo indovinare. `left` in particolare è ciò che identifica il monitor
+  // su una scrivania virtuale multi-schermo.
+  const windows = (await chrome.windows.getAll({ populate: true })).map((w) => ({
+    id: w.id,
+    type: w.type,
+    state: w.state,
+    focused: w.focused,
+    left: w.left,
+    top: w.top,
+    width: w.width,
+    height: w.height,
+    tabs: (w.tabs || []).length,
+    // Una finestra le cui schede sono tutte chrome:// o chrome-untrusted:// non
+    // può fornire l'area del monitor a tile_windows: meglio saperlo prima di
+    // provarci.
+    scriptable: (w.tabs || []).some((t) => /^(https?|file):/i.test(t.url || '')),
+  }));
+  return endings ? { tabs: list, windows, ended: endings } : { tabs: list, windows };
+}
+
+async function cmdNavigate({ url, tab_id }) {
+  if (!url) throw new Error('Missing required parameter: url');
+
+  // La pagina d'errore di Chrome (connessione rifiutata, DNS) arriva a
+  // 'complete' come una pagina vera: l'errore si legge solo qui.
+  const navErrors = watchNavErrors(chrome.webNavigation.onErrorOccurred);
+  try {
+    // Senza tab_id esplicito: apri SEMPRE in una nuova scheda (attiva) per non
+    // sovrascrivere la scheda/sessione corrente dell'utente. Con tab_id: naviga
+    // quella scheda specifica.
+    if (!tab_id) {
+      const newTab = await chrome.tabs.create({ url, active: true });
+      // Se la pagina è già 'complete' (es. cache) non aspettare il listener
+      if (newTab.status !== 'complete') {
+        await waitForComplete(newTab.id);
+      }
+      const failed = navErrors.errorFor(newTab.id);
+      if (failed) throw new Error(navErrorMessage(failed, newTab.id));
+      const createdTab = await chrome.tabs.get(newTab.id);
+      return { url: createdTab.url, title: createdTab.title, tabId: newTab.id };
+    }
+
+    const tabId = await resolveTabId(tab_id);
+
+    // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
+    // può emettere 'complete' prima che il listener esista
+    // Registra il listener PRIMA di tabs.update: una navigazione veloce (cache)
+    // può emettere 'complete' prima che il listener esista
+    const done = waitForComplete(tabId);
+    await chrome.tabs.update(tabId, { url });
+    await done;
+
+    const failed = navErrors.errorFor(tabId);
+    if (failed) throw new Error(navErrorMessage(failed, tabId));
+    const updatedTab = await chrome.tabs.get(tabId);
+    return { url: updatedTab.url, title: updatedTab.title, tabId };
+  } finally {
+    navErrors.stop();
+  }
+}
+
+async function cmdScreenshot({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  const { dataUrl, viewport } = await withTabVisible(tabId, async (tab) => {
+    // Piccolo delay per dare tempo al rendering
+    await new Promise((r) => setTimeout(r, 200));
+    // tab.width/height sono il viewport in CSS px, senza script: è il sistema
+    // di riferimento di element_screenshot.region.
+    return { dataUrl: await captureVisibleOf(tab), viewport: { width: tab.width, height: tab.height } };
+  });
+
+  const bitmap = await dataUrlToBitmap(dataUrl);
+  return { image: await bitmapToBase64Capped(bitmap), viewport };
+}
+
+async function cmdExecuteJs({ code, tab_id, frame_id }) {
+  if (!code) throw new Error('Missing required parameter: code');
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+
+  // Senza userScripts: runUserScript applica il fallback launch-mode
+  // oppure l'errore-guida sul toggle — niente retry doppio
+  if (!userScriptsAvailable()) {
+    const val = await runUserScript(target, code, 'MAIN');
+    return { result: val ?? null };
+  }
+
+  // Strategia: MAIN world primario — pieno accesso a variabili di pagina e
+  // semantica "page context" (es. <script> tag iniettati eseguono). A differenza
+  // del vecchio eval, il codice iniettato via userScripts non è soggetto alla
+  // CSP della pagina. Fallback USER_SCRIPT per i rari casi in cui MAIN fallisce.
+  try {
+    const val = await runUserScript(target, code, 'MAIN');
+    return { result: val ?? null };
+  } catch (mainErr) {
+    try {
+      const val = await runUserScript(target, code, 'USER_SCRIPT');
+      return { result: val ?? null };
+    } catch (userWorldErr) {
+      throw new Error(`${mainErr.message} (USER_SCRIPT world: ${userWorldErr.message})`);
+    }
+  }
+}
+
+// --- Input fidato (chrome.debugger), solo su richiesta ---
+// La pagina prepara il bersaglio (punto da cliccare, fuoco e selezione del
+// campo); gli eventi li genera il browser, con isTrusted=true. Solo il frame
+// principale: le coordinate di Input.* sono quelle del viewport della scheda.
+async function trustedTarget(tabId, frame_id, selector, what) {
+  if (frame_id) throw new Error('trusted input works in the main frame only: omit frame_id, or retry without trusted');
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, kind) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = sel ? deepQuery(sel) : (document.activeElement || document.body);
+      if (!el) return { missing: true };
+      if (kind === 'point') {
+        // instant: con scroll-behavior: smooth nella pagina il rettangolo letto
+        // subito dopo è a metà scorrimento, e il puntatore finiva su un altro
+        // elemento (francescosorrentino.com/strumenti, 01/10/2026).
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+        const top = document.elementFromPoint(x, y);
+        const occluded = top && top !== el && !el.contains(top) && !top.contains(el);
+        return { x, y, tagName: el.tagName, text: (el.textContent || '').substring(0, 100), occluded: Boolean(occluded),
+          occluder: occluded ? (top.id ? `#${top.id}` : top.tagName.toLowerCase()) : null };
+      }
+      if (kind === 'none') return { tagName: el.tagName.toLowerCase() };
+      el.focus();
+      if (kind === 'focus') return { tagName: el.tagName.toLowerCase() };
+      // select: fuoco e contenuto selezionato, così insertText lo sostituisce
+      if (typeof el.select === 'function') el.select();
+      else if (el.isContentEditable) { const range = document.createRange(); range.selectNodeContents(el); const sl = getSelection(); sl.removeAllRanges(); sl.addRange(range); }
+      return { tagName: el.tagName.toLowerCase() };
+    },
+    args: [selector ?? null, what],
+    world: 'MAIN',
+  });
+  const out = results?.[0]?.result;
+  if (!out || out.missing) throw notFoundError(selector);
+  return out;
+}
+
+async function trustedClick(tabId, { selector, frame_id, force, button, count }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'point');
+  if (t.occluded && !force) return { clicked: false, occluded: true, occluder: { selector: t.occluder } };
+  await withDebugger(tabId, async (send) => {
+    for (const ev of mouseClickEvents(t.x, t.y, { button, count })) await send('Input.dispatchMouseEvent', ev);
+  });
+  return { clicked: true, trusted: true, button, count, tagName: t.tagName, text: t.text };
+}
+
+// Passaggio del mouse fidato: solo un mouseMoved del browser accende il
+// :hover del CSS; gli eventi sintetici di cmdHover lo lasciano spento, e una
+// transizione al passaggio del mouse non parte (animations sul sito, 01/10).
+async function trustedHover(tabId, { selector, frame_id }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'point');
+  await withDebugger(tabId, (send) => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: t.x, y: t.y }));
+  return { hovered: true, trusted: true, tagName: t.tagName, ...(t.occluded && { occluded_by: t.occluder }) };
+}
+
+async function trustedType(tabId, { selector, text, frame_id }) {
+  const t = await trustedTarget(tabId, frame_id, selector, 'select');
+  await withDebugger(tabId, (send) => send('Input.insertText', { text }));
+  const back = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { const a = document.activeElement; return a ? String(a.isContentEditable ? a.textContent : (a.value ?? '')) : ''; },
+    world: 'MAIN',
+  });
+  const after = back?.[0]?.result ?? '';
+  return { typed: true, trusted: true, tagName: t.tagName, value_after: after, mismatch: after !== text };
+}
+
+async function trustedKey(tabId, { key, selector, frame_id, ...mods }) {
+  const t = await trustedTarget(tabId, frame_id, selector, selector ? 'focus' : 'none');
+  await withDebugger(tabId, async (send) => {
+    for (const ev of keyEvents(key, mods)) await send('Input.dispatchKeyEvent', ev);
+  });
+  return { key, trusted: true, target: String(t.tagName || '').toLowerCase(), modifiers: Object.entries(mods).filter(([, v]) => v).map(([m]) => m) };
+}
+
+async function cmdClick({ selector, tab_id, frame_id, force = false, button = 'left', count = 1, trusted = false }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedClick(tabId, { selector, frame_id, force, button, count });
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel, forceClick, btn, times) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      if (!forceClick && cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
+        const top = document.elementFromPoint(cx, cy);
+        if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+          const occluderSel = top.id ? `#${top.id}` : top.tagName.toLowerCase() + (typeof top.className === 'string' && top.className.trim() ? `.${top.className.trim().split(/\s+/)[0]}` : '');
+          return { clicked: false, occluded: true, occluder: { selector: occluderSel, tag: top.tagName.toLowerCase(), text: (top.textContent || '').trim().substring(0, 80) } };
+        }
+      }
+      // button 2 = destro: il browser non apre il suo menu nativo da un evento
+      // sintetico, ma le pagine che ne implementano uno proprio ascoltano
+      // 'contextmenu', ed è quello il caso d'uso reale.
+      const right = btn === 'right';
+      const clickCount = Math.max(1, Number(times) || 1);
+      const base = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: right ? 2 : 0, buttons: right ? 2 : 1 };
+
+      for (let i = 0; i < clickCount; i++) {
+        const opts = { ...base, detail: i + 1 };
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        if (right) el.dispatchEvent(new MouseEvent('contextmenu', opts));
+        else el.click();
+      }
+      // dblclick non è implicito nei due click: va emesso a parte, ed è quello
+      // che seleziona una parola o apre un editor inline.
+      if (!right && clickCount >= 2) el.dispatchEvent(new MouseEvent('dblclick', { ...base, detail: 2 }));
+
+      return { clicked: true, button: right ? 'right' : 'left', count: clickCount, tagName: el.tagName, text: el.textContent?.substring(0, 100) };
+    },
+    args: [selector, force, button, count],
+    world: 'MAIN',
+  });
+
+  return elementOutcome(results, selector);
+}
+
+async function cmdTypeText({ selector, text, mode = 'set', tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  if (text === undefined) throw new Error('Missing required parameter: text');
+  const tabId = await resolveTabId(tab_id);
+  if (mode === 'trusted') return trustedType(tabId, { selector, text, frame_id });
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: async (sel, txt, typeMode) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      el.focus();
+      const tag = el.tagName.toLowerCase();
+      // Native setter: i controlled input React ignorano l'assegnazione diretta
+      const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = (tag === 'input' || tag === 'textarea')
+        ? Object.getOwnPropertyDescriptor(proto, 'value')?.set
+        : null;
+      const setValue = (value) => {
+        if (tag === 'input' || tag === 'textarea') {
+          if (setter) setter.call(el, value); else el.value = value;
+        } else if (el.isContentEditable) {
+          el.textContent = value;
+        } else {
+          el.value = value;
+        }
+      };
+      const getValue = () => {
+        if (tag === 'input' || tag === 'textarea') return el.value;
+        if (el.isContentEditable) return el.textContent;
+        return el.value ?? '';
+      };
+
+      if (typeMode === 'keys') {
+        // Eventi tastiera carattere per carattere: per autocomplete/input mascherati
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (const ch of txt) {
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
+          setValue((getValue() ?? '') + ch);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ch }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, cancelable: true }));
+          await sleep(10);
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        const afterKeys = String(getValue() ?? '');
+        return { typed: true, tagName: tag, mode: 'keys', value_after: afterKeys, mismatch: !afterKeys.endsWith(txt) };
+      }
+
+      setValue(txt);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      // Rilettura: un campo controllato che scarta il valore risponde
+      // «ok» uguale, e il modello non ha modo di saperlo senza questo.
+      const after = String(getValue() ?? '');
+      return { typed: true, tagName: tag, value_after: after, mismatch: after !== txt };
+    },
+    args: [selector, text, mode],
+    world: 'MAIN',
+  });
+
+  return elementOutcome(results, selector);
+}
+
+// Impronta per page_changed: pochi interi letti nell'ISOLATED world (nessuna
+// CSP di mezzo), prima e dopo un'azione. Vedi lib/page-fingerprint.js.
+async function cmdPageFingerprint({ tab_id, frame_id, settle }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: pageFingerprint,
+    args: [null, settle ?? null],
+  });
+  return results?.[0]?.result ?? null;
+}
+
+async function cmdReadPage({ mode = 'text', tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  if (mode === 'html') {
+    const results = await chrome.scripting.executeScript({
+      target: scriptTarget(tabId, frame_id),
+      func: () => document.documentElement.outerHTML,
+      world: 'MAIN',
+    });
+    return results?.[0]?.result ?? '';
+  }
+
+  if (mode === 'markdown') {
+    // buildMarkdown è autocontenuta apposta: chrome.scripting ne serializza il
+    // sorgente e la esegue nella pagina, dove non esiste il modulo.
+    const res = await chrome.scripting.executeScript({
+      target: scriptTarget(tabId, frame_id),
+      func: buildMarkdown,
+      args: [null],
+      world: 'MAIN',
+    });
+    return res?.[0]?.result ?? '';
+  }
+
+  if (mode === 'accessibility') {
+    // Ritorna una struttura semplificata dell'a11y tree
+    const results = await chrome.scripting.executeScript({
+      target: scriptTarget(tabId, frame_id),
+      func: () => {
+        function walk(el, depth = 0) {
+          if (depth > 10) return '';
+          const role = el.getAttribute('role') || el.tagName.toLowerCase();
+          const label = el.getAttribute('aria-label') || el.textContent?.substring(0, 50)?.trim() || '';
+          let output = `${'  '.repeat(depth)}[${role}] ${label}\n`;
+          for (const child of el.children) {
+            output += walk(child, depth + 1);
+          }
+          return output;
+        }
+        return walk(document.body);
+      },
+      world: 'MAIN',
+    });
+    return results?.[0]?.result ?? '';
+  }
+
+  // mode === 'text' (default)
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: () => document.body.innerText,
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? '';
+}
+
+// --- create_tab ---
+
+// Bounds reali di una finestra appena creata, confrontati con quelli chiesti.
+// Il window manager può cambiarli in silenzio: su ChromeOS una finestra di
+// 320 px nasce larga 501 (15-16/09). Senza il confronto il chiamante misura a
+// una larghezza che non ha.
+async function windowBoundsReport(windowId, requested) {
+  const asked = Object.fromEntries(Object.entries(requested).filter(([, v]) => typeof v === 'number'));
+  if (!Object.keys(asked).length) return {};
+  const w = await chrome.windows.get(windowId);
+  const actual = { left: w.left, top: w.top, width: w.width, height: w.height };
+  const differ = Object.keys(asked).filter((k) => actual[k] !== asked[k]);
+  return {
+    window_bounds: actual,
+    ...(differ.length && {
+      bounds_note: `The window manager changed ${differ.map((k) => `${k} ${asked[k]}→${actual[k]}`).join(', ')}`
+        + ' (on ChromeOS a window is at least ~500 px wide). For a narrower viewport use emulate_media({device:{width,height}}) (visual group, debugger).',
+    }),
+  };
+}
+
+async function cmdCreateTab({ url, active = true, new_window = false, left, top, width, height }) {
+  if (new_window) {
+    // windows.create con i bounds apre direttamente sul monitor scelto: left è
+    // la coordinata sulla scrivania virtuale, quindi è ciò che sceglie lo schermo.
+    const winOpts = { focused: active !== false };
+    if (url) winOpts.url = url;
+    for (const [k, v] of [['left', left], ['top', top], ['width', width], ['height', height]]) {
+      if (typeof v === 'number') winOpts[k] = v;
+    }
+    const win = await chrome.windows.create(winOpts);
+    const tab = (win.tabs || [])[0];
+    if (url && tab) {
+      await waitForComplete(tab.id);
+      const updated = await chrome.tabs.get(tab.id);
+      return { id: updated.id, url: updated.url, title: updated.title, window_id: win.id,
+        ...await windowBoundsReport(win.id, { left, top, width, height }) };
+    }
+    return { id: tab?.id, url: tab?.url || 'chrome://newtab', title: tab?.title || '', window_id: win.id,
+      ...await windowBoundsReport(win.id, { left, top, width, height }) };
+  }
+  const opts = { active };
+  if (url) opts.url = url;
+  const tab = await chrome.tabs.create(opts);
+  // Attendi caricamento se c'è un URL
+  if (url) {
+    await waitForComplete(tab.id);
+    const updated = await chrome.tabs.get(tab.id);
+    return { id: updated.id, url: updated.url, title: updated.title };
+  }
+  return { id: tab.id, url: tab.url || 'chrome://newtab', title: tab.title || '' };
+}
+
+// --- tab_action ---
+
+// --- move_tab ---
+
+/**
+ * Sposta una scheda in un'altra finestra senza ricrearla: la scheda conserva id,
+ * cronologia e stato della pagina.
+ *
+ * Motivo per cui esiste: sul Terminale ChromeOS garcon apre ogni sessione in una
+ * finestra separata, e consolidarle richiede di spostare schede
+ * `chrome-untrusted://terminal`. Su quello schema `chrome.tabs.create` è vietato;
+ * `move` non ricrea nulla, quindi potrebbe essere permesso. Se Chrome rifiuta, il
+ * messaggio viene propagato **testuale**: è il dato che si sta cercando, e
+ * riscriverlo lo distruggerebbe.
+ */
+// --- tile_windows ---
+
+/**
+ * Affianca le finestre di Chrome su un monitor, dividendone l'area utile in
+ * parti uguali che non lasciano spazi.
+ *
+ * L'area del monitor si legge da `screen.availLeft/availTop/availWidth/
+ * availHeight` eseguito in una scheda di una finestra che ci sta sopra. La via
+ * "giusta" sarebbe chrome.system.display, ma richiede un permesso install-time:
+ * su un'estensione già pubblicata significa una nuova revisione e il possibile
+ * ri-consenso degli utenti, per un dato che il DOM offre gratis.
+ *
+ * Il prezzo di questa scelta: serve almeno una scheda scriptabile fra le
+ * finestre bersaglio. Una finestra con sole schede chrome:// o
+ * chrome-untrusted:// non può fornire l'area, e il tool lo dice invece di
+ * ripiegare su misure inventate.
+ */
+async function cmdTileWindows({ window_ids, reference_window_id, layout = 'grid', padding = 0, include_types, area: explicitArea }) {
+  const types = include_types?.length ? include_types : ['normal'];
+  const all = await chrome.windows.getAll({ populate: true });
+
+  let targets = all.filter((w) => types.includes(w.type));
+  if (window_ids?.length) targets = all.filter((w) => window_ids.includes(w.id));
+  if (!targets.length) throw new Error(`Nessuna finestra da affiancare (tipi: ${types.join(', ')})`);
+
+  // Il monitor è quello della finestra di riferimento: su più schermi non
+  // esiste "lo schermo" senza dire quale.
+  const reference = reference_window_id
+    ? targets.find((w) => w.id === reference_window_id) ?? all.find((w) => w.id === reference_window_id)
+    : targets.find((w) => w.focused) ?? targets[0];
+  if (!reference) throw new Error(`Finestra di riferimento ${reference_window_id} non trovata`);
+
+  // Prima scheda scriptabile fra le finestre bersaglio, partendo dalla
+  // riferimento: le pagine interne di Chrome non accettano injection.
+  const candidates = [reference, ...targets.filter((w) => w.id !== reference.id)]
+    .flatMap((w) => (w.tabs || []).map((t) => ({ windowId: w.id, tabId: t.id, url: t.url || '' })))
+    .filter((t) => /^(https?|file):/i.test(t.url));
+
+  // Un'area esplicita salta la lettura da una scheda: è l'unica strada quando
+  // le finestre bersaglio hanno solo pagine interne di Chrome, come quelle del
+  // Terminale ChromeOS.
+  let area = explicitArea ?? null;
+  const failures = [];
+  for (const cand of (area ? [] : candidates)) {
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: cand.tabId },
+        func: () => ({
+          left: screen.availLeft ?? 0,
+          top: screen.availTop ?? 0,
+          width: screen.availWidth,
+          height: screen.availHeight,
+        }),
+        world: 'MAIN',
+      });
+      if (res?.result?.width) { area = res.result; break; }
+    } catch (e) {
+      failures.push(`${cand.url.slice(0, 40)}: ${e.message}`);
+    }
+  }
+  if (!area) {
+    throw new Error(
+      'Impossibile leggere l\'area del monitor: nessuna scheda scriptabile fra le finestre bersaglio '
+      + '(le pagine chrome:// e chrome-untrusted:// non lo permettono). '
+      + `Apri una pagina http(s) in una di esse e riprova.${failures.length ? ' Tentativi: ' + failures.join(' | ') : ''}`,
+    );
+  }
+
+  const tiles = computeTiles({ count: targets.length, area, layout, padding });
+  const results = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const w = targets[i];
+    const tile = tiles[i];
+    try {
+      // Una finestra massimizzata accetta i bounds e li ignora: va riportata a
+      // 'normal' prima, o la chiamata riesce senza che nulla si muova.
+      if (w.state !== 'normal') {
+        await chrome.windows.update(w.id, { state: 'normal' });
+      }
+      const updated = await chrome.windows.update(w.id, tile);
+      const actual = { left: updated.left, top: updated.top, width: updated.width, height: updated.height };
+      results.push({
+        window_id: w.id,
+        type: w.type,
+        requested: tile,
+        actual,
+        // Il window manager può rifiutare in silenzio: senza il confronto, una
+        // finestra rimasta ferma passerebbe per affiancata.
+        applied: actual.left === tile.left && actual.top === tile.top
+          && actual.width === tile.width && actual.height === tile.height,
+      });
+    } catch (e) {
+      results.push({ window_id: w.id, type: w.type, requested: tile, error: e.message });
+    }
+  }
+
+  return {
+    monitor: area,
+    layout,
+    windows: results.length,
+    applied: results.filter((r) => r.applied).length,
+    results,
+  };
+}
+
+async function cmdMoveTab({ tab_id, window_id, new_window = false, window_type, left, top, width, height, index = -1 }) {
+  if (typeof tab_id !== 'number') throw new Error('Missing required parameter: tab_id');
+  if (typeof window_id !== 'number' && !new_window) throw new Error('Provide window_id or new_window: true');
+
+  const before = await chrome.tabs.get(tab_id);
+
+  if (new_window) {
+    // tabs.move vuole una finestra che esiste già; per estrarre in una finestra
+    // nuova (e posizionata) l'unica via è windows.create({tabId}). windows.create
+    // conosce solo normal e popup: le finestre app sono della SWA, non nostre —
+    // popup è il massimo di "finestra terminale" ottenibile da un'estensione.
+    const winOpts = { tabId: tab_id };
+    if (window_type === 'popup') winOpts.type = 'popup';
+    for (const [k, v] of [['left', left], ['top', top], ['width', width], ['height', height]]) {
+      if (typeof v === 'number') winOpts[k] = v;
+    }
+    const win = await chrome.windows.create(winOpts);
+    // La finestra nuova può nascere dietro un'altra (lo decide il window
+    // manager): allora la pagina resta hidden e non disegna. Lo si dice qui,
+    // non dopo tre attese scadute.
+    await new Promise((r) => setTimeout(r, 300));
+    const hidden = await pageHidden(tab_id);
+    return {
+      visibility: hidden ? 'hidden' : 'visible',
+      ...(hidden ? { hint: HIDDEN_HINT } : {}),
+      moved: tab_id,
+      url: before.url,
+      from_window: before.windowId,
+      to_window: win.id,
+      // Il tipo lo dice Chrome, non la richiesta: se popup viene declassato a
+      // normal il chiamante deve vederlo da qui.
+      window_type: win.type,
+      new_window: true,
+      index: 0,
+      same_window: before.windowId === win.id,
+      ...await windowBoundsReport(win.id, { left, top, width, height }),
+    };
+  }
+  const moved = await chrome.tabs.move(tab_id, { windowId: window_id, index });
+  const tab = Array.isArray(moved) ? moved[0] : moved;
+
+  return {
+    moved: tab_id,
+    url: before.url,
+    from_window: before.windowId,
+    to_window: tab?.windowId ?? window_id,
+    index: tab?.index ?? index,
+    // Chrome può accettare la chiamata e lasciare la scheda dov'era: senza questo
+    // il chiamante vedrebbe un successo per un'operazione non avvenuta.
+    same_window: before.windowId === (tab?.windowId ?? window_id),
+  };
+}
+
+// Perché una scheda non c'è più: «No tab with id» da solo non distingue una
+// chiusura a mano da una sostituzione. In memoria e limitato: se il service
+// worker riparte il registro si svuota e il motivo torna 'unknown'.
+const tabEndings = new Map();
+const TAB_ENDINGS_MAX = 200;
+const bridgeClosing = new Set();
+
+function recordTabEnding(tabId, ending) {
+  if (bridgeClosing.delete(tabId) && ending.reason === 'closed') ending = { reason: 'closed_by_bridge' };
+  tabEndings.set(tabId, { ...ending, at: new Date().toISOString() });
+  if (tabEndings.size > TAB_ENDINGS_MAX) tabEndings.delete(tabEndings.keys().next().value);
+}
+
+const CLOSE_WAIT_MS = 5000;
+
+async function cmdTabAction({ action, tab_id, bypass_cache = false }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+
+  if (action === 'close') {
+    // chrome.tabs.remove aspetta che la pagina lasci andare: con un dialogo
+    // «Vuoi uscire?» aperto o la pagina bloccata in un ciclo resterebbe muta
+    // fino al timeout del comando (30 s, visto il 15/10). Dopo 5 s si risponde
+    // con un errore; la chiusura resta in corso e Chrome la completa quando
+    // la pagina cede (get_tabs la riporta come closed_by_bridge).
+    bridgeClosing.add(tabId);
+    const removing = chrome.tabs.remove(tabId).then(() => true, (e) => { bridgeClosing.delete(tabId); throw e; });
+    const done = await Promise.race([removing, new Promise((r) => setTimeout(() => r(false), CLOSE_WAIT_MS))]);
+    if (done) return { action, closed: tabId };
+    removing.catch(() => {});
+    throw new Error(`Tab ${tabId} did not close within ${CLOSE_WAIT_MS / 1000} s: the page is not answering, either a "Leave site?" dialog is open (beforeunload) or the page is stuck in a loop. The close is still pending and completes if the page lets go. Look at the tab: answer the dialog, or close it by hand.`);
+  }
+  if (action === 'discard') {
+    // La scheda resta nella barra e si ricarica al focus: il processo muore, la
+    // RAM torna. La tmux session dietro un terminale non c'entra: vive nel
+    // container, non nel renderer.
+    const t = await chrome.tabs.discard(tabId);
+    return { action, tabId: t?.id ?? tabId, discarded: true };
+  }
+  if (action === 'mute' || action === 'unmute') {
+    await chrome.tabs.update(tabId, { muted: action === 'mute' });
+    return { action, tabId, muted: action === 'mute' };
+  }
+  if (action === 'duplicate') {
+    const d = await chrome.tabs.duplicate(tabId);
+    return { action, source: tabId, duplicated: d.id, window_id: d.windowId };
+  }
+  if (action === 'activate') {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    return { action, activated: tabId };
+  }
+
+  // Fallback per back/forward: su ChromeOS chrome.tabs.goBack può fallire
+  // anche con history valida — in quel caso usa history.back()/forward() in pagina.
+  const historyFallback = async (direction) => {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (dir) => {
+        if (window.history.length <= 1) return { moved: false };
+        if (dir === 'back') window.history.back(); else window.history.forward();
+        return { moved: true };
+      },
+      args: [direction],
+      world: 'MAIN',
+    });
+    if (!res?.[0]?.result?.moved) {
+      throw new Error(`Cannot go ${direction}: no history entry in that direction`);
+    }
+  };
+
+  const done = waitForComplete(tabId);
+  if (action === 'reload') {
+    await chrome.tabs.reload(tabId, { bypassCache: bypass_cache });
+  } else if (action === 'back') {
+    try { await chrome.tabs.goBack(tabId); }
+    catch { await historyFallback('back'); }
+  } else if (action === 'forward') {
+    try { await chrome.tabs.goForward(tabId); }
+    catch { await historyFallback('forward'); }
+  } else {
+    throw new Error(`Unknown action: ${action}`);
+  }
+  // navigated:false = nessun evento 'complete' entro il timeout: history vuota
+  // in quella direzione (no-op) o navigazione same-document/molto lenta.
+  const navigated = await done;
+  const t = await chrome.tabs.get(tabId);
+  return { action, url: t.url, title: t.title, tabId, navigated };
+}
+
+// --- DevTools: get_page_info ---
+
+async function cmdGetPageInfo({ tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: () => {
+      const metas = [...document.querySelectorAll('meta')].map((m) => ({
+        name: m.getAttribute('name') || m.getAttribute('property') || null,
+        content: m.getAttribute('content') || null,
+        charset: m.getAttribute('charset') || null,
+        httpEquiv: m.getAttribute('http-equiv') || null,
+      }));
+      const scripts = [...document.querySelectorAll('script')].map((s) => ({
+        src: s.src || null,
+        type: s.type || null,
+        async: s.async,
+        defer: s.defer,
+        inline: !s.src ? s.textContent.substring(0, 200) : null,
+      }));
+      const stylesheets = [...document.querySelectorAll('link[rel="stylesheet"], style')].map((s) => {
+        if (s.tagName === 'LINK') return { type: 'link', href: s.href };
+        return { type: 'inline', content: s.textContent.substring(0, 200) };
+      });
+      const links = [...document.querySelectorAll('a[href]')].slice(0, 100).map((a) => ({
+        href: a.href,
+        text: a.textContent.trim().substring(0, 100),
+        target: a.target || null,
+      }));
+      const forms = [...document.querySelectorAll('form')].map((f) => ({
+        action: f.action || null,
+        method: f.method || 'get',
+        id: f.id || null,
+        fields: [...f.elements].slice(0, 50).map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          type: el.type || null,
+          name: el.name || null,
+          id: el.id || null,
+        })),
+      }));
+      // Dev server e overlay di errore: una pagina in errore letta come valida
+      // era il buco di luglio (§15.1).
+      const dev = (() => {
+        let server = null;
+        if (document.querySelector('script[src*="/@vite/client"]') || window.__vite_plugin_react_preamble_installed__) server = 'vite';
+        else if (document.querySelector('script[src*="webpack-dev-server"]') || window.webpackHotUpdate) server = 'webpack-dev-server';
+        else if (document.querySelector('script[src*="/_next/static/"]') && document.getElementById('__NEXT_DATA__')) server = 'next';
+        else if (window.__NUXT__ && document.querySelector('script[src*="/_nuxt/"]')) server = 'nuxt';
+        let overlay = null;
+        const vite = document.querySelector('vite-error-overlay');
+        if (vite) overlay = { tool: 'vite', message: (vite.shadowRoot?.querySelector('.message')?.textContent || vite.textContent || '').trim().slice(0, 300) };
+        const wp = document.querySelector('#webpack-dev-server-client-overlay');
+        if (!overlay && wp) overlay = { tool: 'webpack-dev-server', message: (wp.contentDocument?.body?.innerText || '').trim().slice(0, 300) || 'overlay open' };
+        const nx = document.querySelector('nextjs-portal');
+        if (!overlay && nx) { const t = (nx.shadowRoot?.textContent || '').trim(); if (/error|failed to compile|unhandled/i.test(t)) overlay = { tool: 'next', message: t.slice(0, 300) }; }
+        const nuxt = document.querySelector('.__nuxt-error-page, #nuxt-error');
+        if (!overlay && nuxt) overlay = { tool: 'nuxt', message: (nuxt.innerText || '').trim().slice(0, 300) };
+        return server || overlay ? { server, overlay } : null;
+      })();
+      return {
+        title: document.title,
+        ...(dev ? { dev } : {}),
+        url: location.href,
+        doctype: document.doctype ? document.doctype.name : null,
+        charset: document.characterSet,
+        // hidden = finestra minimizzata, coperta o in secondo piano: la pagina
+        // non disegna e i suoi timer rallentano. Va saputo prima di attendere.
+        visibility: document.visibilityState,
+        metas,
+        scripts,
+        stylesheets,
+        links,
+        forms,
+      };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- DevTools: get_storage ---
+
+async function cmdGetStorage({ type = 'all', tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const data = {};
+
+  if (type === 'all' || type === 'localStorage' || type === 'sessionStorage') {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (storageType) => {
+        const out = {};
+        if (storageType === 'all' || storageType === 'localStorage') {
+          const ls = {};
+          for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); }
+          out.localStorage = ls;
+        }
+        if (storageType === 'all' || storageType === 'sessionStorage') {
+          const ss = {};
+          for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); }
+          out.sessionStorage = ss;
+        }
+        return out;
+      },
+      args: [type],
+      world: 'MAIN',
+    });
+    Object.assign(data, results?.[0]?.result ?? {});
+  }
+
+  if (type === 'all' || type === 'cookies') {
+    const tab = await chrome.tabs.get(tabId);
+    const cookies = await chrome.cookies.getAll({ url: tab.url });
+    data.cookies = cookies.map((c) => ({
+      name: c.name, value: c.value, domain: c.domain, path: c.path,
+      httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite,
+      session: c.session, expirationDate: c.expirationDate ?? null,
+    }));
+  }
+
+  return data;
+}
+
+// --- DevTools: get_performance ---
+
+async function cmdGetPerformance({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const nav = performance.getEntriesByType('navigation')[0];
+      const paint = performance.getEntriesByType('paint');
+      const lcp = performance.getEntriesByType('largest-contentful-paint');
+      const resources = performance.getEntriesByType('resource').slice(0, 50).map((r) => ({
+        name: r.name,
+        type: r.initiatorType,
+        duration: Math.round(r.duration),
+        size: r.transferSize || 0,
+      }));
+
+      const timing = nav ? {
+        dns: Math.round(nav.domainLookupEnd - nav.domainLookupStart),
+        tcp: Math.round(nav.connectEnd - nav.connectStart),
+        ttfb: Math.round(nav.responseStart - nav.requestStart),
+        download: Math.round(nav.responseEnd - nav.responseStart),
+        domInteractive: Math.round(nav.domInteractive - nav.startTime),
+        domComplete: Math.round(nav.domComplete - nav.startTime),
+        loadEvent: Math.round(nav.loadEventEnd - nav.startTime),
+      } : null;
+
+      const paintMetrics = {};
+      for (const p of paint) {
+        paintMetrics[p.name] = Math.round(p.startTime);
+      }
+      if (lcp.length > 0) {
+        paintMetrics['largest-contentful-paint'] = Math.round(lcp[lcp.length - 1].startTime);
+      }
+
+      const memory = performance.memory ? {
+        usedJSHeapSize: performance.memory.usedJSHeapSize,
+        totalJSHeapSize: performance.memory.totalJSHeapSize,
+        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+      } : null;
+
+      return { timing, paint: paintMetrics, memory, resources };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- DevTools: query_dom ---
+
+async function cmdQueryDom({ selector, properties, limit = 50, tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel, props, lim) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const els = deepQueryAll(sel).slice(0, lim);
+      return els.map((el) => {
+        const attrs = {};
+        for (const a of el.attributes) {
+          attrs[a.name] = a.value;
+        }
+        const rect = el.getBoundingClientRect();
+        const result = {
+          tagName: el.tagName.toLowerCase(),
+          id: el.id || null,
+          className: el.className || null,
+          attributes: attrs,
+          textContent: el.textContent?.substring(0, 200)?.trim() || null,
+          childCount: el.children.length,
+          rect: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          },
+        };
+        if (props && props.length > 0) {
+          const computed = getComputedStyle(el);
+          result.computedStyles = {};
+          for (const p of props) {
+            result.computedStyles[p] = computed.getPropertyValue(p);
+          }
+        }
+        return result;
+      });
+    },
+    args: [selector, properties || null, limit],
+    world: 'MAIN',
+  });
+  const elements = results?.[0]?.result ?? [];
+  return { count: elements.length, elements };
+}
+
+// --- DevTools: get_css_styles ---
+
+// La cascata sta in lib/css-cascade.js, iniettato prima della funzione come
+// element-label.js: chrome.scripting serializza solo la funzione. Mondo
+// ISOLATED: il CSSOM è lo stesso e la pagina non vede né manomette la libreria.
+async function cmdGetCssStyles({ selector, properties, include_inherited = false, tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+  await chrome.scripting.executeScript({ target, files: ['lib/css-cascade.js'], world: 'ISOLATED' });
+  const results = await chrome.scripting.executeScript({
+    target,
+    func: (sel, props, inherited) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      return globalThis.__cbCssStyles(el, { selector: sel, properties: props, include_inherited: inherited });
+    },
+    args: [selector, properties ?? null, Boolean(include_inherited)],
+    world: 'ISOLATED',
+  });
+  return elementOutcome(results, selector);
+}
+
+// --- DevTools: modify_dom ---
+
+async function cmdModifyDom({ selector, action, name, value, className, tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel, act, attrName, attrValue, cls) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      switch (act) {
+        case 'setAttribute':
+          if (!attrName) return { success: false, error: 'Missing parameter: name' };
+          el.setAttribute(attrName, attrValue || '');
+          break;
+        case 'removeAttribute':
+          if (!attrName) return { success: false, error: 'Missing parameter: name' };
+          el.removeAttribute(attrName);
+          break;
+        case 'addClass':
+          if (!cls) return { success: false, error: 'Missing parameter: className' };
+          el.classList.add(cls);
+          break;
+        case 'removeClass':
+          if (!cls) return { success: false, error: 'Missing parameter: className' };
+          el.classList.remove(cls);
+          break;
+        case 'setStyle':
+          if (attrValue == null) return { success: false, error: 'Missing parameter: value' };
+          el.style.cssText = attrValue;
+          break;
+        case 'setTextContent':
+          if (attrValue == null) return { success: false, error: 'Missing parameter: value' };
+          el.textContent = attrValue;
+          break;
+        default:
+          return { success: false, error: `Unknown action: ${act}` };
+      }
+      return { success: true, tagName: el.tagName.toLowerCase(), action: act };
+    },
+    args: [selector, action, name || null, value || null, className || null],
+    world: 'MAIN',
+  });
+  return elementOutcome(results, selector);
+}
+
+// --- DevTools: inject_css ---
+
+async function cmdInjectCss({ css, tab_id }) {
+  if (!css) throw new Error('Missing required parameter: css');
+  const tabId = await resolveTabId(tab_id);
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    css,
+  });
+  return { success: true, injectedLength: css.length };
+}
+
+// --- DevTools: read_console ---
+// Hook installed at document_start via console-capture.js content script (MAIN world).
+// This function only reads the accumulated logs.
+
+// limit = 0 quando il server non lo manda: un server più VECCHIO di questa
+// estensione (caso normale, la CWS ha latenza di review) fa lo slice da sé, e un
+// default in pagina gli consegnerebbe meno voci di quelle che ha chiesto.
+async function cmdReadConsole({ clear = false, level = 'all', limit = 0, since = '', tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    // Il taglio a `limit` avviene IN PAGINA: il WebSocket non trasporta ciò che
+    // il modello non vedrà. E `clear` rimuove solo le voci effettivamente
+    // restituite (e solo del level richiesto): cancellare l'intero buffer
+    // distruggeva messaggi che nessuno aveva letto.
+    func: (shouldClear, filterLevel, lim, since) => {
+      const hooked = !!window.__chromeBridge_consoleHooked;
+      const logs = window.__chromeBridge_consoleLogs || [];
+      // Cursore "documento:seq": dopo una ricarica il seq riparte da 1, e un
+      // cursore del documento precedente non deve nascondere le voci nuove.
+      const doc = String(Math.round(performance.timeOrigin));
+      const [sDoc, sSeq] = String(since || '').split(':');
+      const after = sDoc === doc ? Number(sSeq) || 0 : 0;
+      const cursor = `${doc}:${logs.length ? (logs[logs.length - 1].seq ?? 0) : after}`;
+      const fresh = after > 0 ? logs.filter((l) => (l.seq ?? 0) > after) : logs;
+      const filtered = filterLevel === 'all' ? fresh : fresh.filter((l) => l.level === filterLevel);
+      const shown = lim > 0 ? filtered.slice(-lim) : filtered;
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_consoleLogs = logs.filter((l) => !drop.has(l));
+      }
+      return { hooked, total: filtered.length, messages: shown, cursor };
+    },
+    args: [clear, level, limit, since],
+    world: 'MAIN',
+  });
+
+  const out = results?.[0]?.result ?? {};
+  const messages = out.messages ?? [];
+  // "count: 0" senza contesto è indistinguibile da "hook mai installato":
+  // read_console è il tool di debug più usato e non deve far concludere
+  // "pagina pulita" quando in realtà non stava osservando nulla.
+  const note = out.hooked === false
+    ? 'Instrumentation not loaded (page opened before the extension, "Capture console & metrics" off, or a non-injectable page) — no console messages are being captured.'
+    : undefined;
+  return { count: out.total ?? messages.length, messages, hooked: out.hooked !== false, cursor: out.cursor ?? since, ...(note ? { note } : {}) };
+}
+
+// --- DevTools: monitor_network (stateful) ---
+
+// Always-inject: il guard in-page `__chromeBridge_networkHooked` rende
+// l'operazione idempotente e costa pochi ms. Un Set per-tab lato SW andava
+// invece fuori sincrono con la navigazione (il tab veniva rimosso su
+// 'loading', reinserito da un'iniezione risolta contro il documento morente,
+// e il nuovo documento restava senza hook con `count: 0` silenzioso).
+async function ensureNetworkHook(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['network-hook.js'],
+    world: 'MAIN',
+  });
+}
+
+async function cmdMonitorNetwork({ clear = false, source = 'page', limit = 0, since = '', tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  if (source === 'browser') {
+    // Cursore "avvio del worker:seq": un worker rianimato ha il log vuoto e
+    // il seq da capo, quindi un cursore vecchio vale come "dall'inizio".
+    const whole = browserNetLog.get(tabId) ?? [];
+    const [sBoot, sSeq] = String(since || '').split(':');
+    const after = sBoot === String(swBootedAt) ? Number(sSeq) || 0 : 0;
+    const cursor = `${swBootedAt}:${whole.length ? whole[whole.length - 1].seq : after}`;
+    const all = after > 0 ? whole.filter((r) => r.seq > after) : whole;
+    const shown = limit > 0 ? all.slice(-limit) : [...all];
+    if (clear) { const drop = new Set(shown); browserNetLog.set(tabId, whole.filter((r) => !drop.has(r))); }
+    return { count: all.length, requests: shown, log_since: swBootedAt, cursor };
+  }
+
+  await ensureNetworkHook(tabId);
+
+  // Taglio e clear in pagina: il WebSocket non trasporta 1000 voci (~154 KB)
+  // per consegnarne 100, e clear non distrugge ciò che nessuno ha letto.
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (shouldClear, lim, since) => {
+      const hooked = !!window.__chromeBridge_networkHooked;
+      const whole = window.__chromeBridge_networkRequests || [];
+      const doc = String(Math.round(performance.timeOrigin));
+      const [sDoc, sSeq] = String(since || '').split(':');
+      const after = sDoc === doc ? Number(sSeq) || 0 : 0;
+      const cursor = `${doc}:${whole.length ? (whole[whole.length - 1].seq ?? 0) : after}`;
+      const requests = after > 0 ? whole.filter((r) => (r.seq ?? 0) > after) : whole;
+      const shown = lim > 0 ? requests.slice(-lim) : requests.slice();
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_networkRequests = whole.filter((r) => !drop.has(r));
+      }
+      return { hooked, total: requests.length, requests: shown, cursor };
+    },
+    args: [clear, limit, since],
+    world: 'MAIN',
+  });
+
+  const out = results?.[0]?.result ?? {};
+  const requests = out.requests ?? [];
+  const note = out.hooked === false
+    ? 'Network hook not installed on this document — no page requests are being captured.'
+    : undefined;
+  return { count: out.total ?? requests.length, requests, cursor: out.cursor ?? since, ...(note ? { note } : {}) };
+}
+
+// --- wait_for_element ---
+
+async function cmdWaitForElement({ selector, timeout = 10000, interval = 200, visible = false, tab_id, frame_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  const clampedInterval = Math.max(interval, 50);
+
+  const run = () => chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel, tout, intv, vis) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      return new Promise((resolve) => {
+        const start = Date.now();
+        const check = () => {
+          const el = deepQuery(sel);
+          if (el) {
+            if (vis) {
+              const style = getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                if (Date.now() - start >= tout) {
+                  resolve({ found: false, error: 'Element found but not visible within timeout' });
+                  return;
+                }
+                setTimeout(check, intv);
+                return;
+              }
+            }
+            const rect = el.getBoundingClientRect();
+            resolve({
+              found: true,
+              tagName: el.tagName.toLowerCase(),
+              elapsed: Date.now() - start,
+              rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+            });
+            return;
+          }
+          if (Date.now() - start >= tout) {
+            resolve({ found: false, error: `Element not found within ${tout}ms: ${sel}` });
+            return;
+          }
+          setTimeout(check, intv);
+        };
+        check();
+      });
+    },
+    args: [selector, timeout, clampedInterval, visible],
+    world: 'MAIN',
+  }).then((results) => results?.[0]?.result ?? { found: false, error: 'No result' });
+  return withDeadline(tabId, timeout + 1000, run,
+    { found: false, error: `Element not found within ${timeout}ms: ${selector}` }, (r) => r.found === false);
+}
+
+// --- scroll_to ---
+
+async function cmdScrollTo({ selector, x, y, behavior = 'auto', offset_y = 0, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel, sx, sy, beh, offY) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      if (sel) {
+        const el = deepQuery(sel);
+        if (!el) throw new Error(`Element not found: ${sel}`);
+        const rect = el.getBoundingClientRect();
+        const targetY = rect.top + window.scrollY - offY;
+        window.scrollTo({ top: targetY, left: rect.left + window.scrollX, behavior: beh });
+      } else if (sx !== undefined || sy !== undefined) {
+        window.scrollTo({ top: sy ?? window.scrollY, left: sx ?? window.scrollX, behavior: beh });
+      } else {
+        window.scrollTo({ top: 0, left: 0, behavior: beh });
+      }
+      return {
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollHeight: document.documentElement.scrollHeight,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    },
+    args: [selector || null, x ?? null, y ?? null, behavior, offset_y],
+    world: 'MAIN',
+  });
+  return selector ? elementOutcome(results, selector) : (results?.[0]?.result ?? {});
+}
+
+// --- set_storage ---
+
+async function cmdSetStorage({ type, action, key, value, path, domain, expires, secure, sameSite, http_only, tab_id }) {
+  if (!type) throw new Error('Missing required parameter: type');
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+
+  if (type === 'cookie') {
+    const tab = await chrome.tabs.get(tabId);
+    const sameSiteMap = { Strict: 'strict', Lax: 'lax', None: 'no_restriction' };
+    if (action === 'set') {
+      if (!key) throw new Error('key is required for set action');
+      const details = { url: tab.url, name: key, value: value || '', path: path || '/' };
+      if (domain) details.domain = domain;
+      if (expires) { const ts = Math.floor(new Date(expires).getTime() / 1000); if (Number.isNaN(ts)) throw new Error(`Invalid expires date: ${expires}`); details.expirationDate = ts; }
+      if (secure || sameSite === 'None') details.secure = true;
+      if (sameSite) details.sameSite = sameSiteMap[sameSite];
+      if (http_only) details.httpOnly = true;
+      await chrome.cookies.set(details);
+      return { success: true, type: 'cookie', action: 'set', key };
+    }
+    if (action === 'delete') {
+      if (!key) throw new Error('key is required for delete action');
+      const matches = (await chrome.cookies.getAll({ url: tab.url })).filter((c) => c.name === key);
+      for (const c of matches) {
+        const cookieUrl = (c.secure ? 'https://' : 'http://') + c.domain.replace(/^\./, '') + c.path;
+        await chrome.cookies.remove({ url: cookieUrl, name: c.name });
+      }
+      return { success: true, type: 'cookie', action: 'delete', key, removed: matches.length };
+    }
+    if (action === 'clear') {
+      const cookies = await chrome.cookies.getAll({ url: tab.url });
+      for (const c of cookies) {
+        const cookieUrl = (c.secure ? 'https://' : 'http://') + c.domain.replace(/^\./, '') + c.path;
+        await chrome.cookies.remove({ url: cookieUrl, name: c.name });
+      }
+      return { success: true, type: 'cookie', action: 'clear', cleared: cookies.length };
+    }
+    throw new Error(`Invalid cookie action: ${action}`);
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sType, sAction, sKey, sValue) => {
+      const storage = sType === 'localStorage' ? localStorage : sessionStorage;
+      if (sAction === 'set') {
+        if (!sKey) throw new Error('key is required for set action');
+        storage.setItem(sKey, sValue || '');
+        return { success: true, type: sType, action: 'set', key: sKey };
+      } else if (sAction === 'delete') {
+        if (!sKey) throw new Error('key is required for delete action');
+        storage.removeItem(sKey);
+        return { success: true, type: sType, action: 'delete', key: sKey };
+      } else if (sAction === 'clear') {
+        storage.clear();
+        return { success: true, type: sType, action: 'clear' };
+      }
+      throw new Error(`Invalid action: ${sAction}`);
+    },
+    args: [type, action, key || null, value || null],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { success: false };
+}
+
+// --- fill_form ---
+
+async function cmdFillForm({ fields, submit_selector, tab_id, frame_id }) {
+  if (!fields || !Array.isArray(fields)) throw new Error('Missing required parameter: fields');
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (flds, submitSel) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const report = [];
+      for (const { selector, value } of flds) {
+        try {
+          const el = deepQuery(selector);
+          if (!el) { report.push({ selector, success: false, error: 'Element not found' }); continue; }
+          const tag = el.tagName.toLowerCase();
+          const type = (el.type || '').toLowerCase();
+          const disabled = el.disabled;
+          const readOnly = el.readOnly;
+          let chosen = null;
+
+          // Un campo disabilitato o in sola lettura non si compila: prima era
+          // success:true con un avviso, e il modello lo dava per fatto.
+          if (disabled || readOnly) {
+            report.push({ selector, success: false, tagName: tag, type, error: `field is ${disabled ? 'disabled' : 'readonly'}: value not set` });
+            continue;
+          }
+
+          if (tag === 'select') {
+            // Try match by value first, then by text
+            let found = false;
+            for (const opt of el.options) {
+              if (opt.value === value || opt.textContent.trim() === value) {
+                el.value = opt.value;
+                chosen = opt.value;
+                found = true;
+                break;
+              }
+            }
+            if (!found) { report.push({ selector, success: false, tagName: tag, type: 'select', error: `Option not found: ${value}` }); continue; }
+          } else if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+            const shouldCheck = value === 'true' || value === '1';
+            if (el.checked !== shouldCheck) el.click();
+          } else if (tag === 'textarea' || tag === 'input') {
+            // React-compatible value setting
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value'
+            )?.set;
+            if (nativeInputValueSetter) {
+              nativeInputValueSetter.call(el, value);
+            } else {
+              el.value = value;
+            }
+          } else {
+            el.value = value;
+          }
+
+          el.dispatchEvent(new Event('focus', { bubbles: true }));
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          // Rilettura per campo: l'effetto, non l'azione
+          const entry = { selector, success: true, tagName: tag, type: type || tag };
+          if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+            const want = value === 'true' || value === '1';
+            entry.checked_after = el.checked; entry.mismatch = el.checked !== want;
+          } else if (tag === 'select') {
+            entry.value_after = el.value; entry.mismatch = el.value !== chosen;
+          } else {
+            entry.value_after = String(el.value ?? ''); entry.mismatch = String(el.value ?? '') !== String(value);
+          }
+          report.push(entry);
+        } catch (e) {
+          report.push({ selector, success: false, error: e.message });
+        }
+      }
+
+      // Niente invio se un campo è fallito (si invierebbe un modulo diverso da
+      // quello chiesto), e un pulsante che non c'è si dice.
+      let submit = null;
+      if (submitSel) {
+        const failed = report.filter((r) => !r.success).length;
+        const btn = deepQuery(submitSel);
+        if (failed) submit = { submitted: false, reason: `${failed} field(s) failed: not submitted` };
+        else if (!btn) submit = { submitted: false, reason: `submit button not found: ${submitSel}` };
+        else { btn.click(); submit = { submitted: true }; }
+      }
+
+      return { report, submit };
+    },
+    args: [fields, submit_selector || null],
+    world: 'MAIN',
+  });
+  const out = results?.[0]?.result ?? {};
+  // Compatibilità: una pagina vecchia che restituisce l'array nudo.
+  if (Array.isArray(out)) return { fields: out };
+  return { fields: out.report ?? [], ...(out.submit ?? {}) };
+}
+
+// --- viewport_resize ---
+
+async function cmdViewportResize({ preset, width, height, left, top, state, read_only = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const tab = await chrome.tabs.get(tabId);
+
+  const presets = { mobile: { w: 375, h: 812 }, tablet: { w: 768, h: 1024 }, desktop: { w: 1440, h: 900 } };
+  let targetW = width;
+  let targetH = height;
+
+  if (preset && presets[preset]) {
+    if (!targetW) targetW = presets[preset].w;
+    if (!targetH) targetH = presets[preset].h;
+  }
+
+  const updateOpts = {};
+  if (targetW) updateOpts.width = targetW;
+  if (targetH) updateOpts.height = targetH;
+  if (typeof left === 'number') updateOpts.left = left;
+  if (typeof top === 'number') updateOpts.top = top;
+
+  if (!read_only) {
+    // Lo stato va cambiato PRIMA dei bounds: una finestra massimizzata li
+    // accetta e li ignora, e la chiamata riuscirebbe senza spostare nulla.
+    if (state) await chrome.windows.update(tab.windowId, { state });
+    if (Object.keys(updateOpts).length === 0) {
+      if (state) {
+        const w = await chrome.windows.get(tab.windowId);
+        return { requested: { state }, window: { left: w.left, top: w.top, width: w.width, height: w.height, state: w.state } };
+      }
+      throw new Error('Provide preset, width, height, left, top or state');
+    }
+    await chrome.windows.update(tab.windowId, updateOpts);
+    // La finestra si ridisegna in modo asincrono: senza la pausa si leggono le
+    // dimensioni vecchie e si riporta un risultato falso.
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // La misura del viewport passa da un'injection, e `chrome://` e
+  // `chrome-untrusted://` la rifiutano: le finestre del Terminale e di
+  // media-app sono esattamente quelle. Prima questo errore veniva propagato e
+  // il tool falliva DOPO aver spostato la finestra — l'azione riuscita
+  // riportata come guasto, che è il modo di far ritentare chi chiama qualcosa
+  // che è già successo. La geometria della finestra non richiede injection:
+  // arriva da chrome.windows.get e c'è sempre.
+  let actual = {};
+  let viewport_error = null;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      }),
+      world: 'MAIN',
+    });
+    actual = results?.[0]?.result ?? {};
+  } catch (e) {
+    viewport_error = e.message;
+  }
+  const winNow = await chrome.windows.get(tab.windowId);
+  const geometry = { left: winNow.left, top: winNow.top, width: winNow.width, height: winNow.height, state: winNow.state };
+  // Uno zoom sotto il 100% allarga il viewport in CSS px oltre lo schermo:
+  // senza questo numero un 2226 px su uno schermo da 1536 non si spiega.
+  let zoom = null;
+  try { zoom = await chrome.tabs.getZoom(tabId); } catch { /* scheda senza zoom (chrome://) */ }
+  if (read_only) return { actual, window: geometry, zoom, viewport_error };
+  const win = winNow;
+  return {
+    requested: { width: targetW, height: targetH, preset: preset || null, left, top, state },
+    actual,
+    zoom,
+    viewport_error,
+    // Il window manager può accettare e ignorare: senza il confronto una
+    // finestra rimasta ferma passerebbe per spostata.
+    window: geometry,
+  };
+}
+
+// --- full_page_screenshot ---
+
+async function cmdFullPageScreenshot({ max_scrolls = 20, delay = 500, stitch = true, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  // Chrome quota: max 2 captureVisibleTab al secondo — clamp a 500ms
+  const safeDelay = Math.max(delay, 500);
+
+  const { shots, scrollHeight, viewportHeight, viewportWidth } = await withTabVisible(tabId, async (tab) => {
+    // Get page dimensions
+    const dimResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+        originalScrollY: window.scrollY,
+      }),
+      world: 'MAIN',
+    });
+    const { scrollHeight, viewportHeight, viewportWidth, originalScrollY } = dimResults?.[0]?.result ?? {};
+    const steps = Math.min(Math.ceil(scrollHeight / viewportHeight), max_scrolls);
+    const shots = [];
+
+    for (let i = 0; i < steps; i++) {
+      const target = Math.min(i * viewportHeight, Math.max(0, scrollHeight - viewportHeight));
+      const sRes = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sy) => { window.scrollTo(0, sy); return window.scrollY; },
+        args: [target],
+        world: 'MAIN',
+      });
+      const actualY = sRes?.[0]?.result ?? target;
+      await new Promise((r) => setTimeout(r, safeDelay));
+      const dataUrl = await captureVisibleOf(tab);
+      shots.push({ dataUrl, y: actualY });
+      if (actualY + viewportHeight >= scrollHeight) break;
+    }
+
+    // Restore scroll position
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sy) => window.scrollTo(0, sy),
+      args: [originalScrollY],
+      world: 'MAIN',
+    });
+
+    return { shots, scrollHeight, viewportHeight, viewportWidth };
+  });
+
+  if (!shots.length) throw new Error('No captures (page dimensions unavailable)');
+
+  if (!stitch) {
+    const captures = [];
+    for (const s of shots) {
+      captures.push(await bitmapToBase64Capped(await dataUrlToBitmap(s.dataUrl)));
+    }
+    return {
+      captures,
+      scrollHeight, viewportHeight, totalCaptures: shots.length,
+    };
+  }
+
+  // Stitching su OffscreenCanvas (limite hard Chrome ~16384px per lato),
+  // poi slice in segmenti da ~2 viewport: un'unica immagine più alta,
+  // ridotta dal client a ~1568px sul lato lungo, diventa illeggibile e
+  // costringe il modello a ri-catturare (token doppi).
+  const MAX_CANVAS_H = 16384;
+  const first = await dataUrlToBitmap(shots[0].dataUrl);
+  const dpr = first.width / viewportWidth;
+  // Canvas alto quanto l'area davvero catturata: se max_scrolls tronca la
+  // pagina, il resto uscirebbe come segmenti bianchi (immagini sprecate).
+  const lastShot = shots[shots.length - 1];
+  const coveredH = Math.round((lastShot.y + viewportHeight) * dpr);
+  const fullH = Math.min(Math.round(scrollHeight * dpr), coveredH, MAX_CANVAS_H);
+  const canvas = new OffscreenCanvas(first.width, fullH);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(first, 0, Math.round(shots[0].y * dpr));
+  for (let i = 1; i < shots.length; i++) {
+    const bmp = await dataUrlToBitmap(shots[i].dataUrl);
+    ctx.drawImage(bmp, 0, Math.round(shots[i].y * dpr));
+  }
+  const segH = Math.max(1, Math.round(viewportHeight * dpr * 2));
+  const images = [];
+  for (let y = 0; y < fullH; y += segH) {
+    const h = Math.min(segH, fullH - y);
+    const segment = await createImageBitmap(canvas, 0, y, first.width, h);
+    images.push(await bitmapToBase64Capped(segment));
+  }
+  return {
+    images,
+    segments: images.length,
+    scrollHeight, viewportHeight, totalCaptures: shots.length,
+    truncated: scrollHeight * dpr > fullH,
+  };
+}
+
+// --- read_form ---
+// "Controlla il modulo prima che invio": tutti i controlli con etichetta,
+// valore corrente, checked, obbligatorio vuoto, validità del browser. I
+// campi sensibili tornano [redacted]: il controllo li vede, il contesto no.
+
+async function cmdReadForm({ selector, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const SENSITIVE = /pass|pwd|card|cvv|cvc|secret|token|otp|pin\b/i;
+      const root = sel ? deepQuery(sel) : document;
+      if (!root) return { error: `No element matches ${sel}` };
+      const labelOf = (el) => {
+        const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        return (byFor?.textContent || el.getAttribute('aria-label') || el.closest('label')?.textContent || el.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      };
+      const selectorOf = (el) => el.id ? `#${CSS.escape(el.id)}` : el.name ? `${el.tagName.toLowerCase()}[name="${el.name}"]` : el.tagName.toLowerCase();
+      const seenRadio = new Set();
+      const controls = [];
+      for (const el of root.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""]')) {
+        if (el.type === 'hidden') continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const type = el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : el.isContentEditable ? 'contenteditable' : (el.type || 'text');
+        if (type === 'radio') { if (seenRadio.has(el.name)) continue; seenRadio.add(el.name); }
+        const sensitive = type === 'password' || /^cc-/.test(el.getAttribute('autocomplete') || '') || SENSITIVE.test(`${el.name || ''} ${el.id || ''}`);
+        let value;
+        if (type === 'checkbox') value = el.checked;
+        else if (type === 'radio') { const on = root.querySelector(`input[type=radio][name="${CSS.escape(el.name)}"]:checked`); value = on ? (labelOf(on) || on.value) : null; }
+        else if (type === 'select') value = el.multiple ? [...el.selectedOptions].map((o) => o.textContent.trim()) : (el.selectedOptions[0]?.textContent.trim() ?? '');
+        else if (type === 'contenteditable') value = (el.innerText || '').trim().slice(0, 200);
+        else if (type === 'file') value = el.files?.length ? [...el.files].map((f) => f.name).join(', ') : '';
+        else value = String(el.value ?? '');
+        if (sensitive && value) value = '[redacted]';
+        const required = !!el.required || el.getAttribute('aria-required') === 'true';
+        const empty = value === '' || value == null || value === false && type !== 'checkbox';
+        controls.push({
+          label: labelOf(el) || el.name || el.id || '', selector: selectorOf(el), name: el.name || null, type, value,
+          required, disabled: !!el.disabled, valid: typeof el.checkValidity === 'function' ? el.checkValidity() : true,
+          validation: el.validationMessage || null, empty_required: required && (value === '' || value == null),
+        });
+      }
+      const form = sel ? root.closest?.('form') || root : null;
+      return { url: location.href, count: controls.length, empty_required: controls.filter((c) => c.empty_required).length, invalid: controls.filter((c) => !c.valid).length, controls };
+    },
+    args: [selector ?? null],
+  });
+  return results?.[0]?.result ?? { controls: [] };
+}
+
+// --- watch ---
+// Osservazione continua di una pagina: la condizione (selettore presente,
+// testo presente, o il testo di un elemento che cambia) viene valutata a
+// ogni alarm — sopravvive all'idle del service worker, non al riavvio del
+// browser — e ogni evento finisce in chrome.storage.session. La consegna a
+// chi ascolta è del server (poll) e della CLI (`watch --wait`): un server
+// MCP non può svegliare il modello, e lo si dice invece di fingere.
+
+const WATCH_ALARM_PREFIX = 'cb-watch:';
+const WATCH_MAX_EVENTS = 200;
+
+async function loadWatches() { return (await chrome.storage.session.get({ watches: {} })).watches; }
+async function saveWatches(w) { await chrome.storage.session.set({ watches: w }); }
+
+async function pushWatchEvent(ev) {
+  const { watchEvents = [] } = await chrome.storage.session.get({ watchEvents: [] });
+  watchEvents.push(ev);
+  await chrome.storage.session.set({ watchEvents: watchEvents.slice(-WATCH_MAX_EVENTS) });
+}
+
+async function evalWatch(w) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: w.tabId },
+    func: (selector, text, valueOf) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const out = { url: location.href };
+      if (selector) out.present = !!deepQuery(selector);
+      if (text) out.text_found = (document.body?.innerText || '').toLowerCase().includes(String(text).toLowerCase());
+      if (valueOf) { const el = deepQuery(valueOf); out.value = el ? (el.innerText || el.value || '').trim().slice(0, 500) : null; }
+      return out;
+    },
+    args: [w.selector ?? null, w.text ?? null, w.value_of ?? null],
+  });
+  return results?.[0]?.result ?? null;
+}
+
+async function runWatch(name) {
+  const watches = await loadWatches();
+  const w = watches[name];
+  if (!w) { await chrome.alarms.clear(WATCH_ALARM_PREFIX + name); return; }
+  const now = Date.now();
+  if (w.expires_at && now > w.expires_at) {
+    await pushWatchEvent({ ts: now, name, kind: 'expired' });
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return;
+  }
+  let tab;
+  try { tab = await chrome.tabs.get(w.tabId); } catch {
+    await pushWatchEvent({ ts: now, name, kind: 'tab_closed' });
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return;
+  }
+  if (w.reload) { try { await chrome.tabs.reload(w.tabId); await new Promise((r) => setTimeout(r, 3000)); } catch { /* pagina non ricaricabile */ } }
+  let cur;
+  try { cur = await evalWatch(w); } catch (err) { cur = { error: err.message, url: tab.url }; }
+  w.checks = (w.checks || 0) + 1;
+  w.last_check = now;
+  const matched = (w.selector != null && cur?.present === true) || (w.text != null && cur?.text_found === true);
+  const gone = (w.selector != null && cur?.present === false) || (w.text != null && cur?.text_found === false);
+  let fire = null;
+  if (w.until === 'match' && matched) fire = 'matched';
+  else if (w.until === 'gone' && gone && w.seen_once) fire = 'gone';
+  else if (w.until === 'change' && w.value_of != null && cur && cur.value !== undefined && w.last_value !== undefined && cur.value !== w.last_value) fire = 'changed';
+  if (matched) w.seen_once = true;
+  const prev = w.last_value;
+  if (cur && cur.value !== undefined) w.last_value = cur.value;
+  if (fire) {
+    await pushWatchEvent({ ts: now, name, kind: fire, url: cur?.url ?? tab.url, value: cur?.value ?? null, previous: prev ?? null });
+    if (w.once !== false) { delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name); return; }
+  }
+  watches[name] = w;
+  await saveWatches(watches);
+}
+
+async function cmdWatch({ action = 'add', name, selector, text, value_of, until, interval_s = 60, expires_min = 240, reload = false, once = true, since = 0, tab_id }) {
+  if (action === 'list') {
+    const watches = await loadWatches();
+    return { watches: Object.values(watches).map(({ last_value, ...w }) => ({ ...w, last_value: last_value == null ? null : String(last_value).slice(0, 80) })) };
+  }
+  if (action === 'poll') {
+    const { watchEvents = [] } = await chrome.storage.session.get({ watchEvents: [] });
+    const events = watchEvents.filter((e) => e.ts > (since || 0) && (!name || e.name === name));
+    return { events, now: Date.now() };
+  }
+  if (!name || !/^[\w-]+$/.test(name)) throw new Error('name is required and must match [\\w-]+');
+  if (action === 'remove') {
+    const watches = await loadWatches();
+    const existed = !!watches[name];
+    delete watches[name]; await saveWatches(watches); await chrome.alarms.clear(WATCH_ALARM_PREFIX + name);
+    return { removed: existed, name };
+  }
+  // add
+  if (!selector && !text && !value_of) throw new Error('watch needs selector, text or value_of');
+  const tabId = await resolveTabId(tab_id);
+  const mode = until || (value_of ? 'change' : 'match');
+  const w = { name, tabId, selector: selector ?? null, text: text ?? null, value_of: value_of ?? null, until: mode, interval_s: Math.max(30, Number(interval_s) || 60), expires_at: Date.now() + Math.max(1, Number(expires_min) || 240) * 60000, reload: !!reload, once: once !== false, created_at: Date.now(), checks: 0 };
+  let first = null;
+  try { first = await evalWatch(w); } catch (err) { throw new Error(`Cannot evaluate the watch on this page: ${err.message}`); }
+  if (first?.value !== undefined) w.last_value = first.value;
+  const matchedNow = (w.selector && first?.present) || (w.text && first?.text_found);
+  if (matchedNow) w.seen_once = true;
+  const watches = await loadWatches();
+  watches[name] = w; await saveWatches(watches);
+  await chrome.alarms.create(WATCH_ALARM_PREFIX + name, { periodInMinutes: Math.max(0.5, w.interval_s / 60), delayInMinutes: Math.max(0.5, w.interval_s / 60) });
+  return { added: name, tabId, until: mode, interval_s: w.interval_s, expires_at: w.expires_at, initial: first, note: matchedNow && mode === 'match' ? 'condition already true now: until=match will fire at the first check' : undefined };
+}
+
+// --- element_screenshot ---
+
+// Il box si indica per selettore (scrollato in vista) o per regione in CSS px
+// del viewport corrente — lo stesso sistema dei rect di get_interactives e
+// query_dom. `scale` ingrandisce il ritaglio: più pixel per il modello sulla
+// zona che gli interessa, invece di un altro screenshot intero.
+async function cmdElementScreenshot({ selector, region, scale = 1, tab_id }) {
+  if (!selector && !region) throw new Error('Missing required parameter: selector or region');
+  const tabId = await resolveTabId(tab_id);
+  const zoom = Math.min(4, Math.max(1, Number(scale) || 1));
+
+  const { rect, dataUrl, tabWidth } = await withTabVisible(tabId, async (tab) => {
+    let rect;
+    if (selector) {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+          function deepQueryAll(sel, firstOnly) {
+            if (!sel.includes('>>>')) {
+              if (!firstOnly) return [...document.querySelectorAll(sel)];
+              const el = document.querySelector(sel);
+              return el ? [el] : [];
+            }
+            const parts = sel.split('>>>').map((s) => s.trim());
+            let scopes = [...document.querySelectorAll(parts[0])];
+            for (let i = 1; i < parts.length && scopes.length; i++) {
+              const last = i === parts.length - 1;
+              const found = new Set();
+              const done = new Set();
+              for (const scope of scopes) {
+                // Sotto uno scope già visitato le radici sono già state interrogate.
+                let up = scope.parentNode || scope.host;
+                while (up && !done.has(up)) up = up.parentNode || up.host;
+                if (up) continue;
+                done.add(scope);
+                const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+                for (let r = 0; r < roots.length; r++) {
+                  for (const el of roots[r].querySelectorAll(parts[i])) {
+                    if (firstOnly && last) return [el];
+                    found.add(el);
+                  }
+                  for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+                }
+              }
+              scopes = [...found];
+            }
+            return scopes;
+          }
+
+          function deepQuery(sel) {
+            return deepQueryAll(sel, true)[0] || null;
+          }
+          // deep-query:end
+          const el = deepQuery(sel);
+          if (!el) throw new Error(`Element not found: ${sel}`);
+          el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+        },
+        args: [selector],
+        world: 'MAIN',
+      });
+      rect = res?.[0]?.result;
+      if (!rect || rect.width === 0 || rect.height === 0) throw new Error('Element has no visible area');
+      // Delay per rendering post-scroll (behavior:'instant' forzato per evitare smooth-scroll CSS)
+      await new Promise((r) => setTimeout(r, 300));
+    } else {
+      const { x, y, width, height } = region;
+      if (!(width > 0) || !(height > 0)) throw new Error('region needs positive width and height');
+      // Niente script: il dpr si ricava dal rapporto cattura/viewport, così la
+      // regione funziona anche su chrome:// dove executeScript è rifiutato.
+      rect = { x: Number(x) || 0, y: Number(y) || 0, width, height, dpr: null };
+    }
+    const dataUrl = await captureVisibleOf(tab);
+    return { rect, dataUrl, tabWidth: tab.width };
+  });
+  const bitmap = await dataUrlToBitmap(dataUrl);
+  const dpr = rect.dpr || (tabWidth ? bitmap.width / tabWidth : 1);
+  const sx = Math.max(0, Math.round(rect.x * dpr));
+  const sy = Math.max(0, Math.round(rect.y * dpr));
+  const sw = Math.min(Math.round(rect.width * dpr), bitmap.width - sx);
+  const sh = Math.min(Math.round(rect.height * dpr), bitmap.height - sy);
+  if (sw <= 0 || sh <= 0) throw new Error(`${selector ? 'Element' : 'Region'} is outside the visible viewport`);
+  // scale moltiplica, il cap a MAX_IMAGE_SIDE resta: oltre, i pixel non
+  // arrivano comunque al modello.
+  const outScale = Math.min(zoom, MAX_IMAGE_SIDE / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * outScale));
+  const dh = Math.max(1, Math.round(sh * outScale));
+  const canvas = new OffscreenCanvas(dw, dh);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, dw, dh);
+  return { image: await canvasToBase64(canvas), width: dw, height: dh, scale: Number(outScale.toFixed(2)) };
+}
+
+// --- highlight_elements ---
+
+async function cmdHighlightElements({ selector, color = 'rgba(255,0,0,0.3)', border = '2px solid red', label = false, remove = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, bg, brd, showLabel, doRemove) => {
+      // Remove existing highlights
+      const existing = document.querySelectorAll('[data-chrome-bridge-highlight]');
+      existing.forEach((el) => el.remove());
+
+      if (doRemove || !sel) {
+        return { removed: existing.length, highlighted: 0 };
+      }
+
+      const els = [...document.querySelectorAll(sel)].slice(0, 100);
+      let count = 0;
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue;
+        const overlay = document.createElement('div');
+        overlay.setAttribute('data-chrome-bridge-highlight', 'true');
+        overlay.style.cssText = `position:absolute;top:${rect.top+window.scrollY}px;left:${rect.left+window.scrollX}px;width:${rect.width}px;height:${rect.height}px;background:${bg};border:${brd};pointer-events:none;z-index:2147483647;box-sizing:border-box;`;
+        if (showLabel) {
+          const tag = el.tagName.toLowerCase();
+          const cls = el.className ? `.${el.className.toString().split(' ')[0]}` : '';
+          overlay.textContent = `${tag}${cls} (${Math.round(rect.width)}x${Math.round(rect.height)})`;
+          overlay.style.fontSize = '10px';
+          overlay.style.color = '#fff';
+          overlay.style.textShadow = '0 0 2px #000';
+          overlay.style.overflow = 'hidden';
+          overlay.style.padding = '1px 3px';
+        }
+        document.body.appendChild(overlay);
+        count++;
+      }
+      return { removed: existing.length, highlighted: count };
+    },
+    args: [selector || null, color, border, label, remove],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { highlighted: 0 };
+}
+
+// --- measure_spacing ---
+
+async function cmdMeasureSpacing({ selector1, selector2, tab_id }) {
+  if (!selector1 || !selector2) throw new Error('Missing required parameters: selector1, selector2');
+  const tabId = await resolveTabId(tab_id);
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel1, sel2) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el1 = deepQuery(sel1);
+      const el2 = deepQuery(sel2);
+      if (!el1) throw new Error(`Element not found: ${sel1}`);
+      if (!el2) throw new Error(`Element not found: ${sel2}`);
+
+      function getInfo(el, sel) {
+        const rect = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          selector: sel,
+          tagName: el.tagName.toLowerCase(),
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+          margin: { top: parseFloat(cs.marginTop), right: parseFloat(cs.marginRight), bottom: parseFloat(cs.marginBottom), left: parseFloat(cs.marginLeft) },
+          padding: { top: parseFloat(cs.paddingTop), right: parseFloat(cs.paddingRight), bottom: parseFloat(cs.paddingBottom), left: parseFloat(cs.paddingLeft) },
+          hidden: rect.width === 0 && rect.height === 0,
+        };
+      }
+
+      const info1 = getInfo(el1, sel1);
+      const info2 = getInfo(el2, sel2);
+      const r1 = el1.getBoundingClientRect();
+      const r2 = el2.getBoundingClientRect();
+
+      const horizontalGap = Math.max(0, Math.max(r2.left - r1.right, r1.left - r2.right));
+      const verticalGap = Math.max(0, Math.max(r2.top - r1.bottom, r1.top - r2.bottom));
+      const overlapX = Math.max(0, Math.min(r1.right, r2.right) - Math.max(r1.left, r2.left));
+      const overlapY = Math.max(0, Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top));
+      const center1 = { x: r1.left + r1.width / 2, y: r1.top + r1.height / 2 };
+      const center2 = { x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 };
+      const centerDistance = Math.round(Math.sqrt((center2.x - center1.x) ** 2 + (center2.y - center1.y) ** 2));
+
+      return {
+        element1: info1,
+        element2: info2,
+        spacing: {
+          horizontalGap: Math.round(horizontalGap),
+          verticalGap: Math.round(verticalGap),
+          overlap: overlapX > 0 && overlapY > 0,
+          overlapArea: overlapX > 0 && overlapY > 0 ? { width: Math.round(overlapX), height: Math.round(overlapY) } : null,
+          centerDistance,
+        },
+      };
+    },
+    args: [selector1, selector2],
+    world: 'MAIN',
+  });
+  return elementOutcome(results, `${selector1} or ${selector2}`);
+}
+
+// --- watch_dom (stateful) ---
+
+async function cmdWatchDom({ selector = 'body', attributes = true, childList = true, characterData = false, subtree = true, clear = false, stop = false, limit = 0, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+
+  if (stop) {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        if (window.__chromeBridge_domObserver) {
+          window.__chromeBridge_domObserver.disconnect();
+          window.__chromeBridge_domObserver = null;
+        }
+        window.__chromeBridge_domWatcherHooked = false;
+        window.__chromeBridge_domMutations = [];
+      },
+      world: 'MAIN',
+    });
+    return { stopped: true, count: 0, mutations: [] };
+  }
+
+  // Always inject: idempotent via in-page guard; handles selector change by re-observing.
+  // Un selettore senza corrispondenza osservava body in silenzio: ora è un errore.
+  const install = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, opts) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      if (!deepQuery(sel)) return { missing: true };
+      if (window.__chromeBridge_domWatcherHooked && window.__chromeBridge_domWatchSelector !== sel) {
+        if (window.__chromeBridge_domObserver) window.__chromeBridge_domObserver.disconnect();
+        window.__chromeBridge_domWatcherHooked = false;
+        window.__chromeBridge_domMutations = [];
+      }
+      if (window.__chromeBridge_domWatcherHooked) return;
+      window.__chromeBridge_domWatcherHooked = true;
+      window.__chromeBridge_domWatchSelector = sel;
+      window.__chromeBridge_domMutations = [];
+      const MAX = 1000;
+      const target = deepQuery(sel);
+      const observer = new MutationObserver((mutationList) => {
+        for (const m of mutationList) {
+          // Ring buffer: dopo un'azione interessano le mutation RECENTI, quindi
+          // si scartano le vecchie invece di smettere di registrare.
+          if (window.__chromeBridge_domMutations.length >= MAX) window.__chromeBridge_domMutations.shift();
+          const entry = {
+            type: m.type,
+            target: m.target.tagName ? m.target.tagName.toLowerCase() : '#text',
+            timestamp: Date.now(),
+          };
+          if (m.type === 'attributes') entry.attributeName = m.attributeName;
+          if (m.type === 'childList') {
+            entry.addedNodes = m.addedNodes.length;
+            entry.removedNodes = m.removedNodes.length;
+          }
+          // Skip our own highlight overlays
+          if (m.target.hasAttribute && m.target.hasAttribute('data-chrome-bridge-highlight')) continue;
+          window.__chromeBridge_domMutations.push(entry);
+        }
+      });
+      observer.observe(target, opts);
+      window.__chromeBridge_domObserver = observer;
+    },
+    args: [selector, { attributes, childList, characterData, subtree }],
+    world: 'MAIN',
+  });
+  if (install?.[0]?.result?.missing) throw notFoundError(selector);
+
+  // Read mutations
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (shouldClear, lim) => {
+      const mutations = window.__chromeBridge_domMutations || [];
+      const shown = lim > 0 ? mutations.slice(-lim) : mutations.slice();
+      if (shouldClear && shown.length) {
+        const drop = new Set(shown);
+        window.__chromeBridge_domMutations = mutations.filter((m) => !drop.has(m));
+      }
+      return { total: mutations.length, mutations: shown };
+    },
+    args: [clear, limit],
+    world: 'MAIN',
+  });
+  const out = results?.[0]?.result ?? {};
+  const mutations = out.mutations ?? [];
+  return { count: out.total ?? mutations.length, mutations };
+}
+
+// --- hover ---
+
+async function cmdHover({ selector, tab_id, frame_id, trusted = false }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedHover(tabId, { selector, frame_id });
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (sel) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
+      el.dispatchEvent(new MouseEvent('mouseover', opts));
+      el.dispatchEvent(new MouseEvent('mousemove', opts));
+      return {
+        tagName: el.tagName.toLowerCase(),
+        text: el.textContent?.substring(0, 100)?.trim() || null,
+        rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+      };
+    },
+    args: [selector],
+    world: 'MAIN',
+  });
+  return elementOutcome(results, selector);
+}
+
+// --- press_key ---
+
+async function cmdPressKey({ key, selector, ctrl = false, shift = false, alt = false, meta = false, trusted = false, tab_id, frame_id }) {
+  if (!key) throw new Error('Missing required parameter: key');
+  const tabId = await resolveTabId(tab_id);
+  if (trusted) return trustedKey(tabId, { key, selector, frame_id, ctrl, shift, alt, meta });
+
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (k, sel, mods) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      let el;
+      if (sel) {
+        el = deepQuery(sel);
+        if (!el) throw new Error(`Element not found: ${sel}`);
+      } else {
+        el = document.activeElement || document.body;
+      }
+      const keyToCode = (kk) => {
+        if (/^[a-z]$/i.test(kk)) return `Key${kk.toUpperCase()}`;
+        if (/^[0-9]$/.test(kk)) return `Digit${kk}`;
+        const map = {
+          ' ': 'Space', '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
+          '\\': 'Backslash', ';': 'Semicolon', "'": 'Quote', ',': 'Comma', '.': 'Period',
+          '/': 'Slash', '`': 'Backquote',
+        };
+        return map[kk] || kk;
+      };
+      const opts = {
+        key: k,
+        code: keyToCode(k),
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: mods.ctrl,
+        shiftKey: mods.shift,
+        altKey: mods.alt,
+        metaKey: mods.meta,
+      };
+      el.dispatchEvent(new KeyboardEvent('keydown', opts));
+      // keypress only for printable chars
+      if (k.length === 1) {
+        el.dispatchEvent(new KeyboardEvent('keypress', opts));
+      }
+      el.dispatchEvent(new KeyboardEvent('keyup', opts));
+      return {
+        key: k,
+        target: el.tagName.toLowerCase(),
+        modifiers: Object.entries(mods).filter(([, v]) => v).map(([m]) => m),
+      };
+    },
+    args: [key, selector || null, { ctrl, shift, alt, meta }],
+    world: 'MAIN',
+  });
+  return elementOutcome(results, selector);
+}
+
+// --- get_frames ---
+
+async function cmdGetFrames({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const frames = await chrome.webNavigation.getAllFrames({ tabId });
+  return {
+    frames: (frames || []).map((f) => ({
+      frameId: f.frameId,
+      parentFrameId: f.parentFrameId,
+      url: f.url,
+    })),
+  };
+}
+
+// --- upload_file ---
+
+// upload_chunk: i file oltre 6 MB arrivano a pezzi (server/upload.js). La
+// pagina li tiene in window.__cbUploads finché upload_file li monta, o un
+// abort li butta.
+async function cmdUploadChunk({ upload_id, index, total, content_b64, abort = false, tab_id }) {
+  if (!upload_id) throw new Error('Missing required parameter: upload_id');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (id, i, n, b64, drop) => {
+      const all = (window.__cbUploads ??= {});
+      if (drop) { delete all[id]; return { aborted: true }; }
+      const u = (all[id] ??= { parts: [], total: n });
+      u.parts[i] = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      return { received: i + 1, total: n };
+    },
+    args: [upload_id, index ?? 0, total ?? 1, content_b64 ?? '', abort],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { received: 0 };
+}
+
+async function cmdUploadFile({ selector, name, mime_type, content_b64, upload_id, size, tab_id }) {
+  if (!selector) throw new Error('Missing required parameter: selector');
+  if (!content_b64 && !upload_id) throw new Error('Missing required parameter: content_b64');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, fname, mime, b64, id, expected) => {
+      const pieces = id ? window.__cbUploads?.[id] : null;
+      if (id) delete window.__cbUploads?.[id];
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const el = deepQuery(sel);
+      if (!el) throw new Error(`Element not found: ${sel}`);
+      // Un throw qui si perderebbe (elementOutcome lo leggerebbe come «not found»): esito esplicito.
+      if (!(el instanceof HTMLInputElement) || el.type !== 'file') return { uploaded: false, error: 'Element is not an input[type=file]' };
+      if (id && (!pieces || pieces.parts.filter(Boolean).length !== pieces.total)) {
+        return { uploaded: false, error: `Upload ${id} incomplete: ${pieces ? pieces.parts.filter(Boolean).length : 0}/${pieces?.total ?? '?'} pieces (page reloaded meanwhile?)` };
+      }
+      const bytes = id ? new Blob(pieces.parts) : Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const length = id ? bytes.size : bytes.length;
+      if (id && expected != null && length !== expected) return { uploaded: false, error: `Upload ${id}: ${length} bytes arrived, ${expected} expected` };
+      const file = new File([bytes], fname, { type: mime });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.files = dt.files;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { uploaded: fname, size: length, mime, ...(id && { pieces: pieces.total }) };
+    },
+    args: [selector, name, mime_type, content_b64 ?? null, upload_id ?? null, size ?? null],
+    world: 'MAIN',
+  });
+  return elementOutcome(results, selector);
+}
+
+// --- wait_for_navigation ---
+
+async function cmdWaitForNavigation({ timeout = 15000, mode = 'load', tab_id, since_url }) {
+  const tabId = await resolveTabId(tab_id);
+  const start = Date.now();
+
+  if (mode === 'spa') {
+    // baseline route corrente
+    const baseRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.__chromeBridge_lastRoute || location.href,
+      world: 'MAIN',
+    });
+    const baseline = baseRes?.[0]?.result ?? null;
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (base, tout) => new Promise((resolve) => {
+        const startT = Date.now();
+        const check = () => {
+          const cur = window.__chromeBridge_lastRoute || location.href;
+          if (cur !== base) { resolve({ navigated: true, mode: 'spa', url: cur, elapsed: Date.now() - startT }); return; }
+          if (Date.now() - startT >= tout) { resolve({ navigated: false, mode: 'spa', url: cur, note: 'No SPA route change within timeout' }); return; }
+          setTimeout(check, 100);
+        };
+        check();
+      }),
+      // Clamp sotto l'envelope del comando (60s) per non lasciare il poll orfano
+      args: [baseline, Math.min(timeout, 59000)],
+      world: 'MAIN',
+    });
+    return res?.[0]?.result ?? { navigated: false, mode: 'spa' };
+  }
+
+  // mode === 'load' : navigazione full-page (tab.status complete)
+  const tab = await chrome.tabs.get(tabId);
+
+  // Navigazione già avvenuta fra l'azione e questa attesa: l'URL è cambiato.
+  if (since_url && tab.url && tab.url !== since_url) {
+    if (tab.status !== 'complete') await waitForComplete(tabId, timeout);
+    const now = await chrome.tabs.get(tabId);
+    return { navigated: true, mode: 'load', url: now.url, status: now.status, elapsed: Date.now() - start };
+  }
+
+  if (tab.status === 'complete') {
+    // Attendi che una navigazione parta (entro min(timeout, 5s))
+    const started = await new Promise((resolve) => {
+      const listener = (id, info) => {
+        if (id === tabId && info.status === 'loading') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve(true);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(false); }, Math.min(timeout, 5000));
+    });
+    if (!started) {
+      const t = await chrome.tabs.get(tabId);
+      return { navigated: false, mode: 'load', url: t.url, note: 'No navigation started' };
+    }
+  }
+
+  const completed = await waitForComplete(tabId, Math.max(0, timeout - (Date.now() - start)));
+  const t = await chrome.tabs.get(tabId);
+  return { navigated: completed, mode: 'load', url: t.url, title: t.title, elapsed: Date.now() - start };
+}
+
+// --- dismiss_overlays ---
+
+async function cmdDismissOverlays({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const dismissed = [];
+      const clickIfVisible = (el, why) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        if (rect.width === 0 || rect.height === 0 || style.visibility === 'hidden' || style.display === 'none') return false;
+        const sel = el.id ? `#${el.id}` : (el.getAttribute('data-testid') ? `[data-testid="${el.getAttribute('data-testid')}"]` : el.tagName.toLowerCase());
+        el.click();
+        dismissed.push({ selector: sel, text: (el.textContent || '').trim().substring(0, 60), why });
+        return true;
+      };
+
+      // 1. Selettori noti di framework consent
+      const known = [
+        '#onetrust-accept-btn-handler',
+        '#CybotCookiebotDialogBodyButtonAccept',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+        'button[mode="primary"][data-testid="uc-accept-all-button"]',
+        '.cc-allow', '.cookie-accept', '#accept-cookies',
+        'button[aria-label*="accept" i]',
+        '[data-cookiebanner="accept_button"]',
+      ];
+      for (const k of known) {
+        if (dismissed.length >= 5) break;
+        try { if (clickIfVisible(document.querySelector(k), 'known')) continue; } catch {}
+      }
+
+      // 2. Euristica generica: bottone con testo accetta/accept dentro overlay fixed/sticky o z-index alto
+      if (dismissed.length === 0) {
+        const reText = /^(accetta|accetto|accept all|accept|agree|consenti|ok|got it|i agree|allow all)$/i;
+        const candidates = [...document.querySelectorAll('button, [role=button], a')].filter((el) => {
+          const t = (el.textContent || '').trim();
+          return t.length <= 30 && reText.test(t);
+        });
+        for (const el of candidates) {
+          // verifica che sia in un contenitore overlay (fixed/sticky o z-index alto risalendo i parent)
+          let node = el, inOverlay = false;
+          for (let i = 0; i < 6 && node; i++) {
+            const s = getComputedStyle(node);
+            if (s.position === 'fixed' || s.position === 'sticky' || (parseInt(s.zIndex) || 0) >= 100) { inOverlay = true; break; }
+            node = node.parentElement;
+          }
+          if (inOverlay && clickIfVisible(el, 'heuristic')) break;
+        }
+      }
+
+      return { count: dismissed.length, dismissed };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, dismissed: [] };
+}
+
+// --- wait_for_network_idle ---
+
+async function cmdWaitForNetworkIdle({ idle_ms = 500, timeout = 15000, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  await ensureNetworkHook(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (idleMs, tout) => new Promise((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        const inflight = window.__chromeBridge_inflight || 0;
+        const last = window.__chromeBridge_lastNetActivity || start;
+        if (inflight === 0 && Date.now() - last >= idleMs) {
+          resolve({ idle: true, elapsed: Date.now() - start });
+          return;
+        }
+        if (Date.now() - start >= tout) {
+          resolve({ idle: false, inflight, elapsed: Date.now() - start });
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    }),
+    args: [idle_ms, timeout],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { idle: false };
+}
+
+// --- handle_dialogs ---
+
+async function cmdHandleDialogs({ action = 'accept', prompt_text, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (act, promptText) => {
+      if (act === 'reset') {
+        if (window.__chromeBridge_origDialogs) {
+          window.alert = window.__chromeBridge_origDialogs.alert;
+          window.confirm = window.__chromeBridge_origDialogs.confirm;
+          window.prompt = window.__chromeBridge_origDialogs.prompt;
+          delete window.__chromeBridge_origDialogs;
+        }
+        const log = window.__chromeBridge_dialogs || [];
+        window.__chromeBridge_dialogs = [];
+        return { reset: true, dialogs: log };
+      }
+      if (!window.__chromeBridge_origDialogs) {
+        window.__chromeBridge_origDialogs = { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
+        window.__chromeBridge_dialogs = [];
+      }
+      window.__chromeBridge_dialogPolicy = { action: act, promptText: promptText ?? null };
+      const push = (type, message) => {
+        window.__chromeBridge_dialogs.push({ type, message: String(message ?? ''), timestamp: Date.now() });
+        if (window.__chromeBridge_dialogs.length > 100) window.__chromeBridge_dialogs.shift();
+      };
+      window.alert = (msg) => { push('alert', msg); };
+      window.confirm = (msg) => { push('confirm', msg); return window.__chromeBridge_dialogPolicy.action === 'accept'; };
+      window.prompt = (msg, def) => {
+        push('prompt', msg);
+        const p = window.__chromeBridge_dialogPolicy;
+        return p.action === 'accept' ? (p.promptText ?? def ?? '') : null;
+      };
+      return { installed: true, policy: act, dialogs: window.__chromeBridge_dialogs };
+    },
+    args: [action, prompt_text ?? null],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- find_text ---
+
+async function cmdFindText({ text, case_sensitive = false, max_results = 20, tab_id }) {
+  if (!text) throw new Error('Missing required parameter: text');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: findTextInPage,
+    args: [text, case_sensitive, max_results],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, matches: [] };
+}
+
+// --- network_rules (declarativeNetRequest) ---
+// Nota: le regole dinamiche sono globali per il browser, non per-tab.
+
+async function cmdNetworkRules({ action, url_filter, redirect_url, header, header_value, header_target = 'request', resource_types }) {
+  if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'list') {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    return { count: rules.length, rules };
+  }
+
+  if (action === 'clear') {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: rules.map((r) => r.id),
+    });
+    return { cleared: rules.length };
+  }
+
+  if (!url_filter) throw new Error('Missing required parameter: url_filter');
+  const existing = await chrome.declarativeNetRequest.getDynamicRules();
+  const nextId = existing.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  const types = resource_types && resource_types.length > 0 ? resource_types : undefined;
+  const condition = { urlFilter: url_filter };
+  if (types) condition.resourceTypes = types;
+
+  let rule;
+  if (action === 'block') {
+    rule = { id: nextId, priority: 1, action: { type: 'block' }, condition };
+  } else if (action === 'redirect') {
+    if (!redirect_url) throw new Error('Missing required parameter: redirect_url');
+    rule = { id: nextId, priority: 1, action: { type: 'redirect', redirect: { url: redirect_url } }, condition };
+  } else if (action === 'modify_header') {
+    if (!header) throw new Error('Missing required parameter: header');
+    const op = header_value === undefined || header_value === null || header_value === ''
+      ? { header, operation: 'remove' }
+      : { header, operation: 'set', value: header_value };
+    // `target` decide request vs response: senza il ramo responseHeaders era
+    // impossibile strippare content-security-policy / x-frame-options o
+    // iniettare access-control-allow-origin — i tre blocchi più frequenti in
+    // sviluppo locale — pur essendo declarativeNetRequest già concesso.
+    const headerAction = header_target === 'response'
+      ? { type: 'modifyHeaders', responseHeaders: [op] }
+      : { type: 'modifyHeaders', requestHeaders: [op] };
+    rule = { id: nextId, priority: 1, action: headerAction, condition };
+  } else {
+    throw new Error(`Unknown action: ${action}`);
+  }
+
+  await chrome.declarativeNetRequest.updateDynamicRules({ addRules: [rule] });
+  return { added: rule };
+}
+
+// --- screenshot_diff (regressione visiva) ---
+// Baseline in memoria del service worker: persa se il SW viene sospeso.
+// NOTA: la logica capture+crop duplica cmdElementScreenshot — candidata a refactor futuro.
+
+const MAX_DIFF_BASELINES = 10;
+const diffBaselines = new Map(); // name → { bitmapData: ImageData, width, height, capturedAt, selector }
+
+async function imageToDiffCanvas(b64) {
+  const bitmap = await dataUrlToBitmap(`data:image/png;base64,${b64}`);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+  return { ctx, width: bitmap.width, height: bitmap.height };
+}
+
+async function captureForDiff(tabId, selector) {
+  const { cropRect, dataUrl } = await withTabVisible(tabId, async (tab) => {
+    let cropRect = null;
+    if (selector) {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+          function deepQueryAll(sel, firstOnly) {
+            if (!sel.includes('>>>')) {
+              if (!firstOnly) return [...document.querySelectorAll(sel)];
+              const el = document.querySelector(sel);
+              return el ? [el] : [];
+            }
+            const parts = sel.split('>>>').map((s) => s.trim());
+            let scopes = [...document.querySelectorAll(parts[0])];
+            for (let i = 1; i < parts.length && scopes.length; i++) {
+              const last = i === parts.length - 1;
+              const found = new Set();
+              const done = new Set();
+              for (const scope of scopes) {
+                // Sotto uno scope già visitato le radici sono già state interrogate.
+                let up = scope.parentNode || scope.host;
+                while (up && !done.has(up)) up = up.parentNode || up.host;
+                if (up) continue;
+                done.add(scope);
+                const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+                for (let r = 0; r < roots.length; r++) {
+                  for (const el of roots[r].querySelectorAll(parts[i])) {
+                    if (firstOnly && last) return [el];
+                    found.add(el);
+                  }
+                  for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+                }
+              }
+              scopes = [...found];
+            }
+            return scopes;
+          }
+
+          function deepQuery(sel) {
+            return deepQueryAll(sel, true)[0] || null;
+          }
+          // deep-query:end
+          const el = deepQuery(sel);
+          if (!el) throw new Error(`Element not found: ${sel}`);
+          el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio };
+        },
+        args: [selector],
+        world: 'MAIN',
+      });
+      cropRect = res?.[0]?.result;
+      if (!cropRect || cropRect.width === 0 || cropRect.height === 0) throw new Error('Element has no visible area');
+    }
+
+    await new Promise((r) => setTimeout(r, 300));
+    const dataUrl = await captureVisibleOf(tab);
+    return { cropRect, dataUrl };
+  });
+  const bitmap = await dataUrlToBitmap(dataUrl);
+
+  let sx = 0, sy = 0, sw = bitmap.width, sh = bitmap.height;
+  if (cropRect) {
+    const dpr = cropRect.dpr;
+    sx = Math.max(0, Math.round(cropRect.x * dpr));
+    sy = Math.max(0, Math.round(cropRect.y * dpr));
+    sw = Math.min(Math.round(cropRect.width * dpr), bitmap.width - sx);
+    sh = Math.min(Math.round(cropRect.height * dpr), bitmap.height - sy);
+    if (sw <= 0 || sh <= 0) throw new Error('Element is outside the visible viewport');
+  }
+
+  const canvas = new OffscreenCanvas(sw, sh);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  return { canvas, ctx, width: sw, height: sh };
+}
+
+async function cmdScreenshotDiff({ action, name = 'default', selector, threshold = 10, image_b64, tab_id }) {
+  if (!action) throw new Error('Missing required parameter: action');
+
+  if (action === 'list') {
+    return {
+      baselines: [...diffBaselines.entries()].map(([n, b]) => ({
+        name: n, width: b.width, height: b.height, capturedAt: b.capturedAt, selector: b.selector,
+      })),
+    };
+  }
+
+  if (action === 'clear') {
+    const n = diffBaselines.size;
+    diffBaselines.clear();
+    return { cleared: n };
+  }
+
+  const tabId = await resolveTabId(tab_id);
+
+  if (action === 'baseline') {
+    if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
+      throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
+    }
+    // Baseline da file (mockup, screenshot di un altro ambiente): stessi
+    // pixel di una cattura, ma li porta il server. Nessun cap a 1568px qui:
+    // il confronto vuole le dimensioni originali.
+    const { ctx, width, height } = image_b64 ? await imageToDiffCanvas(image_b64) : await captureForDiff(tabId, selector);
+    // Ricontrolla dopo l'await: due baseline concorrenti possono aver
+    // superato entrambe il check iniziale
+    if (!diffBaselines.has(name) && diffBaselines.size >= MAX_DIFF_BASELINES) {
+      throw new Error(`Too many stored baselines (max ${MAX_DIFF_BASELINES}) — use action: clear to free memory`);
+    }
+    diffBaselines.set(name, {
+      bitmapData: ctx.getImageData(0, 0, width, height),
+      width, height,
+      capturedAt: Date.now(),
+      selector: selector || null,
+      from_image: !!image_b64,
+    });
+    return { baseline: name, width, height, selector: selector || null, from_image: !!image_b64 };
+  }
+
+  if (action === 'compare') {
+    const base = diffBaselines.get(name);
+    if (!base) throw new Error(`No baseline named "${name}" — capture one first with action: baseline (note: baselines are lost if the extension service worker restarts)`);
+
+    const { ctx, width, height } = await captureForDiff(tabId, selector ?? base.selector ?? undefined);
+    let baseData = base.bitmapData;
+    let scaled = null;
+    if (width !== base.width || height !== base.height) {
+      // Una baseline catturata che non combacia è un viewport cambiato: errore
+      // onesto. Una baseline da file (mockup, screenshot ridotto a 1568px) ha
+      // quasi sempre un'altra misura: si riscala alla cattura e lo si dice.
+      if (!base.from_image) {
+        return { match: false, reason: 'size_mismatch', baseline: { width: base.width, height: base.height }, current: { width, height } };
+      }
+      const src = new OffscreenCanvas(base.width, base.height);
+      src.getContext('2d').putImageData(base.bitmapData, 0, 0);
+      const dst = new OffscreenCanvas(width, height);
+      const dctx = dst.getContext('2d');
+      dctx.imageSmoothingQuality = 'high';
+      dctx.drawImage(src, 0, 0, base.width, base.height, 0, 0, width, height);
+      baseData = dctx.getImageData(0, 0, width, height);
+      scaled = { from: { width: base.width, height: base.height }, to: { width, height }, aspect_changed: Math.abs(base.width / base.height - width / height) > 0.01 };
+    }
+
+    const cur = ctx.getImageData(0, 0, width, height);
+    const a = baseData.data;
+    const b = cur.data;
+    const diffCanvas = new OffscreenCanvas(width, height);
+    const diffCtx = diffCanvas.getContext('2d');
+    const out = diffCtx.createImageData(width, height);
+    let changed = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      const delta = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      if (delta > threshold * 3) {
+        changed++;
+        out.data[i] = 255; out.data[i + 1] = 0; out.data[i + 2] = 0; out.data[i + 3] = 255;
+      } else {
+        // Base sbiadita per contesto
+        const gray = (a[i] + a[i + 1] + a[i + 2]) / 3;
+        out.data[i] = gray; out.data[i + 1] = gray; out.data[i + 2] = gray; out.data[i + 3] = 80;
+      }
+    }
+    diffCtx.putImageData(out, 0, 0);
+    const totalPixels = width * height;
+    const diffPercent = (changed / totalPixels) * 100;
+    // L'immagine è allegata solo se c'è qualcosa da guardare, e passa dal cap
+    // a 1568px come ogni altro screenshot: un diff a 2560x1440 DPR2 sono 14,7 MP
+    // spediti contro 1,38 MP che sopravvivono al ridimensionamento lato client.
+    return {
+      match: changed === 0,
+      diff_percent: Math.round(diffPercent * 100) / 100,
+      ...(scaled ? { baseline_scaled: scaled } : {}),
+      changed_pixels: changed,
+      total_pixels: totalPixels,
+      ...(changed === 0 ? {} : { diff_image: await canvasToBase64Capped(diffCanvas) }),
+    };
+  }
+
+  throw new Error(`Unknown action: ${action}`);
+}
+
+// --- web_vitals ---
+
+async function cmdWebVitals({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const v = window.__chromeBridge_vitals;
+      if (!v) return { available: false, note: 'Instrumentation not loaded (page opened before extension, or chrome:// page)' };
+      const nav = performance.getEntriesByType('navigation')[0];
+      const paint = {};
+      for (const p of performance.getEntriesByType('paint')) paint[p.name] = Math.round(p.startTime);
+      return {
+        available: true,
+        cls: Math.round(v.cls * 1000) / 1000,
+        lcp_ms: v.lcp,
+        fcp_ms: paint['first-contentful-paint'] ?? null,
+        ttfb_ms: nav ? Math.round(nav.responseStart - nav.requestStart) : null,
+        long_tasks: v.longTasks,
+        max_event_duration_ms: v.maxEventDelayMs,
+      };
+    },
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { available: false };
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === 'Tracing.tracingComplete') {
+    const t = traces.get(source.tabId);
+    if (t) t.resolveComplete(params.stream);
+  } else if (method === 'Page.screencastFrame') {
+    const c = casts.get(source.tabId);
+    // L'ack va mandato sempre, o Chrome smette di inviare fotogrammi.
+    chrome.debugger.sendCommand({ tabId: source.tabId }, 'Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+    if (!c) return;
+    c.frames.push({ data: params.data, t: params.metadata?.timestamp ?? Date.now() / 1000 });
+    c.total += 1;
+    // Il server drena ogni 400 ms: se smette (server caduto), il buffer non
+    // cresce senza limite.
+    if (c.frames.length > CAST_BUFFER_MAX) { c.frames.shift(); c.dropped += 1; }
+  }
+});
+
+// --- list_event_listeners ---
+
+async function cmdListEventListeners({ type, limit = 100, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (filterType, lim) => {
+      const all = window.__chromeBridge_listeners || [];
+      const filtered = filterType ? all.filter((l) => l.type === filterType) : all;
+      const byType = {};
+      for (const l of filtered) byType[l.type] = (byType[l.type] || 0) + 1;
+      return {
+        total: filtered.length,
+        by_type: byType,
+        listeners: filtered.slice(-lim),
+        note: window.__chromeBridge_listeners ? undefined : 'Instrumentation not loaded for this page',
+      };
+    },
+    args: [type ?? null, limit],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { total: 0, by_type: {}, listeners: [] };
+}
+
+// --- monitor_websocket (hook lazy, come ensureNetworkHook) ---
+
+// Always-inject idempotente, come ensureNetworkHook: il guard è __chromeBridge_wsHooked.
+async function ensureWsHook(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      if (window.__chromeBridge_wsHooked) return;
+      window.__chromeBridge_wsHooked = true;
+      window.__chromeBridge_wsLog = [];
+      const MAX = 500;
+      const PREVIEW = 500;
+      const push = (entry) => {
+        if (window.__chromeBridge_wsLog.length >= MAX) window.__chromeBridge_wsLog.shift();
+        window.__chromeBridge_wsLog.push(entry);
+      };
+      const preview = (data) => {
+        try {
+          if (typeof data === 'string') return data.substring(0, PREVIEW);
+          return `<binary ${data?.byteLength ?? data?.size ?? '?'} bytes>`;
+        } catch { return '<unreadable>'; }
+      };
+      const OrigWS = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        const ws = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
+        push({ event: 'open_attempt', url: String(url), timestamp: Date.now() });
+        ws.addEventListener('open', () => push({ event: 'open', url: String(url), timestamp: Date.now() }));
+        ws.addEventListener('close', (e) => push({ event: 'close', url: String(url), code: e.code, timestamp: Date.now() }));
+        ws.addEventListener('error', () => push({ event: 'error', url: String(url), timestamp: Date.now() }));
+        ws.addEventListener('message', (e) => push({ event: 'message', direction: 'in', url: String(url), data: preview(e.data), timestamp: Date.now() }));
+        const origSend = ws.send.bind(ws);
+        ws.send = (data) => {
+          push({ event: 'message', direction: 'out', url: String(url), data: preview(data), timestamp: Date.now() });
+          return origSend(data);
+        };
+        return ws;
+      };
+      window.WebSocket.prototype = OrigWS.prototype;
+      Object.setPrototypeOf(window.WebSocket, OrigWS);
+      for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) window.WebSocket[k] = OrigWS[k];
+    },
+    world: 'MAIN',
+  });
+}
+
+async function cmdMonitorWebsocket({ clear = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  await ensureWsHook(tabId);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (shouldClear) => {
+      const log = window.__chromeBridge_wsLog || [];
+      const out = [...log];
+      if (shouldClear) window.__chromeBridge_wsLog = [];
+      return out;
+    },
+    args: [clear],
+    world: 'MAIN',
+  });
+  const events = results?.[0]?.result ?? [];
+  return { count: events.length, events };
+}
+
+// --- extract_table ---
+
+async function cmdExtractTable({ selector = 'table', index = 0, scan_rows, max_rows, tab_id }) {
+  // scan_rows = quante righe materializzare in pagina (il filtro/paginazione
+  // avviene lato server). Fallback a max_rows per compatibilità con vecchi client.
+  const cap = scan_rows ?? max_rows ?? 2000;
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (sel, idx, maxRows) => {
+      const tables = document.querySelectorAll(sel);
+      const table = tables[idx];
+      if (!table) {
+        throw new Error(`No table found for selector "${sel}" at index ${idx} (${tables.length} found)`);
+      }
+
+      const cellText = (cell) => (cell.textContent || '').trim();
+
+      // Headers: thead th, or first row's th/td as fallback
+      let headers = [];
+      let bodyRows;
+      const thead = table.querySelector('thead');
+      if (thead && thead.rows.length > 0) {
+        headers = [...thead.rows[0].cells].map(cellText);
+        bodyRows = table.tBodies.length
+          ? [].concat(...[...table.tBodies].map((tb) => [...tb.rows]))
+          : [...table.rows].filter((r) => !thead.contains(r));
+      } else {
+        const allRows = [...table.rows];
+        if (allRows.length > 0 && [...allRows[0].cells].some((c) => c.tagName === 'TH')) {
+          headers = [...allRows[0].cells].map(cellText);
+          bodyRows = allRows.slice(1);
+        } else {
+          bodyRows = allRows;
+        }
+      }
+
+      const rowCount = bodyRows.length;
+      const capped = bodyRows.slice(0, maxRows);
+      const headersUsable = headers.length > 0
+        && headers.every((h) => h !== '')
+        && new Set(headers).size === headers.length;
+
+      const rows = capped.map((tr) => {
+        const cells = [...tr.cells].map(cellText);
+        if (!headersUsable) return cells;
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = cells[i] ?? ''; });
+        return obj;
+      });
+
+      return {
+        caption: table.caption ? cellText(table.caption) : null,
+        headers,
+        row_count: rowCount,
+        rows,
+        truncated: rowCount > maxRows,
+        tables_found: tables.length,
+      };
+    },
+    args: [selector, index, cap],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { headers: [], rows: [], row_count: 0, truncated: false, tables_found: 0 };
+}
+
+// --- drag_and_drop ---
+
+async function cmdDragAndDrop({ source_selector, target_selector, mode = 'html5', tab_id, frame_id }) {
+  if (!source_selector) throw new Error('Missing required parameter: source_selector');
+  if (!target_selector) throw new Error('Missing required parameter: target_selector');
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: async (srcSel, tgtSel, dndMode) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      // Un throw qui arrivava come result undefined e diventava {dragged:false}:
+      // un selettore ">>>" (SyntaxError per querySelector) falliva in silenzio.
+      const src = deepQuery(srcSel);
+      if (!src) return { missing: 'Source', selector: srcSel };
+      const tgt = deepQuery(tgtSel);
+      if (!tgt) return { missing: 'Target', selector: tgtSel };
+      src.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const sr = src.getBoundingClientRect();
+      const tr = tgt.getBoundingClientRect();
+      const sc = { x: sr.left + sr.width / 2, y: sr.top + sr.height / 2 };
+      const tc = { x: tr.left + tr.width / 2, y: tr.top + tr.height / 2 };
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      if (dndMode === 'html5') {
+        const dt = new DataTransfer();
+        const fire = (el, type, x, y) => el.dispatchEvent(new DragEvent(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt,
+        }));
+        fire(src, 'dragstart', sc.x, sc.y);
+        await sleep(50);
+        fire(tgt, 'dragenter', tc.x, tc.y);
+        fire(tgt, 'dragover', tc.x, tc.y);
+        await sleep(50);
+        fire(tgt, 'drop', tc.x, tc.y);
+        fire(src, 'dragend', tc.x, tc.y);
+      } else {
+        // pointer mode: per librerie sortable basate su pointer/mouse events
+        const fire = (el, type, x, y, Ctor = PointerEvent) => el.dispatchEvent(new Ctor(type, {
+          bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type.includes('up') ? 0 : 1, pointerId: 1, isPrimary: true,
+        }));
+        fire(src, 'pointerdown', sc.x, sc.y);
+        fire(src, 'mousedown', sc.x, sc.y, MouseEvent);
+        await sleep(50);
+        // movimento intermedio
+        const mid = { x: (sc.x + tc.x) / 2, y: (sc.y + tc.y) / 2 };
+        for (const p of [mid, tc]) {
+          fire(document, 'pointermove', p.x, p.y);
+          fire(document, 'mousemove', p.x, p.y, MouseEvent);
+          await sleep(50);
+        }
+        fire(tgt, 'pointerup', tc.x, tc.y);
+        fire(tgt, 'mouseup', tc.x, tc.y, MouseEvent);
+      }
+      return { dragged: srcSel, dropped_on: tgtSel, mode: dndMode };
+    },
+    args: [source_selector, target_selector, mode],
+    world: 'MAIN',
+  });
+  const out = elementOutcome(results, source_selector);
+  if (out.missing) throw new Error(`${out.missing} element not found: ${out.selector} (no element matches; check it with query_dom)`);
+  return out;
+}
+
+// --- clipboard ---
+
+async function cmdClipboard({ action, text, tab_id }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  const tabId = await resolveTabId(tab_id);
+  // La pagina deve essere focalizzata per navigator.clipboard
+  const tab = await chrome.tabs.get(tabId);
+  await chrome.tabs.update(tabId, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    // World ISOLATED di proposito: le permission clipboardRead/clipboardWrite
+    // dell'estensione si applicano al suo isolated world, rendendo execCommand
+    // funzionante senza user gesture.
+    func: async (act, txt) => {
+      if (act === 'write') {
+        if (txt === undefined || txt === null) throw new Error('Missing required parameter: text');
+        try {
+          await navigator.clipboard.writeText(txt);
+          return { written: true, length: txt.length, method: 'clipboard-api' };
+        } catch (e) {
+          // Fallback execCommand
+          const ta = document.createElement('textarea');
+          ta.value = txt;
+          ta.style.cssText = 'position:fixed;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          if (!ok) throw new Error(`Clipboard write failed: ${e.message}`);
+          return { written: true, length: txt.length, method: 'execCommand' };
+        }
+      }
+      if (act === 'read') {
+        try {
+          const value = await navigator.clipboard.readText();
+          return { text: value, method: 'clipboard-api' };
+        } catch (e) {
+          // Nessun fallback: execCommand('paste') è stato rimosso da Chrome 86+.
+          throw new Error(`Clipboard read failed: ${e.message} (page may need focus)`);
+        }
+      }
+      throw new Error(`Unknown action: ${act}`);
+    },
+    args: [action, text ?? null],
+    world: 'ISOLATED',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// --- set_geolocation ---
+
+async function cmdSetGeolocation({ latitude, longitude, accuracy = 10, reset = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (lat, lng, acc, doReset) => {
+      if (doReset) {
+        if (window.__chromeBridge_origGeo) {
+          navigator.geolocation.getCurrentPosition = window.__chromeBridge_origGeo.getCurrentPosition;
+          navigator.geolocation.watchPosition = window.__chromeBridge_origGeo.watchPosition;
+          delete window.__chromeBridge_origGeo;
+        }
+        return { reset: true };
+      }
+      if (lat === null || lng === null) throw new Error('Missing required parameters: latitude, longitude');
+      if (!window.__chromeBridge_origGeo) {
+        window.__chromeBridge_origGeo = {
+          getCurrentPosition: navigator.geolocation.getCurrentPosition.bind(navigator.geolocation),
+          watchPosition: navigator.geolocation.watchPosition.bind(navigator.geolocation),
+        };
+      }
+      const makePosition = () => ({
+        coords: {
+          latitude: lat, longitude: lng, accuracy: acc,
+          altitude: null, altitudeAccuracy: null, heading: null, speed: null,
+        },
+        timestamp: Date.now(),
+      });
+      navigator.geolocation.getCurrentPosition = (success) => {
+        setTimeout(() => success(makePosition()), 10);
+      };
+      navigator.geolocation.watchPosition = (success) => {
+        setTimeout(() => success(makePosition()), 10);
+        return Math.floor(Math.random() * 1000000);
+      };
+      return { emulated: { latitude: lat, longitude: lng, accuracy: acc } };
+    },
+    args: [latitude ?? null, longitude ?? null, accuracy, reset],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? {};
+}
+
+// Una navigazione nella scheda armata porta un documento senza hook.
+chrome.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
+  const armed = captureArmed.get(tabId);
+  if (armed) injectCaptureHook(tabId, armed.max, [frameId]).catch(() => {});
+});
+
+chrome.downloads.onCreated.addListener((item) => { captureDownload(item).catch(() => {}); });
+
+// --- save_page (MHTML via pageCapture) ---
+
+// --- http_request ---
+
+/**
+ * La fetch parte dal service worker, non dal server Node: con host permission
+ * `<all_urls>` e `credentials: 'include'` Chrome allega i cookie di sessione
+ * dell'utente. È l'unica differenza che conta — la stessa URL richiesta da Node
+ * restituisce la pagina di login.
+ */
+async function cmdHttpRequest({ url, method = 'GET', headers, body, binary = false }) {
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    throw new Error(`http_request needs an absolute http(s) URL, got "${url}"`);
+  }
+  const res = await fetch(url, {
+    method,
+    headers: headers && Object.keys(headers).length ? headers : undefined,
+    body: body ?? undefined,
+    credentials: 'include',
+    redirect: 'follow',
+  });
+
+  const outHeaders = {};
+  for (const [k, v] of res.headers.entries()) outHeaders[k] = v;
+  const common = {
+    status: res.status,
+    ok: res.ok,
+    // res.url riflette i redirect seguiti: senza, un 302 verso il login
+    // sembrerebbe una risposta della URL chiesta.
+    url: res.url,
+    content_type: res.headers.get('content-type') || '',
+    headers: outHeaders,
+  };
+
+  if (binary) {
+    const blob = await res.blob();
+    return { ...common, body_b64: await blobToBase64(blob), size: blob.size };
+  }
+  const text = await res.text();
+  return { ...common, body: text, size: text.length };
+}
+
+// --- wait_for_text ---
+
+/**
+ * Attende che un testo compaia. Si poteva già fare con wait_for_function, ma
+ * quella strada richiede il toggle "Allow user scripts" e un'espressione scritta
+ * a mano: questa no.
+ */
+async function cmdWaitForText({ text, selector, timeout = 10000, interval = 200, tab_id, frame_id }) {
+  if (!text) throw new Error('Missing required parameter: text');
+  const tabId = await resolveTabId(tab_id);
+
+  const run = () => chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (needle, scopeSel, tout, intv) => new Promise((resolve) => {
+      const started = Date.now();
+      const wanted = String(needle).toLowerCase();
+      const check = () => {
+        const root = scopeSel ? document.querySelector(scopeSel) : document.body;
+        const haystack = (root?.innerText || '').toLowerCase();
+        const at = haystack.indexOf(wanted);
+        if (at !== -1) {
+          resolve({
+            found: true,
+            waited_ms: Date.now() - started,
+            // Contesto attorno alla prima occorrenza: conferma di aver trovato
+            // la cosa giusta senza restituire l'intera pagina.
+            context: (root?.innerText || '').slice(Math.max(0, at - 60), at + wanted.length + 60).trim(),
+          });
+          return;
+        }
+        if (Date.now() - started >= tout) {
+          resolve({ found: false, error: `Text not found within ${tout}ms: ${needle}` });
+          return;
+        }
+        setTimeout(check, intv);
+      };
+      check();
+    }),
+    args: [text, selector || null, timeout, Math.max(50, interval)],
+    world: 'MAIN',
+  }).then((results) => results?.[0]?.result ?? { found: false, error: 'No result' });
+
+  return withDeadline(tabId, timeout + 1000, run,
+    { found: false, error: `Text not found within ${timeout}ms: ${text}` }, (r) => r.found === false);
+}
+
+async function cmdSavePage({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const blob = await new Promise((resolve, reject) => {
+    chrome.pageCapture.saveAsMHTML({ tabId }, (data) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(data);
+    });
+  });
+  return { mhtml_b64: await blobToBase64(blob), size: blob.size };
+}
+
+// --- set_zoom ---
+
+async function cmdSetZoom({ factor, reset = false, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (reset) {
+    await chrome.tabs.setZoom(tabId, 0); // 0 = default zoom
+  } else if (factor !== undefined && factor !== null) {
+    if (factor < 0.25 || factor > 5) throw new Error('factor must be between 0.25 and 5');
+    await chrome.tabs.setZoom(tabId, factor);
+  }
+  const current = await chrome.tabs.getZoom(tabId);
+  return { zoom: current };
+}
+
+// --- Browser-level network log (webRequest) ---
+const browserNetLog = new Map(); // tabId → array
+
+let browserNetSeq = 0;
+function pushNetEntry(tabId, entry) {
+  entry.seq = ++browserNetSeq;
+  if (tabId < 0) return;
+  let arr = browserNetLog.get(tabId);
+  if (!arr) { arr = []; browserNetLog.set(tabId, arr); }
+  if (arr.length >= 500) arr.shift();
+  arr.push(entry);
+}
+
+chrome.webRequest.onCompleted.addListener((d) => {
+  pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: d.statusCode, startTime: d.timeStamp, duration: null, fromCache: d.fromCache, ip: d.ip || null });
+}, { urls: ['<all_urls>'] });
+
+chrome.webRequest.onErrorOccurred.addListener((d) => {
+  pushNetEntry(d.tabId, { source: 'browser', type: d.type, method: d.method, url: d.url, status: 0, startTime: d.timeStamp, duration: null, error: d.error });
+}, { urls: ['<all_urls>'] });
+
+// --- Cattura header risposta main_frame (per security_headers) ---
+const mainFrameHeaders = new Map(); // tabId → { url, status, headers: {name(lc): value}, capturedAt }
+
+// Limite: header duplicati (es. CSP multiple) vengono sovrascritti — vince l'ultimo, solo quello viene auditato.
+chrome.webRequest.onHeadersReceived.addListener((d) => {
+  if (d.tabId < 0 || d.type !== 'main_frame') return;
+  const headers = {};
+  for (const h of d.responseHeaders || []) {
+    headers[h.name.toLowerCase()] = h.value ?? '';
+  }
+  mainFrameHeaders.set(d.tabId, { url: d.url, status: d.statusCode, headers, capturedAt: Date.now() });
+}, { urls: ['<all_urls>'], types: ['main_frame'] }, ['responseHeaders']);
+
+async function cmdGetResponseHeaders({ tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const entry = mainFrameHeaders.get(tabId);
+  if (!entry) {
+    return { available: false, note: 'No headers captured for this tab — reload the page (headers are captured from navigations after the extension loaded)' };
+  }
+  return { available: true, ...entry };
+}
+
+// --- http_auth (credenziali per HTTP Basic/Digest auth) ---
+
+let httpAuthCreds = null; // { username, password }
+const httpAuthAttempted = new Set(); // requestId già serviti (anti-loop)
+
+chrome.webRequest.onAuthRequired.addListener(
+  (details, callback) => {
+    if (!httpAuthCreds || httpAuthAttempted.has(details.requestId)) {
+      callback({});
+      return;
+    }
+    httpAuthAttempted.add(details.requestId);
+    if (httpAuthAttempted.size > 500) httpAuthAttempted.clear();
+    callback({ authCredentials: { username: httpAuthCreds.username, password: httpAuthCreds.password } });
+  },
+  { urls: ['<all_urls>'] },
+  ['asyncBlocking']
+);
+
+async function cmdHttpAuth({ action, username, password }) {
+  if (!action) throw new Error('Missing required parameter: action');
+  if (action === 'set') {
+    if (!username) throw new Error('Missing required parameter: username');
+    httpAuthCreds = { username, password: password || '' };
+    return { set: true, username };
+  }
+  if (action === 'clear') {
+    httpAuthCreds = null;
+    httpAuthAttempted.clear();
+    return { cleared: true };
+  }
+  throw new Error(`Unknown action: ${action}`);
+}
+
+// --- Tab lifecycle: cleanup injection state ---
+
+chrome.tabs.onRemoved.addListener((tabId, info) => {
+  browserNetLog.delete(tabId);
+  mainFrameHeaders.delete(tabId);
+  recordTabEnding(tabId, { reason: info?.isWindowClosing ? 'window_closed' : 'closed' });
+});
+
+// Chrome sostituisce l'id quando rimpiazza la scheda (prerender, alcuni
+// discard): per chi teneva il vecchio id è una scheda sparita senza chiusura.
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  recordTabEnding(removedTabId, { reason: 'replaced', replaced_by: addedTabId });
+});
+
+// --- get_interactives ---
+
+async function cmdGetInteractives({ scope, limit = 100, visible_only = true, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  // labelOf vive in un file a sé (testato in test/unit): va iniettato prima
+  await chrome.scripting.executeScript({ target: scriptTarget(tabId, frame_id), files: ['lib/element-label.js'], world: 'MAIN' });
+  const results = await chrome.scripting.executeScript({
+    target: scriptTarget(tabId, frame_id),
+    func: (scopeSel, lim, visibleOnly) => {
+      const root = scopeSel ? document.querySelector(scopeSel) : document;
+      if (!root) return { count: 0, elements: [], note: 'Scope element not found' };
+      const labelOf = globalThis.__cbLabelOf;
+
+      // Selettore stabile e riusabile: id > data-testid > path nth-of-type
+      const stableSelector = (el) => {
+        if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) return `#${el.id}`;
+        const testid = el.getAttribute('data-testid');
+        if (testid) return `[data-testid="${testid.replace(/"/g, '\\"')}"]`;
+        const parts = [];
+        let node = el;
+        while (node && node.nodeType === 1 && node !== document.documentElement) {
+          let part = node.tagName.toLowerCase();
+          if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) { parts.unshift(`#${node.id}`); break; }
+          const parent = node.parentElement;
+          if (parent) {
+            const sameTag = [...parent.children].filter((c) => c.tagName === node.tagName);
+            if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+          }
+          parts.unshift(part);
+          node = node.parentElement;
+        }
+        return parts.join(' > ');
+      };
+
+      const SEL = 'button, a[href], input:not([type=hidden]), select, textarea, [role=button], [role=link], [role=tab], [role=menuitem], [onclick], [tabindex]:not([tabindex="-1"]), summary';
+      const seen = new Set();
+      const out = [];
+      for (const el of root.querySelectorAll(SEL)) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+        if (visibleOnly && !visible) continue;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let occluded = false;
+        if (visible && cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
+          const top = document.elementFromPoint(cx, cy);
+          occluded = !!top && top !== el && !el.contains(top) && !top.contains(el);
+        }
+        const label = labelOf(el, document);
+        out.push({
+          selector: stableSelector(el),
+          tag: el.tagName.toLowerCase(),
+          type: el.getAttribute('type') || el.getAttribute('role') || null,
+          text: label || null,
+          enabled: !el.disabled,
+          visible,
+          occluded,
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+        });
+        if (out.length >= lim) break;
+      }
+      return { count: out.length, elements: out };
+    },
+    args: [scope || null, limit, visible_only],
+    world: 'MAIN',
+  });
+  return results?.[0]?.result ?? { count: 0, elements: [] };
+}
+
+// --- wait_for_function ---
+
+async function cmdWaitForFunction({ expression, timeout = 10000, polling_ms = 100, tab_id, frame_id }) {
+  if (!expression) throw new Error('Missing required parameter: expression');
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+  const intv = Math.max(polling_ms, 50);
+  // Polling lato service worker: una micro-iniezione per tentativo,
+  // robusto anche attraverso navigazioni della pagina.
+  // L'espressione utente è interpolata nel codice user-script (niente eval).
+  const probe = `(() => {
+    try {
+      const __v = (${expression});
+      let s = __v;
+      try { s = (typeof __v === 'object' && __v !== null) ? JSON.parse(JSON.stringify(__v)) : __v; } catch { s = String(__v); }
+      return { truthy: !!__v, value: s ?? null };
+    } catch (e) {
+      return { truthy: false, value: { __error: e.message } };
+    }
+  })()`;
+  const start = Date.now();
+  let last = null;
+  for (;;) {
+    let r = null;
+    try {
+      r = await runUserScript(target, probe, 'MAIN');
+    } catch (e) {
+      r = { truthy: false, value: { __error: e.message } };
+    }
+    if (r && r.truthy) {
+      return { satisfied: true, elapsed: Date.now() - start, value: r.value };
+    }
+    last = r ? r.value : null;
+    if (Date.now() - start >= timeout) {
+      return { satisfied: false, elapsed: Date.now() - start, lastValue: last };
+    }
+    await new Promise((res) => setTimeout(res, intv));
+  }
+}
+
+// --- webmcp ---
+// Gli strumenti WebMCP vivono in window.__cbWebmcp (webmcp-hook.js, MAIN
+// world). Con la strumentazione spenta il gancio non c'è: si inietta qui, e
+// vede comunque tutto ciò che getTools elenca.
+
+async function ensureWebmcpHook(target) {
+  const [{ result } = {}] = await chrome.scripting.executeScript({ target, world: 'MAIN', func: () => Boolean(window.__cbWebmcp) });
+  if (!result) await chrome.scripting.executeScript({ target, files: ['webmcp-hook.js'], world: 'MAIN' });
+}
+
+async function cmdWebmcp({ action = 'list', name, input = {}, timeout = 30000, confirm = false, limit = 20, tab_id, frame_id }) {
+  const tabId = await resolveTabId(tab_id);
+  const target = scriptTarget(tabId, frame_id);
+  await ensureWebmcpHook(target);
+  const run = async (func, args = []) => (await chrome.scripting.executeScript({ target, world: 'MAIN', func, args }))[0]?.result;
+  if (action === 'summary') return await run(() => window.__cbWebmcp.summary());
+  if (action === 'list') {
+    const data = await run(() => window.__cbWebmcp.list());
+    return limit > 0 && data ? { ...data, recent_calls: await run((l) => window.__cbWebmcp.calls(l), [limit]) } : data;
+  }
+  if (action !== 'call') throw new Error(`Unknown webmcp action: ${action}`);
+  if (!name) throw new Error('Missing required parameter: name');
+
+  // Una chiamata può portare a un'altra pagina (un form inviato, un redirect):
+  // la risposta dice dove. È il caso aperto dell'explainer (issue #135).
+  const before = (await chrome.tabs.get(tabId)).url;
+  let res;
+  try {
+    res = await run((n, i, o) => window.__cbWebmcp.call(n, i, o), [name, input, { timeout, confirmed: confirm === true }]);
+  } catch (err) {
+    res = { status: 'navigated', note: `the page went away during the call (${err.message})` };
+  }
+  if (res == null) res = { status: 'navigated', note: 'the page went away before the tool answered' };
+  if (['ok', 'error', 'timeout', 'navigated'].includes(res.status)) {
+    await new Promise((r) => setTimeout(r, 300));
+    let tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'loading') { await waitForComplete(tabId, 4000); tab = await chrome.tabs.get(tabId); }
+    if (tab.url !== before) res.navigated_to = tab.url;
+  }
+  return res;
+}
+
+// --- scroll_until ---
+
+async function cmdScrollUntil({ until = 'no_new_content', selector, container, max_scrolls = 20, step_px, settle_ms = 400, tab_id }) {
+  const tabId = await resolveTabId(tab_id);
+  if (until === 'network_idle') await ensureNetworkHook(tabId);
+  const run = () => chrome.scripting.executeScript({
+    target: { tabId },
+    func: (mode, sel, containerSel, maxScrolls, stepPx, settleMs) => new Promise((resolve) => {
+      // deep-query:begin (generato da extension/lib/deep-query.js: node tools/sync-deep-query.mjs)
+      function deepQueryAll(sel, firstOnly) {
+        if (!sel.includes('>>>')) {
+          if (!firstOnly) return [...document.querySelectorAll(sel)];
+          const el = document.querySelector(sel);
+          return el ? [el] : [];
+        }
+        const parts = sel.split('>>>').map((s) => s.trim());
+        let scopes = [...document.querySelectorAll(parts[0])];
+        for (let i = 1; i < parts.length && scopes.length; i++) {
+          const last = i === parts.length - 1;
+          const found = new Set();
+          const done = new Set();
+          for (const scope of scopes) {
+            // Sotto uno scope già visitato le radici sono già state interrogate.
+            let up = scope.parentNode || scope.host;
+            while (up && !done.has(up)) up = up.parentNode || up.host;
+            if (up) continue;
+            done.add(scope);
+            const roots = scope.shadowRoot ? [scope.shadowRoot, scope] : [scope];
+            for (let r = 0; r < roots.length; r++) {
+              for (const el of roots[r].querySelectorAll(parts[i])) {
+                if (firstOnly && last) return [el];
+                found.add(el);
+              }
+              for (const el of roots[r].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          scopes = [...found];
+        }
+        return scopes;
+      }
+
+      function deepQuery(sel) {
+        return deepQueryAll(sel, true)[0] || null;
+      }
+      // deep-query:end
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const docEl = document.scrollingElement || document.documentElement;
+      const scrollable = (el) => {
+        if (el.scrollHeight <= el.clientHeight + 2) return false;
+        const oy = getComputedStyle(el).overflowY;
+        return oy === 'auto' || oy === 'scroll' || oy === 'overlay';
+      };
+      const describe = (el) => {
+        if (el.id) return `#${el.id}`;
+        const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : '';
+        return el.tagName.toLowerCase() + cls;
+      };
+      // Le app come Ads Manager bloccano il documento e scorrono in un div
+      // interno: scorrendo solo window la condizione «bottom» era vera al
+      // primo giro. Senza container esplicito si prende il contenitore
+      // scorrevole più grande, ma solo se il documento non scorre.
+      let box = null;
+      if (containerSel) {
+        box = deepQuery(containerSel);
+        if (!box) { resolve({ stopped_reason: 'error', error: `Container not found: ${containerSel}`, scrolls: 0 }); return; }
+      } else if (docEl.scrollHeight <= innerHeight + 2
+        // overflow hidden su html o body: l'utente non può scorrere il
+        // documento anche se è più alto della finestra (e scrollBy sì).
+        || [document.documentElement, document.body].some((e) => e && getComputedStyle(e).overflowY === 'hidden')) {
+        let best = null;
+        let bestArea = 0;
+        for (const el of document.querySelectorAll('body *')) {
+          if (el.clientHeight < 50 || !scrollable(el)) continue;
+          const area = el.clientWidth * el.clientHeight;
+          if (area > bestArea) { best = el; bestArea = area; }
+        }
+        box = best;
+      }
+      const s = box
+        ? { by: (d) => box.scrollBy(0, d), pos: () => box.scrollTop, height: () => box.scrollHeight, view: () => box.clientHeight, name: describe(box) }
+        : { by: (d) => window.scrollBy(0, d), pos: () => window.scrollY, height: () => docEl.scrollHeight, view: () => innerHeight, name: 'document' };
+      const done = (stopped_reason, scrolls) => resolve({ stopped_reason, scrolls, finalScrollY: Math.round(s.pos()), container: s.name });
+      (async () => {
+        let scrolls = 0;
+        let lastHeight = s.height();
+        let stableCount = 0;
+        const step = stepPx || s.view();
+        for (scrolls = 0; scrolls < maxScrolls; scrolls++) {
+          if (mode === 'element' && sel) {
+            const el = deepQuery(sel);
+            if (el) {
+              const r = el.getBoundingClientRect();
+              const vis = r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+              if (vis) { done('element_found', scrolls); return; }
+            }
+          }
+          s.by(step);
+          await sleep(settleMs);
+
+          if (mode === 'network_idle') {
+            const inflight = window.__chromeBridge_inflight || 0;
+            const last = window.__chromeBridge_lastNetActivity || Date.now();
+            if (inflight === 0 && Date.now() - last >= settleMs) { done('network_idle', scrolls + 1); return; }
+          }
+
+          const h = s.height();
+          if (h === lastHeight) {
+            stableCount++;
+            if (mode === 'no_new_content' && stableCount >= 2) { done('no_new_content', scrolls + 1); return; }
+          } else { stableCount = 0; lastHeight = h; }
+
+          // bottom reached
+          if (s.view() + s.pos() >= h - 2) { done('bottom', scrolls + 1); return; }
+        }
+        done('max_scrolls', scrolls);
+      })();
+    }),
+    args: [until, selector || null, container || null, max_scrolls, step_px || null, settle_ms],
+    world: 'MAIN',
+  }).then((results) => results?.[0]?.result ?? { stopped_reason: 'error', scrolls: 0 });
+  // Stesse sleep in pagina delle attese: su una scheda nascosta rallentano.
+  const deadline = Math.min(55000, max_scrolls * (settle_ms + 250) + 5000);
+  return withDeadline(tabId, deadline, run,
+    { stopped_reason: 'deadline', error: `Scrolling did not finish within ${deadline}ms` },
+    (r) => r.stopped_reason === 'deadline');
+}
+
+// --- Avvia la connessione + registra l'instrumentation ---
+loadConfig().then(connect);
+applyInstrumentation();
