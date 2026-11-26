@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Chrome Bridge">
+  <rect width="128" height="128" rx="24" fill="#1F2937"/>
+  <path d="M20 84 Q64 28 108 84" fill="none" stroke="#F9FAFB" stroke-width="10" stroke-linecap="round"/>
+  <path d="M20 96 H108" stroke="#F9FAFB" stroke-width="8" stroke-linecap="round"/>
+  <path d="M40 96 V72 M64 96 V56 M88 96 V72" stroke="#F9FAFB" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="40" r="10" fill="#34D399"/>
+</svg>

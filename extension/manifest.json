@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Bridge for Claude Code",
+  "version": "1.32.9",
+  "description": "Bridge your browser to Claude Code: 69 token-efficient web-dev automation tools over a local WebSocket. ChromeOS included.",
+  "homepage_url": "https://github.com/frsorrentino/chrome-bridge",
+  "minimum_chrome_version": "135",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "userScripts",
+    "alarms",
+    "storage",
+    "cookies",
+    "webNavigation",
+    "webRequest",
+    "declarativeNetRequest",
+    "clipboardRead",
+    "clipboardWrite",
+    "downloads",
+    "pageCapture",
+    "webRequestAuthProvider",
+    "debugger"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
