@@ -35,6 +35,13 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
   `/chrome-bridge:observe` without it. Only `observe/SOURCE` changes. Task
   claude-observe-senza-allowed-tools-24-11.
 
+### Plugin, after 1.33.1
+
+- `plugin/README.md`: the directory edition (tag `directory-1.33.1`, with
+  `plugin/` at the root of the tree) needs a README of its own, or the
+  directory refuses it (`README_MISSING`). Written by hand like the manifest;
+  `plugin-dir.test.js` checks it is there with at least 40 words.
+
 ## 1.33.1 — 2026-11-26
 
 The plugin carries less that it never runs. Server and npm package unchanged

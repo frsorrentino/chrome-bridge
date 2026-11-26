@@ -35,7 +35,7 @@ test('plugin/ è aggiornata: rigenerarla con tools/build-plugin.mjs non cambia n
   t.after(() => rm(tmp, { recursive: true, force: true }));
   buildPlugin(tmp);
   const fresh = walk(tmp);
-  const cur = new Map([...walk(PLUGIN)].filter(([p]) => !p.startsWith('.claude-plugin/')));
+  const cur = new Map([...walk(PLUGIN)].filter(([p]) => !p.startsWith('.claude-plugin/') && p !== 'README.md'));
   const missing = [...fresh.keys()].filter((p) => !cur.has(p));
   const extra = [...cur.keys()].filter((p) => !fresh.has(p));
   const changed = [...fresh.keys()].filter((p) => cur.has(p)
@@ -63,6 +63,10 @@ test('il manifest avvia il server incorporato con node, senza npx', () => {
   assert.equal(plugin.privacyPolicyUrl, undefined);
   assert.ok(existsSync(join(PLUGIN, plugin.skills, 'chrome-bridge', 'SKILL.md')));
   assert.ok(existsSync(join(PLUGIN, 'hooks', 'hooks.json')));
+  // L'edizione directory (tag directory-*) ha plugin/ alla radice: senza un README suo la directory
+  // la rifiuta (README_MISSING, almeno 40 parole). Scritto a mano, come il manifest.
+  const words = readFileSync(join(PLUGIN, 'README.md'), 'utf8').split(/\s+/).filter(Boolean).length;
+  assert.ok(words >= 40, `README di ${words} parole`);
 });
 
 // Il server come lo avvia Claude Code, con stdin e stdout in pipe: initialize, poi tools/list.
