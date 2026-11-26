@@ -55,6 +55,21 @@ const assignment = new Map();   // module id → chunk name
 const fileOf = (id) => id.replace(/^\0/, '').split('?')[0];
 const groupOf = (id) => packageOf(fileOf(id)) ?? (fileOf(id).startsWith(join(ROOT, 'server') + sep) ? 'server' : null);
 
+// Modules the plugin replaces with a stub of its own (tools/plugin-stubs/): server/lighthouse.js
+// fetches the Lighthouse CLI from npm and runs it, which the plugin must not ship. Its stub
+// keeps the same exports; the reason is in the stub.
+const STUBS = { [join(ROOT, 'server', 'lighthouse.js')]: join(ROOT, 'tools', 'plugin-stubs', 'lighthouse.js') };
+function pluginStubs() {
+  return {
+    name: 'plugin-stubs',
+    async resolveId(source, importer, opts) {
+      if (!importer || !source.startsWith('.')) return null;
+      const r = await this.resolve(source, importer, { ...opts, skipSelf: true });
+      return r && STUBS[r.id] ? STUBS[r.id] : null;
+    },
+  };
+}
+
 function planChunks() {
   return {
     name: 'plan-chunks',
@@ -110,7 +125,7 @@ const bundle = await rollup({
   // Absolute: relative inputs resolve against the current folder, not against this repository.
   input: Object.fromEntries(Object.entries(ENTRIES).map(([k, v]) => [k, join(ROOT, v)])),
   external: (id) => builtins.has(id) || OPTIONAL.some((p) => id === p || id.startsWith(`${p}/`)),
-  plugins: [nodeResolve({ preferBuiltins: true, exportConditions: ['node'] }), commonjs(), json(), planChunks()],
+  plugins: [pluginStubs(), nodeResolve({ preferBuiltins: true, exportConditions: ['node'] }), commonjs(), json(), planChunks()],
   onwarn(w, warn) {
     // zod's /* @__PURE__ */ comments in positions rollup drops: harmless, only tree-shaking hints
     if (['CIRCULAR_DEPENDENCY', 'THIS_IS_UNDEFINED', 'INVALID_ANNOTATION'].includes(w.code)) return;

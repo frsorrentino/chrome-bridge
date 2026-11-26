@@ -108,6 +108,13 @@ export async function sweepStaleLaunchDirs({ dir = tmpdir(), now = Date.now(), a
 
 /** Prepara dir temporanee: copia estensione + launch.json, profilo con dev mode. */
 export async function prepareLaunch(port) {
+  // Il plugin di Claude Code (plugin/) non porta extension/: lì il launch mode
+  // non si accende (il manifest non passa --launch). Se ci si arriva lo stesso,
+  // un errore che dice dove sta il pezzo mancante, non un ENOENT di cp.
+  if (!existsSync(join(EXTENSION_SRC, 'manifest.json'))) {
+    throw new Error(`--launch needs the extension folder next to the server, and ${EXTENSION_SRC} is missing. `
+      + 'The Claude Code plugin does not ship it: launch mode runs from the npm package chrome-bridge-mcp or from a clone of the repository.');
+  }
   const base = await mkdtemp(join(tmpdir(), LAUNCH_PREFIX));
   await writeFile(join(base, 'owner.json'), JSON.stringify({ pid: process.pid, started: new Date().toISOString() }));
   const extDir = join(base, 'ext');

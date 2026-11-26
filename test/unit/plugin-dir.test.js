@@ -1,7 +1,8 @@
 /**
  * plugin/ è la cartella che Claude Code installa (marketplace.json: source "./plugin").
  * Dentro c'è solo ciò che gira: il server incorporato in dist/ (niente npx, niente
- * download da npm) e le copie di skills/ commands/ hooks/ observe/ extension/.
+ * download da npm) e le copie di skills/ commands/ hooks/ observe/. extension/ no:
+ * l'estensione arriva dal Chrome Web Store e il plugin non avvia mai il launch mode.
  * Questi test falliscono se plugin/ non è stato rigenerato dopo un cambio, se esce dai
  * limiti della directory (512 file, 256 KiB a file, niente link) o se il bundle non
  * risponde come server/index.js.
@@ -9,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -57,7 +58,9 @@ test('il manifest avvia il server incorporato con node, senza npx', () => {
   assert.equal(srv.command, 'node');
   assert.deepEqual(srv.args, ['${CLAUDE_PLUGIN_ROOT}/dist/index.js']);
   assert.ok(existsSync(join(PLUGIN, 'dist', 'index.js')));
-  assert.ok(existsSync(join(PLUGIN, plugin.icon)), `icona ${plugin.icon}`);
+  // 1.33.1: il portale non riconosce icon e privacyPolicyUrl, e Claude Code non li usa.
+  assert.equal(plugin.icon, undefined);
+  assert.equal(plugin.privacyPolicyUrl, undefined);
   assert.ok(existsSync(join(PLUGIN, plugin.skills, 'chrome-bridge', 'SKILL.md')));
   assert.ok(existsSync(join(PLUGIN, 'hooks', 'hooks.json')));
 });
@@ -109,32 +112,47 @@ test('la CLI incorporata elenca gli stessi tool, con le stesse definizioni', asy
   assert.equal(b, a);
 });
 
-test('--launch dal bundle copia plugin/extension nel profilo e la carica',
+test('il plugin non avvia mai il launch mode, e non porta extension/', () => {
+  const plugin = JSON.parse(readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf8'));
+  const srv = plugin.mcpServers['chrome-bridge'];
+  assert.ok(!srv.args.includes('--launch'), JSON.stringify(srv.args));
+  assert.equal(existsSync(join(PLUGIN, 'extension')), false);
+  // Skill, comandi e hook non devono proporre --launch: dal plugin finirebbe nell'errore qui sotto.
+  const texts = [...walk(PLUGIN)].map(([p]) => p).filter((p) => !p.startsWith('dist/') && /\.(md|json|sh|py)$/.test(p));
+  const hits = texts.filter((p) => /--launch\b/.test(readFileSync(join(PLUGIN, p), 'utf8')));
+  assert.deepEqual(hits, []);
+});
+
+test('lo stub di Lighthouse ha gli stessi export del modulo vero, e il bundle non lancia npx', async () => {
+  const real = Object.keys(await import('../../server/lighthouse.js')).sort();
+  const stub = Object.keys(await import('../../tools/plugin-stubs/lighthouse.js')).sort();
+  assert.deepEqual(stub, real);
+  const code = [...walk(join(PLUGIN, 'dist'))].map(([p]) => readFileSync(join(PLUGIN, 'dist', p), 'utf8')).join('\n');
+  // I segni del modulo vero: la versione fissata da scaricare e il lanciatore di npx.
+  assert.doesNotMatch(code, /lighthouse@\$\{/);
+  assert.doesNotMatch(code, /npx-cli\.js/);
+  assert.match(code, /Lighthouse is not part of the Claude Code plugin/);
+});
+
+test('--launch dal bundle senza extension/ esce con un errore che lo dice',
   { skip: process.platform === 'win32' && 'il browser finto è uno script sh' }, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), 'cb-plugin-launch-'));
     const fake = join(dir, 'browser.sh');
-    const argsFile = join(dir, 'args.txt');
-    // Il browser finto scrive gli argomenti e controlla subito la copia dell'estensione.
-    await writeFile(fake, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argsFile}"\nexec sleep 600\n`);
+    await writeFile(fake, '#!/bin/sh\nexec sleep 600\n');
     await chmod(fake, 0o755);
     const child = spawn(process.execPath, [join(PLUGIN, 'dist', 'index.js'), '--launch'],
       { env: { ...process.env, CHROME_BRIDGE_BROWSER: fake, CHROME_BRIDGE_PORT: '', TMPDIR: dir } });
     let log = '';
-    t.after(async () => {
-      child.kill('SIGKILL');
-      const pid = / pid=(\d+)/.exec(log)?.[1];
-      if (pid) { try { process.kill(Number(pid), 'SIGKILL'); } catch { /* già fermo */ } }
-      await rm(dir, { recursive: true, force: true });
+    t.after(async () => { child.kill('SIGKILL'); await rm(dir, { recursive: true, force: true }); });
+    child.stderr.on('data', (d) => { log += d; });
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`ancora vivo dopo 60 s\n${log}`)), 60000);
+      child.once('exit', (c) => { clearTimeout(timer); resolve(c); });
     });
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`avvio --launch: niente dopo 120 s\n${log}`)), 120000);
-      child.stderr.on('data', (d) => { log += d; if (log.includes('MCP server ready')) { clearTimeout(timer); resolve(); } });
-      child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`uscito con ${code}\n${log}`)); });
-    });
-    const args = (await readFile(argsFile, 'utf8')).split('\n');
-    const ext = args.find((a) => a.startsWith('--load-extension='))?.slice('--load-extension='.length);
-    assert.ok(ext, `nessun --load-extension in ${args.join(' ')}`);
-    const manifest = JSON.parse(await readFile(join(ext, 'manifest.json'), 'utf8'));
-    const ours = JSON.parse(readFileSync(join(PLUGIN, 'extension', 'manifest.json'), 'utf8'));
-    assert.equal(manifest.version, ours.version);
+    assert.equal(code, 1, log);
+    assert.match(log, /--launch needs the extension folder next to the server/);
+    assert.match(log, /The Claude Code plugin does not ship it/);
+    assert.doesNotMatch(log, /ENOENT/);
+    // Nessun profilo temporaneo lasciato: il controllo viene prima di mkdtemp.
+    assert.deepEqual((await readdir(dir)).filter((n) => n.startsWith('chrome-bridge-launch-')), []);
   });

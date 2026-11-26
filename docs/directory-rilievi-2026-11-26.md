@@ -76,7 +76,22 @@ Due candidati, da confermare sul portale:
   incorporato in `plugin/dist/` (1.33.0). CHANGELOG, docs, test e `cws-upload.mjs` escono dal plugin distribuito, e
   con loro i lockfile. Nuova candidatura nel portale col percorso `plugin/`, a cura della master.
 
-## Appello (per ciò che resta dopo la 1.33.0)
+## Dopo la convalida del portale su 1.33.0 (26/11, 19:28)
+
+- Blocchi solo da Verified: hook command, server MCP locale, `dist/cli.js`. «Will be refused» 12: credenziale 8, codice
+  decodificato 2, `extension/manifest.json` (immagini) 1, `observe/py.sh` (script non seguito) 1. Avvisi 5: `icon`,
+  `privacyPolicyUrl`, «download-and-run» ×3 (`RUNTIME_FETCH_EXEC`: `dist/server-1.js`, `extension/service-worker.js`,
+  `observe/observe.py`).
+- 1.33.1 (scelte della master nel piano approvato): `extension/` fuori da `plugin/` (il plugin non avvia mai
+  `--launch`; senza la cartella `--launch` esce con un errore chiaro); `server/lighthouse.js` sostituito nel bundle da
+  `tools/plugin-stubs/lighthouse.js`; `icon` e `privacyPolicyUrl` tolti.
+- `observe/observe.py` e `RUNTIME_FETCH_EXEC`: nello stesso file c'è una richiesta di rete, r. 1392 `urlopen`, il POST
+  dell'invio anonimo, la cui risposta si legge come JSON per prendere l'URL della issue. Ci sono anche processi
+  avviati: r. 338 `Popen` di sé stesso (`auto-send`), r. 922 `git remote get-url`, r. 1116/1232/1462/1536 `gh`, r. 1130
+  l'anonimizzatore. Niente di ciò che arriva dalla rete viene eseguito. Non si tocca qui (lo riscrive `sync.py`):
+  appello, o una correzione in claude-observe proposta dalla master.
+
+## Appello (per ciò che resta dopo la 1.33.1)
 
 Testo da incollare, in inglese come il portale:
 
@@ -97,15 +112,23 @@ Testo da incollare, in inglese come il portale:
 >   browser, or goes through the anonymous route. The text is anonymized before it leaves, and nothing is sent without
 >   that explicit choice.
 >
-> **Decoded code findings (CODE_DECODED_AT_RUN_TIME).** In both files the decoded data is never executed:
+> **Decoded code (CODE_DECODED_AT_RUN_TIME) and download-and-run (RUNTIME_FETCH_EXEC).**
 >
-> - `extension/service-worker.js`: `atob` (lines 3295 and 3357) turns the bytes of a file that `upload_file` sends in
->   base64 pieces back into a `Blob`, which is set on the page's `<input type=file>`. The `new Function` at line 620 is
->   `execute_js`, the tool that runs the JavaScript the user asks for in the page, in the page's MAIN world, subject to
->   the page's CSP; the server can be started with `--no-js` to turn it off entirely.
 > - `dist/cli.js` (the bundled `server/cli.js`): `Buffer.from(…, 'base64')` writes to disk the PNG screenshots and the
->   MHTML snapshot that arrive in JSON over the local WebSocket. The `AsyncFunction` is `chrome-bridge run`, which runs
->   a script the user wrote and passes on the command line (`--code` or `--file`), with the chrome-bridge tools passed in as `cb`.
->
-> Rewriting these paths would only hide the pattern from the scanner without changing what runs, so we have left them
-> as they are and readable.
+>   MHTML snapshot that arrive in JSON over the local WebSocket; nothing decoded is executed. The `AsyncFunction` is
+>   `chrome-bridge run`, which runs a script the user wrote and passes on the command line (`--code` or `--file`), with
+>   the chrome-bridge tools passed in as `cb`. Rewriting it would only hide the pattern from the scanner without
+>   changing what runs, so it stays as it is and readable.
+> - `extension/` is no longer part of the plugin since 1.33.1, and we want to say plainly why, since it also removes a
+>   flagged file: the plugin never used it. The copy served only launch mode (a dedicated browser the server starts with
+>   `--launch`), and the plugin's manifest never passes `--launch`. The extension reaches users from the Chrome Web
+>   Store, its source is public in the repository's `extension/` folder, and the Store reviews it. For the record, the
+>   flagged lines decode the bytes of a file that `upload_file` sends in base64 pieces into a `Blob` for the page's
+>   `<input type=file>`, and the `new Function` is `execute_js`, the tool that runs the JavaScript the user asks for in
+>   the page (the server's `--no-js` turns it off).
+> - The Lighthouse runner, which fetched the Lighthouse CLI from npm and ran it, is replaced in the plugin's bundle by a
+>   stub with the same exports (`tools/plugin-stubs/lighthouse.js` in the repository). The tool worked only in launch
+>   mode, so plugin users lose nothing; the npm package keeps it.
+> - `observe/observe.py`: its only network call is the POST of the anonymous report (`urlopen`), whose answer is read
+>   as JSON to get the issue's URL; the processes it starts are `git`, the user's `gh`, the anonymizer and itself
+>   (`auto-send`). Nothing received from the network is executed.

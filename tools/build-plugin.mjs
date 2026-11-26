@@ -6,10 +6,14 @@
  * whole repository in the plugin cache, tests, docs, benchmarks and the Chrome Web Store
  * release tool (tools/cws-upload.mjs) included. plugin/ holds only what runs:
  *
- *   .claude-plugin/   manifest and icon            written by hand, here, not copied
+ *   .claude-plugin/   the manifest                 written by hand, here, not copied
  *   dist/             server and CLI bundled       tools/build-plugin-server.mjs
- *   skills/ commands/ hooks/ observe/ extension/   copies of the folders at the root
+ *   skills/ commands/ hooks/ observe/   copies of the folders at the root
  *   LICENSE
+ *
+ * extension/ stays out: the extension reaches users from the Chrome Web Store, and the copy
+ * served only launch mode (server/launcher.js copies it into the browser profile), which the
+ * plugin never starts, since its manifest does not pass --launch.
  *
  * The folders at the root stay the source: npm, the Chrome Web Store workflows and
  * claude-observe's sync.py keep writing and reading them there. Run this after changing any
@@ -25,7 +29,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const COPIED = ['skills', 'commands', 'hooks', 'observe', 'extension'];
+export const COPIED = ['skills', 'commands', 'hooks', 'observe'];
 export const COPIED_FILES = ['LICENSE'];
 // Produced by running the code, never part of the plugin.
 const SKIP = new Set(['__pycache__', '.DS_Store', 'node_modules']);
@@ -44,7 +48,7 @@ function copyTree(from, to) {
 }
 
 export function buildPlugin(out) {
-  for (const dir of [...COPIED, ...COPIED_FILES, 'dist']) rmSync(join(out, dir), { recursive: true, force: true });
+  for (const dir of [...COPIED, ...COPIED_FILES, 'dist', 'extension']) rmSync(join(out, dir), { recursive: true, force: true });
   for (const dir of COPIED) copyTree(join(ROOT, dir), join(out, dir));
   for (const f of COPIED_FILES) copyFileSync(join(ROOT, f), join(out, f));
   execFileSync(process.execPath, [join(ROOT, 'tools', 'build-plugin-server.mjs'), '--out', join(out, 'dist')], { stdio: 'inherit' });

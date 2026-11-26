@@ -35,6 +35,31 @@ nuove con `tab_action duplicate`. Il difetto (timeout muto) resta da chiudere.
   `/chrome-bridge:observe` without it. Only `observe/SOURCE` changes. Task
   claude-observe-senza-allowed-tools-24-11.
 
+## 1.33.1 — 2026-11-26
+
+The plugin carries less that it never runs. Server and npm package unchanged
+for anyone outside the plugin; the extension manifest stays 1.32.9, so the
+Chrome Web Store is skipped. Task directory-chrome-bridge-26-11.
+
+### Changed
+
+- `plugin/` no longer ships `extension/` (64 files instead of 102). The
+  extension reaches users from the Chrome Web Store; the copy served only
+  launch mode, which the plugin never starts, because its manifest does not
+  pass `--launch`. If `--launch` reaches a server without the folder next to
+  it, it now exits with «--launch needs the extension folder next to the
+  server…» instead of an `ENOENT` from the copy, and leaves no temporary
+  profile behind.
+- In the plugin bundle `server/lighthouse.js` is replaced by
+  `tools/plugin-stubs/lighthouse.js`, with the same exports: the real module
+  fetches the Lighthouse CLI from npm on its first call and runs it. Nothing
+  changes for plugin users: `lighthouse` works only in launch mode and already
+  stopped at «works only in launch mode». The npm package keeps the real one.
+- `icon` and `privacyPolicyUrl` are out of `plugin/.claude-plugin/plugin.json`:
+  Claude Code does not read them and the plugin directory does not recognise
+  them. The privacy policy stays at
+  https://frsorrentino.github.io/chrome-bridge/privacy (`docs/privacy.md`).
+
 ## 1.33.0 — 2026-11-26
 
 The Claude Code plugin no longer downloads its server from npm. Server and npm
