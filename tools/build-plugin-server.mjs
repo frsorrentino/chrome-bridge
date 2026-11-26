@@ -79,12 +79,19 @@ function planChunks() {
           sccs.push(scc);
         }
       };
-      for (const id of [...ids].sort()) if (!idx.has(id) && groupOf(id)) visit(id);
+      // Sorted by the path inside the repository with "/": absolute Windows paths ("D:\…") sort in
+      // another order than POSIX ones, and the chunks came out different on the two systems.
+      const key = (id) => id.split(ROOT).join('').split('\\').join('/');
+      const byKey = [...ids].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+      for (const id of byKey) if (!idx.has(id) && groupOf(id)) visit(id);
       const fill = new Map();   // group → { n, size }
       for (const scc of sccs) {
         const group = groupOf(scc[0]);
         if (scc.some((id) => entryIds.has(id))) continue;   // entries stay in their own files
-        const size = scc.reduce((s, id) => s + Buffer.byteLength(info.get(id).code ?? '', 'utf8'), 0);
+        // The size of the file on disk, not of info.code: the commonjs plugin writes absolute import
+        // paths into the transformed code, so its length changed with the checkout folder and the
+        // chunks with it (CI, Windows). Virtual modules count 0.
+        const size = scc.reduce((s, id) => s + (id.startsWith('\0') ? 0 : statSync(fileOf(id)).size), 0);
         const b = fill.get(group) ?? { n: 1, size: 0 };
         if (b.size > 0 && b.size + size > BUCKET) { b.n += 1; b.size = 0; }
         b.size += size;
@@ -100,7 +107,8 @@ const manualChunks = (id) => assignment.get(id);
 const bundle = await rollup({
   // observe.js is an entry of its own: it starts itself again as `node <its file> --write`
   // (server/observe.js, SELF), so its code must live in a file named after it.
-  input: ENTRIES,
+  // Absolute: relative inputs resolve against the current folder, not against this repository.
+  input: Object.fromEntries(Object.entries(ENTRIES).map(([k, v]) => [k, join(ROOT, v)])),
   external: (id) => builtins.has(id) || OPTIONAL.some((p) => id === p || id.startsWith(`${p}/`)),
   plugins: [nodeResolve({ preferBuiltins: true, exportConditions: ['node'] }), commonjs(), json(), planChunks()],
   onwarn(w, warn) {
